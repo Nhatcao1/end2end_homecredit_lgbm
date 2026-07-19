@@ -112,11 +112,11 @@ before adding another workload.
 | ID | Original function | HEIR code to build | Client-only flags — no HEIR code | Excluded/plaintext | Status |
 |---|---|---|---|---|---|
 | F01 | `application_train_test()` | None | CSV loading, sentinel/null handling, row filtering, factorization, one-hot encoding, and ratio features at lines 46-68 | General pandas preparation | Flag-only plan complete |
-| F02 | `bureau_and_balance()` | Counts, sums, sums of squares, active/closed masked sums; mean/variance sufficient statistics | Cleaning, category masks, `SK_ID_BUREAU`/`SK_ID_CURR` alignment and grouping | `min`, `max`, exact encrypted division | Planned |
-| F03 | `previous_applications()` | Counts, sums, sums of squares, approved/refused masked sums; mean/variance sufficient statistics | Sentinel/null handling, one-hot/status masks, grouping, `APP_CREDIT_PERC` | `min`, `max`, exact encrypted division | Planned |
-| F04 | `pos_cash()` | `POS_COUNT`, sums, and mean sufficient statistics | One-hot masks and applicant row alignment | `max` | `POS_COUNT` prepare/report implemented; generated CKKS execution pending |
-| F05 | `installments_payments()` | Source `PAYMENT_DIFF` plus its mean/sum/variance; counts and supported aggregates over client-prepared DPD/DBD | Null handling, `PAYMENT_PERC`, applicant grouping, and positive clipping at lines 199-226 | `min`, `max`, `nunique`, encrypted clipping/division | Planned |
-| F06 | `credit_card_balance()` | Counts, sums, sums of squares, mean/variance sufficient statistics | One-hot encoding, dropped ID handling, applicant grouping | `min`, `max` | Planned |
+| F02 | `bureau_and_balance()` | Counts, sums, sums of squares, active/closed masked sums; mean/variance sufficient statistics | Cleaning, category masks, `SK_ID_BUREAU`/`SK_ID_CURR` alignment and grouping | `min`, `max`, exact encrypted division | B01-B03 preparation/oracle/report implemented; generated CKKS pending |
+| F03 | `previous_applications()` | Counts, sums, sums of squares, approved/refused masked sums; mean/variance sufficient statistics | Sentinel/null handling, one-hot/status masks, grouping, `APP_CREDIT_PERC` | `min`, `max`, exact encrypted division | P01-P03 preparation/oracle/report implemented; generated CKKS pending |
+| F04 | `pos_cash()` | `POS_COUNT`, sums, and mean sufficient statistics | One-hot masks and applicant row alignment | `max` | POS01-POS02 preparation/oracle/report implemented; K01 generated runner exists, CKKS execution pending |
+| F05 | `installments_payments()` | Source `PAYMENT_DIFF` plus its mean/sum/variance; counts and supported aggregates over client-prepared DPD/DBD | Null handling, `PAYMENT_PERC`, applicant grouping, and positive clipping at lines 199-226 | `min`, `max`, `nunique`, encrypted clipping/division | I01-I03 preparation/oracle/report implemented; generated CKKS pending |
+| F06 | `credit_card_balance()` | Counts, sums, sums of squares, mean/variance sufficient statistics | One-hot encoding, dropped ID handling, applicant grouping | `min`, `max` | C01-C02 preparation/oracle/report implemented; generated CKKS pending |
 | F07 | `kfold_lightgbm()` | None under current CKKS plan | None | Source LightGBM training/inference, KFold, ROC-AUC, feature importance, and plotting at lines 247-316 remain plaintext | Flag-only plan complete |
 
 ## Kernel-to-function benchmark mapping
@@ -129,6 +129,41 @@ before adding another workload.
 | `previous_applications/function_report.md` | General sums and approved/refused masked sums | K01; K02 for moments |
 | `installments_payments/function_report.md` | `PAYMENT_DIFF` and supported aggregates | K03; K02 for prepared values |
 | `credit_card_balance/function_report.md` | Supported numeric moments | K02 |
+
+## Implemented function-task catalog
+
+Every row below has a task definition, trusted preparation path, fixed-shape
+tensor manifest, source-facing plaintext reference, kernel oracle, and Markdown
+report. `Implemented` here does not mean encrypted execution has occurred.
+
+| Task | Function-specific benchmark | Reusable kernel(s) | Adapter status |
+|---|---|---|---|
+| B01 | Bureau general supported aggregates | K01, K02 | Implemented; generated CKKS pending |
+| B02 | Bureau active-credit masked aggregates | K01, K02 | Implemented; generated CKKS pending |
+| B03 | Bureau closed-credit masked aggregates | K01, K02 | Implemented; generated CKKS pending |
+| P01 | Previous-application general aggregates | K01, K02 | Implemented; generated CKKS pending |
+| P02 | Approved-application masked aggregates | K01, K02 | Implemented; generated CKKS pending |
+| P03 | Refused-application masked aggregates | K01, K02 | Implemented; generated CKKS pending |
+| POS01 | POS row count | K01 | Implemented; strict K01 runner available |
+| POS02 | POS supported numeric means | K02 | Implemented; generated CKKS pending |
+| I01 | Installment row count | K01 | Implemented; K01 runner adaptation pending |
+| I02 | Client-prepared DPD/DBD/payment aggregates | K01, K02 | Implemented; generated CKKS pending |
+| I03 | Encrypted `PAYMENT_DIFF` moments | K03 | Implemented; generated CKKS pending |
+| C01 | Credit-card row count | K01 | Implemented; K01 runner adaptation pending |
+| C02 | Credit-card supported numeric moments | K01, K02 | Implemented; generated CKKS pending |
+
+The current adapters cover source numeric columns. Dynamic category discovery
+and one-hot encoding remain client-only; category-mean benchmarks can be added
+later only against a client-frozen numeric category schema.
+
+### Adapter validation snapshot
+
+On 2026-07-19, all 13 adapters completed a bounded real-data preparation run
+using eight applicants and at most 500,000 rows from each source/auxiliary CSV.
+Thirteen separate Markdown reports were produced. Eleven task reports contained
+matched source rows; the two credit-card reports correctly exercised their
+zero-history/padding path within that bounded slice. This snapshot validates
+schema handling and report generation only and remains `prepared_only`.
 
 Function benchmark output remains separate:
 
@@ -193,15 +228,16 @@ the source configuration of up to 10,000 estimators.
 
 ## Implementation order
 
-The reusable arithmetic MLIR/oracle layer is complete for K01-K03 and S01-S02.
-The remaining order is:
+The reusable arithmetic MLIR/oracle layer is complete for K01-K03 and S01-S02,
+and all 13 approved function adapters are implemented. The remaining order is:
 
 1. Complete the K01 synthetic kernel gate with HEIR-generated CKKS source.
-2. Complete the separate `pos_cash()/POS_COUNT` function benchmark using K01.
-3. Reuse the same K01 source/hash for `credit_card_balance()/CC_COUNT`, bureau
-   active/closed sums, and previous approved/refused sums; keep separate reports.
-4. Implement K02 moments and benchmark it separately under each source function.
-5. Implement K03 and benchmark `installments_payments()/PAYMENT_DIFF`.
+2. Generalize the K01 generated runner for POS01, I01, C01, and masked sums.
+3. Generate and validate K02 CKKS/OpenFHE source once, then reuse its source hash
+   across every K02 function report.
+4. Generate and validate K03 CKKS/OpenFHE source for I03.
+5. Execute each function task against its kernel runner and populate accuracy,
+   timing, CKKS parameters, evaluation keys, and artifact sizes.
 6. Produce a source-parity coverage report showing reproduced, client-only, and
    excluded outputs for every original function.
 

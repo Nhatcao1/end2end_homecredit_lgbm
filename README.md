@@ -18,7 +18,17 @@ encrypted_payloads/    ciphertext inputs (not tracked)
 The HE/HEIR feasibility assessment is documented in
 `home_credit_lightgbm_heir_analysis.md`.
 
-Each planned HE workload will produce a Markdown benchmark report containing
-its plaintext reference, CKKS result, accuracy comparison, timing breakdown,
-artifact sizes, HEIR-generated source proof, and privacy boundary.
+Thirteen function-specific benchmark adapters are implemented over five shared
+HEIR arithmetic kernels. Prepare their separate Markdown reports with:
 
+```bash
+python3 code/heir/scripts/run_function_benchmarks.py --task all --run-name review_v1
+```
+
+Each adapter currently records its source-facing plaintext reference, raw
+kernel oracle, tensor manifest, preparation timing, artifact sizes, and privacy
+boundary. Generated CKKS/OpenFHE execution and decrypted accuracy fields remain
+pending and must not be inferred from a `prepared_only` report.
+
+The task registry and current acceptance status are maintained in
+`docs/HEIR_BENCHMARK_CRITERIA.md`.
