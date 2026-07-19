@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import csv
+import hashlib
+import json
 import math
 import time
 from pathlib import Path
@@ -10,7 +12,7 @@ from typing import Any
 
 from code.heir.common import path_size, write_csv, write_json, write_values
 from code.heir.kernels.registry import kernel_contracts
-from code.heir.workloads.grouped import FeatureSpec, TaskSpec
+from code.heir.workloads.grouped import FeatureSpec, FunctionSpec, TaskSpec
 
 
 def _read_applications(path: Path, row_limit: int) -> list[dict[str, str]]:
@@ -42,17 +44,21 @@ def _required_columns(task: TaskSpec) -> set[str]:
     return required
 
 
-def _read_selected_rows(
+def _read_function_rows(
     path: Path,
-    task: TaskSpec,
+    function: FunctionSpec,
     app_index: dict[str, int],
     row_limit: int,
 ) -> tuple[list[list[dict[str, str]]], int, int]:
+    """Read the union of columns once for all components in one function."""
+    required = {"SK_ID_CURR"}
+    for component in function.components:
+        required.update(_required_columns(component))
     rows_by_app: list[list[dict[str, str]]] = [[] for _ in app_index]
     scanned = matched = 0
     with path.open("r", encoding="utf-8-sig", newline="") as source:
         reader = csv.DictReader(source)
-        missing = _required_columns(task).difference(reader.fieldnames or [])
+        missing = required.difference(reader.fieldnames or [])
         if missing:
             raise ValueError(f"{path.name} is missing columns: {sorted(missing)}")
         for row_index, row in enumerate(reader):
@@ -302,92 +308,283 @@ def _prepare_features(
     return reference, oracle, width, manifest, dropped_missing
 
 
-def prepare_function_task(
-    task: TaskSpec,
+def _prefix_component_rows(
+    rows: list[dict[str, Any]], component: TaskSpec
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "component_id": component.task_id,
+            "component": component.title,
+            **row,
+        }
+        for row in rows
+    ]
+
+
+def _execution_parts(function: FunctionSpec) -> list[dict[str, str]]:
+    parts = [
+        {
+            "part": "CSV loading, applicant selection, grouping, and row alignment",
+            "owner": "Client only",
+            "status": "Executed in prepare-only run",
+            "output": "anonymous grouped rows",
+        }
+    ]
+    seen_client: set[str] = set()
+    seen_excluded: set[str] = set()
+    needs_finalized_statistics = False
+    for component in function.components:
+        for preparation in component.client_preparation:
+            if preparation not in seen_client:
+                parts.append(
+                    {
+                        "part": preparation,
+                        "owner": "Client only",
+                        "status": "Executed in prepare-only run",
+                        "output": "plaintext staging values/masks",
+                    }
+                )
+                seen_client.add(preparation)
+        parts.append(
+            {
+                "part": component.title,
+                "owner": "HEIR " + "/".join(component.kernel_ids),
+                "status": "Intended HE arithmetic; not executed",
+                "output": "encrypted sufficient statistics",
+            }
+        )
+        needs_finalized_statistics = needs_finalized_statistics or any(
+            operation in {"mean", "var"}
+            for feature in component.features
+            for operation in feature.operations
+        )
+        for excluded in component.excluded_outputs:
+            if excluded not in seen_excluded:
+                parts.append(
+                    {
+                        "part": excluded,
+                        "owner": "Excluded from CKKS V1",
+                        "status": "Not implemented",
+                        "output": "none",
+                    }
+                )
+                seen_excluded.add(excluded)
+    if needs_finalized_statistics:
+        parts.append(
+            {
+                "part": "Mean and sample-variance finalization",
+                "owner": "Future HEIR continuation kernel",
+                "status": "Not implemented; plaintext audit computes it today",
+                "output": "future encrypted source feature values",
+            }
+        )
+    parts.extend(
+        [
+            {
+                "part": "Plaintext source reference and kernel oracle",
+                "owner": "Audit only",
+                "status": "Executed; must not feed encrypted pipeline",
+                "output": "CSV correctness oracle",
+            },
+            {
+                "part": "Encrypted feature-bundle persistence",
+                "owner": "HE pipeline",
+                "status": "Manifest prepared; ciphertext files pending",
+                "output": "future serialized ciphertext bundle",
+            },
+        ]
+    )
+    return parts
+
+
+def prepare_complete_function(
+    function: FunctionSpec,
     data_dir: Path,
     application_path: Path,
     output_dir: Path,
     application_row_limit: int = 8,
     source_row_limit: int = 0,
 ) -> dict[str, Any]:
-    """Prepare one task without claiming HEIR-generated CKKS execution."""
+    """Prepare all components of one source function with a single main-table scan."""
     started = time.perf_counter()
     applications = _read_applications(application_path, application_row_limit)
     app_index = {row["SK_ID_CURR"]: index for index, row in enumerate(applications)}
-    source_path = data_dir / task.input_file
-    rows_by_app, scanned, matched = _read_selected_rows(
-        source_path, task, app_index, source_row_limit
+    rows_by_app, scanned, matched = _read_function_rows(
+        data_dir / function.input_file,
+        function,
+        app_index,
+        source_row_limit,
     )
 
     bureau_sizes: dict[str, int] = {}
     auxiliary_rows_scanned = 0
-    if any(feature.transform == "bureau_balance_size" for feature in task.features):
+    if any(
+        feature.transform == "bureau_balance_size"
+        for component in function.components
+        for feature in component.features
+    ):
         bureau_sizes, auxiliary_rows_scanned = _bureau_balance_sizes(
             data_dir, rows_by_app, source_row_limit
         )
 
-    if task.kind == "count":
-        reference, oracle, width, tensor_manifest = _prepare_count(
-            task, rows_by_app, output_dir
-        )
-        dropped_missing = 0
-    else:
-        reference, oracle, width, tensor_manifest, dropped_missing = _prepare_features(
-            task, rows_by_app, bureau_sizes, output_dir
+    reference: list[dict[str, Any]] = []
+    oracle: list[dict[str, Any]] = []
+    tensor_manifest: list[dict[str, Any]] = []
+    component_summaries: list[dict[str, Any]] = []
+    for component in function.components:
+        component_dir = output_dir / "components" / component.slug
+        if component.kind == "count":
+            part_reference, part_oracle, width, part_manifest = _prepare_count(
+                component, rows_by_app, component_dir
+            )
+            dropped_missing = 0
+        else:
+            (
+                part_reference,
+                part_oracle,
+                width,
+                part_manifest,
+                dropped_missing,
+            ) = _prepare_features(
+                component, rows_by_app, bureau_sizes, component_dir
+            )
+        reference.extend(_prefix_component_rows(part_reference, component))
+        oracle.extend(_prefix_component_rows(part_oracle, component))
+        for item in part_manifest:
+            source_path = component_dir / item["file"]
+            tensor_manifest.append(
+                {
+                    "component_id": component.task_id,
+                    "component": component.title,
+                    **item,
+                    "file": str(source_path.relative_to(output_dir)),
+                }
+            )
+        component_summaries.append(
+            {
+                "component_id": component.task_id,
+                "name": component.title,
+                "kind": component.kind,
+                "kernel_ids": list(component.kernel_ids),
+                "slots_per_application": width,
+                "client_compacted_missing_values": dropped_missing,
+                "feature_count": len(component.features) if component.features else 1,
+            }
         )
 
     write_csv(
         output_dir / "plaintext_reference.csv",
-        ["app_index", "feature", "operation", "value"],
+        ["component_id", "component", "app_index", "feature", "operation", "value"],
         reference,
     )
     write_csv(
         output_dir / "kernel_oracle.csv",
-        ["app_index", "feature", "count", "sum", "sum_squares"],
+        [
+            "component_id",
+            "component",
+            "app_index",
+            "feature",
+            "count",
+            "sum",
+            "sum_squares",
+        ],
         oracle,
     )
     write_csv(
         output_dir / "tensor_manifest.csv",
-        ["feature", "kind", "file", "elements"],
+        ["component_id", "component", "feature", "kind", "file", "elements"],
         tensor_manifest,
     )
+    private_mapping = [
+        {
+            "app_index": index,
+            "SK_ID_CURR": row["SK_ID_CURR"],
+            "TARGET": row["TARGET"],
+        }
+        for index, row in enumerate(applications)
+    ]
     write_csv(
         output_dir / "client_private" / "applicant_mapping.csv",
         ["app_index", "SK_ID_CURR", "TARGET"],
-        [
-            {
-                "app_index": index,
-                "SK_ID_CURR": row["SK_ID_CURR"],
-                "TARGET": row["TARGET"],
-            }
-            for index, row in enumerate(applications)
-        ],
+        private_mapping,
+    )
+    layout_hash = hashlib.sha256(
+        "\n".join(row["SK_ID_CURR"] for row in applications).encode("utf-8")
+    ).hexdigest()
+    write_json(
+        output_dir / "client_private" / "applicant_layout.json",
+        {
+            "applicant_count": len(applications),
+            "private_applicant_order_sha256": layout_hash,
+            "rule": "application selection order",
+        },
     )
 
+    schema = [
+        {
+            "component_id": row["component_id"],
+            "feature": row["feature"],
+            "operation": row["operation"],
+        }
+        for row in reference
+        if row["app_index"] == 0
+    ]
+    schema_hash = hashlib.sha256(
+        json.dumps(schema, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+    bundle_manifest = {
+        "bundle_status": "plaintext_staging_only",
+        "function_benchmark": function.name,
+        "scheme": "CKKS",
+        "crypto_context_id": "pending HEIR execution",
+        "key_set_id": "pending HEIR execution",
+        "applicant_count": len(applications),
+        "applicant_layout": "client_private/applicant_layout.json",
+        "feature_schema_sha256": schema_hash,
+        "ciphertext_files": [],
+        "intended_outputs": schema,
+        "pipeline_rule": (
+            "future ciphertext outputs remain encrypted; plaintext_reference.csv "
+            "and kernel_oracle.csv are audit-only"
+        ),
+    }
+    write_json(output_dir / "feature_bundle_manifest.json", bundle_manifest)
+
     contracts_by_id = {contract.kernel_id: contract for contract in kernel_contracts()}
+    kernel_ids = list(
+        dict.fromkeys(
+            kernel_id
+            for component in function.components
+            for kernel_id in component.kernel_ids
+        )
+    )
     summary: dict[str, Any] = {
-        "task": task.to_dict(),
+        "function": function.to_dict(),
         "backend_status": "prepared_only",
+        "bundle_status": bundle_manifest["bundle_status"],
         "heir_scheme": "CKKS",
+        "main_source_scan_count": 1,
         "application_rows": len(applications),
         "source_rows_scanned": scanned,
         "source_rows_matched": matched,
         "auxiliary_rows_scanned": auxiliary_rows_scanned,
-        "slots_per_application": width,
-        "client_compacted_missing_values": dropped_missing,
-        "kernel_contracts": [contracts_by_id[kernel_id].to_dict() for kernel_id in task.kernel_ids],
+        "components": component_summaries,
+        "execution_parts": _execution_parts(function),
+        "kernel_contracts": [contracts_by_id[kernel_id].to_dict() for kernel_id in kernel_ids],
+        "feature_schema_sha256": schema_hash,
         "privacy_boundary": (
-            "client groups, derives features/masks, compacts missing values, pads, and encrypts; "
-            "server evaluates only fixed-shape arithmetic"
+            "client groups, derives features/masks, compacts missing values, and pads; "
+            "future server execution receives ciphertexts and returns ciphertexts"
         ),
-        "timings_seconds": {"prepare_wall_seconds": time.perf_counter() - started},
+        "timings_seconds": {"combined_prepare_wall_seconds": time.perf_counter() - started},
     }
     summary["artifact_sizes_bytes"] = {
         "run_directory": path_size(output_dir),
-        "tensors": path_size(output_dir / "tensors"),
+        "tensors": path_size(output_dir / "components"),
         "plaintext_reference": path_size(output_dir / "plaintext_reference.csv"),
         "kernel_oracle": path_size(output_dir / "kernel_oracle.csv"),
-        "client_private_mapping": path_size(output_dir / "client_private" / "applicant_mapping.csv"),
+        "feature_bundle_manifest": path_size(output_dir / "feature_bundle_manifest.json"),
+        "client_private": path_size(output_dir / "client_private"),
     }
     write_json(output_dir / "benchmark_summary.json", summary)
     return summary

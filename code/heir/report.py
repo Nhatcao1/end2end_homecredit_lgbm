@@ -170,27 +170,29 @@ def _benchmark_preparation_excerpt(task: dict[str, Any]) -> str:
     else:
         branch = "branch_mask = 1.0\n"
     if task["kind"] == "count":
-        return f"""# Client Python, simplified from prepare_function_task()
+        return f"""# Client Python, simplified from the combined function preparation
 rows = rows_grouped_by_anonymous_applicant
 history_mask = [1.0] * len(rows)  # then zero-pad to fixed width
 
 # HE input per applicant: encrypted history_mask and encrypted unit_weights
 # K01 reference: sum(history_mask[i] * unit_weights[i])"""
     if task["kind"] == "difference_moments":
-        return f"""# Client Python, simplified from prepare_function_task()
+        return f"""# Client Python, simplified from the combined function preparation
 for row in rows_grouped_by_anonymous_applicant:
     if row_has_both_numeric_inputs(row):
         left.append(float(row["AMT_INSTALMENT"]))
         right.append(float(row["AMT_PAYMENT"]))
         {branch.rstrip()}
-# left/right/branch_mask are zero-padded and encrypted."""
-    return f"""# Client Python, simplified from prepare_function_task()
+# left/right/branch_mask are zero-padded into staging tensors.
+# A future HEIR runner encrypts them before server evaluation."""
+    return f"""# Client Python, simplified from the combined function preparation
 for row in rows_grouped_by_anonymous_applicant:
     value = client_prepare_numeric_value(row)  # ratio/clipping when configured
     if value is not None:                       # missing values are compacted here
         values.append(value)
         {branch.rstrip()}
-# values and branch_mask are zero-padded and encrypted."""
+# values and branch_mask are zero-padded into staging tensors.
+# A future HEIR runner encrypts them before server evaluation."""
 
 
 def _kernel_excerpt(kernel_id: str) -> str:
@@ -206,7 +208,7 @@ for i in range(width):
     total += mask[i] * values[i]
     sum_squares += mask[i] * values[i] * values[i]
 
-# Client after decryption:
+# Audit-only reference after decrypting a separate validation copy:
 mean = total / count
 sample_var = (sum_squares - total * total / count) / (count - 1)""",
         "K03": """# K03 difference_moments, simplified
@@ -220,31 +222,60 @@ for i in range(width):
     return examples[kernel_id]
 
 
-def write_function_report(
+def write_complete_function_report(
     path: Path, summary: dict[str, Any], preview: list[dict[str, Any]]
 ) -> None:
-    """Write the common report contract used by all function task adapters."""
-    task = summary["task"]
+    """Write one report for a complete original feature-engineering function."""
+    function = summary["function"]
     criteria = [
-        ["Source function and lines recorded", "Pass"],
+        ["All function components prepared together", "Pass"],
+        ["Main source CSV scanned once", "Pass" if summary["main_source_scan_count"] == 1 else "Fail"],
         ["Raw identifiers and TARGET excluded from HE tensors", "Pass"],
-        ["Missing values compacted by client", "Pass"],
-        ["Reusable kernel contracts and MLIR builders referenced", "Pass"],
-        ["Plaintext source reference and kernel oracle recorded", "Pass"],
-        ["HEIR-generated CKKS executed", "Not run — this is a prepare-only run"],
+        ["Client, HE, excluded, and audit stages labeled", "Pass"],
+        ["Consolidated plaintext reference and kernel oracle recorded", "Pass"],
+        ["Bundle compatibility/schema manifest recorded", "Pass"],
+        ["HEIR-generated CKKS executed", "Not run — prepare-only"],
+        ["Serialized ciphertext bundle saved", "Not run — plaintext staging only"],
+    ]
+    execution_rows = [
+        [part["part"], part["owner"], part["status"], part["output"]]
+        for part in summary["execution_parts"]
+    ]
+    component_rows = [
+        [
+            component["component_id"],
+            component["name"],
+            ", ".join(component["kernel_ids"]),
+            component["feature_count"],
+            component["slots_per_application"],
+            component["client_compacted_missing_values"],
+        ]
+        for component in summary["components"]
     ]
     feature_rows = [
-        [feature["name"], ", ".join(feature["operations"]), feature["transform"]]
-        for feature in task["features"]
-    ] or [["ROW_COUNT", "count", "row occupancy"]]
-    preview_rows = [
-        [row.get("app_index"), row.get("feature"), row.get("operation"), row.get("value")]
-        for row in preview[:12]
+        [
+            component["task_id"],
+            feature["name"],
+            ", ".join(feature["operations"]),
+            feature["transform"],
+        ]
+        for component in function["components"]
+        for feature in component["features"]
     ]
-    boundary_rows = [
-        ["Client preparation", item] for item in task["client_preparation"]
-    ] + [["Excluded", item] for item in task["excluded_outputs"]]
-    contract_rows = [
+    for component in function["components"]:
+        if not component["features"]:
+            feature_rows.append([component["task_id"], "ROW_COUNT", "count", "row occupancy"])
+    source_sections = "\n\n".join(
+        f"### {component['title']}\n\n```python\n"
+        f"{_source_python_excerpt(component)}\n```"
+        for component in function["components"]
+    )
+    preparation_sections = "\n\n".join(
+        f"### {component['title']}\n\n```python\n"
+        f"{_benchmark_preparation_excerpt(component)}\n```"
+        for component in function["components"]
+    )
+    kernel_rows = [
         [
             contract["kernel_id"],
             contract["name"],
@@ -258,81 +289,96 @@ def write_function_report(
         f"{_kernel_excerpt(contract['kernel_id'])}\n```"
         for contract in summary["kernel_contracts"]
     )
-    report = f"""# HEIR CKKS function benchmark: {task['task_id']} {task['title']}
+    preview_rows = [
+        [
+            row.get("component_id"),
+            row.get("app_index"),
+            row.get("feature"),
+            row.get("operation"),
+            row.get("value"),
+        ]
+        for row in preview[:16]
+    ]
+    report = f"""# HEIR CKKS function benchmark: {function['benchmark_id']} {function['title']}
 
-## Status
+## Status and meaning
 
-`{summary['backend_status']}` means the trusted-client Python preparation ran,
-but no homomorphic-encryption program ran.
+`{summary['backend_status']}` / `{summary['bundle_status']}`
 
-Completed in this run:
+This is one combined benchmark for `{function['function_name']}()` source lines
+`{function['source_lines']}`. Its internal components share the same selected
+applicants, main-table scan, preparation run, and future HE session.
 
-- Read the source CSV and select the benchmark applicants.
-- Apply documented client preparation, pack and zero-pad numeric tensors.
-- Calculate the plaintext source reference and the expected reusable-kernel
-  outputs in `kernel_oracle.csv`.
-- Write the tensor manifest and this Markdown report.
-
-Not executed in this run:
-
-- `heir-opt`, `heir-translate`, or HEIR-generated C++.
-- CKKS context/key generation, encryption, encrypted evaluation, decryption,
-  CKKS error measurement, or OpenFHE timing.
-
-So `prepared_only` is a valid preparation/oracle benchmark, not a partial or
-successful encrypted computation.
-
-## Source Python and benchmark mapping
-
-This task covers `{task['function_name']}()` source lines `{task['source_lines']}`.
-The following is a shortened source-equivalent pattern; the complete list of
-retained fields is in the next section.
-
-```python
-{_source_python_excerpt(task)}
-```
-
-The benchmark-specific client preparation is implemented by
-`code/heir/function_benchmark.py::prepare_function_task()` using the task
-definition in `code/heir/workloads/`.
-
-```python
-{_benchmark_preparation_excerpt(task)}
-```
+`prepared_only` means client Python read and prepared the data, wrote fixed-shape
+plaintext staging tensors, calculated audit references, and generated this
+report. It does **not** mean any tensor was encrypted or any HEIR/OpenFHE program
+ran. `plaintext_staging_only` means `feature_bundle_manifest.json` describes the
+future encrypted outputs but contains no ciphertext files yet.
 
 ## Acceptance criteria
 
 {_table(["Criterion", "Result"], criteria)}
 
-## Source outputs in this task
+## Which parts use HE?
 
-{_table(["Feature", "Retained operations", "Client transform"], feature_rows)}
+{_table(["Pipeline part", "Owner", "Current status", "Output"], execution_rows)}
 
-Mean and pandas sample variance are trusted post-processing of decrypted
-`count`, `sum`, and `sum_squares`. A missing source value is removed during
-trusted compaction; HEIR does not detect missingness.
+`Client only` stages deliberately stay outside HE. `HEIR Kxx` stages are the
+encrypted arithmetic target. `Audit only` files validate correctness and must
+never be consumed by the encrypted production pipeline.
 
-## Reusable kernels
+## Original Python flow, shortened
 
-{_table(["ID", "Kernel", "Depth", "Generated CKKS"], contract_rows)}
+The complete original function remains in
+`notebooks/lightgbm_with_simple_features.py`. These snippets show how its
+internal parts combine into one returned applicant-level feature table.
 
-## Simplified HEIR arithmetic
+{source_sections}
 
-The following snippets are the arithmetic contracts represented by the reusable
-MLIR builders. They explain the intended encrypted calculation; the snippets
-themselves are not the encrypted backend.
+## Combined benchmark preparation, shortened
+
+The implementation reads `{function['input_file']}` once, groups selected rows
+once, then prepares each internal arithmetic component from that shared data.
+
+{preparation_sections}
+
+## Internal computation components
+
+These are report sections within this one function benchmark, not independently
+executed benchmarks.
+
+{_table(
+    ["Trace ID", "Component", "Kernel(s)", "Features", "Slots/app", "Missing values compacted"],
+    component_rows,
+)}
+
+## Complete retained feature mapping
+
+{_table(["Trace ID", "Feature", "Source outputs", "Client transform"], feature_rows)}
+
+## Reusable HEIR arithmetic
+
+{_table(["ID", "Kernel", "Depth", "Generated CKKS"], kernel_rows)}
+
+The snippets below describe the reusable MLIR arithmetic contracts. They are
+not evidence that encrypted execution occurred in this run.
 
 {kernel_code}
 
-## Privacy and calculation boundary
+## Ciphertext continuity and bundle storage
 
-{_table(["Boundary", "Decision"], boundary_rows)}
-
-- Prepared tensor CSV files are plaintext client-side staging artifacts and
-  must not be sent to the server before encryption.
-- Applicant identifiers and TARGET remain under `client_private/`.
-- Tensor shape, task name, feature names, and selected applicant count are
-  visible benchmark metadata.
+- Normal pipeline rule: future HEIR outputs are serialized as ciphertext and
+  remain encrypted for downstream stages.
+- All function bundles must share a compatible CKKS context, key set, applicant
+  ordering, and feature schema.
+- `feature_bundle_manifest.json` currently records the schema fingerprint
+  `{summary['feature_schema_sha256']}` and the expected outputs.
+- Its `ciphertext_files` list is empty in this prepare-only implementation.
+- `plaintext_reference.csv` and `kernel_oracle.csv` are audit artifacts only;
+  they are never downstream feature inputs.
+- K02/K03 currently produce sufficient statistics. Preserving encryption for
+  source means and variances requires a later encrypted finalization kernel,
+  which is explicitly marked as not implemented above.
 
 ## Input scope
 
@@ -340,17 +386,16 @@ themselves are not the encrypted backend.
     ["Measure", "Value"],
     [
         ["Application rows", summary["application_rows"]],
+        ["Main source scans", summary["main_source_scan_count"]],
         ["Source rows scanned", summary["source_rows_scanned"]],
         ["Source rows matched", summary["source_rows_matched"]],
         ["Auxiliary rows scanned", summary["auxiliary_rows_scanned"]],
-        ["Slots per applicant", summary["slots_per_application"]],
-        ["Client-compacted missing values", summary["client_compacted_missing_values"]],
     ],
 )}
 
-## Plaintext result preview
+## Plaintext audit preview
 
-{_table(["Anonymous app", "Feature", "Operation", "Value"], preview_rows)}
+{_table(["Trace ID", "Anonymous app", "Feature", "Operation", "Value"], preview_rows)}
 
 ## Timings
 
@@ -360,11 +405,11 @@ themselves are not the encrypted backend.
 
 {_table(["Artifact", "Bytes"], [[key, value] for key, value in summary["artifact_sizes_bytes"].items()])}
 
-## Current limitation
+## Next cryptographic completion gate
 
-`prepared_only` validates source mapping, client/HE separation, tensor shape,
-and plaintext oracles. It is not evidence of encrypted execution. Completion
-requires compiling the referenced reusable MLIR with HEIR's CKKS/OpenFHE
-pipeline and comparing decrypted outputs with `kernel_oracle.csv`.
+Compile the referenced MLIR with HEIR's CKKS/OpenFHE pipeline, reuse one
+context/key set across all components, serialize the returned ciphertexts, fill
+`ciphertext_files`, and optionally audit-decrypt a separate validation copy.
+Until then this report must remain `prepared_only`.
 """
     path.write_text(report, encoding="utf-8")

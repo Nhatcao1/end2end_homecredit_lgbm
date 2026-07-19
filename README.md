@@ -18,17 +18,22 @@ encrypted_payloads/    ciphertext inputs (not tracked)
 The HE/HEIR feasibility assessment is documented in
 `home_credit_lightgbm_heir_analysis.md`.
 
-Thirteen function-specific benchmark adapters are implemented over five shared
-HEIR arithmetic kernels. Prepare their separate Markdown reports with:
+Five complete function benchmarks are implemented over shared HEIR arithmetic
+kernels. Run one original source function at a time with:
 
 ```bash
-python3 code/heir/scripts/run_function_benchmarks.py --task all --run-name review_v1
+python3 code/heir/scripts/run_function_benchmarks.py \
+  --function bureau \
+  --application-row-limit 8 \
+  --source-row-limit 500000 \
+  --run-name bureau_smoke
 ```
 
-Each adapter currently records its source-facing plaintext reference, raw
-kernel oracle, tensor manifest, preparation timing, artifact sizes, and privacy
-boundary. Generated CKKS/OpenFHE execution and decrypted accuracy fields remain
-pending and must not be inferred from a `prepared_only` report.
+Available functions are `bureau`, `previous`, `pos`, `installments`, and
+`credit_card`. Each produces one combined Markdown report, consolidated oracle,
+tensor manifest, and bundle-ready schema. Generated CKKS/OpenFHE execution and
+ciphertext serialization remain pending and must not be inferred from a
+`prepared_only` / `plaintext_staging_only` report.
 
-The task registry and current acceptance status are maintained in
+The function registry and current acceptance status are maintained in
 `docs/HEIR_BENCHMARK_CRITERIA.md`.

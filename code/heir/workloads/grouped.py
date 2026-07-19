@@ -24,7 +24,7 @@ class FeatureSpec:
 
 @dataclass(frozen=True)
 class TaskSpec:
-    """Function-specific interpretation of one or more reusable kernels."""
+    """Internal computation component within a complete function benchmark."""
 
     task_id: str
     slug: str
@@ -46,3 +46,27 @@ class TaskSpec:
             value[key] = list(value[key])
         value["features"] = [feature.to_dict() for feature in self.features]
         return value
+
+
+@dataclass(frozen=True)
+class FunctionSpec:
+    """Public benchmark unit matching one original feature-engineering function."""
+
+    benchmark_id: str
+    name: str
+    function_name: str
+    title: str
+    input_file: str
+    source_lines: str
+    components: tuple[TaskSpec, ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "benchmark_id": self.benchmark_id,
+            "name": self.name,
+            "function_name": self.function_name,
+            "title": self.title,
+            "input_file": self.input_file,
+            "source_lines": self.source_lines,
+            "components": [component.to_dict() for component in self.components],
+        }

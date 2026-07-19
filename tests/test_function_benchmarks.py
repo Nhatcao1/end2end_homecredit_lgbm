@@ -6,9 +6,9 @@ import unittest
 from pathlib import Path
 
 from code.heir.common import read_csv
-from code.heir.function_benchmark import prepare_function_task
-from code.heir.report import write_function_report
-from code.heir.workloads.catalog import TASKS, get_task
+from code.heir.function_benchmark import prepare_complete_function
+from code.heir.report import write_complete_function_report
+from code.heir.workloads.catalog import COMPONENTS, FUNCTIONS, get_function
 
 
 def write_table(path: Path, fields: list[str], rows: list[dict[str, object]]) -> None:
@@ -21,7 +21,7 @@ def write_table(path: Path, fields: list[str], rows: list[dict[str, object]]) ->
 
 def required_fields(filename: str) -> list[str]:
     fields = {"SK_ID_CURR"}
-    for task in TASKS:
+    for task in COMPONENTS:
         if task.input_file != filename:
             continue
         if task.branch_column:
@@ -40,16 +40,23 @@ def row(filename: str, **overrides: object) -> dict[str, object]:
 
 
 def reference_value(
-    path: Path, app_index: int, feature: str, operation: str
+    path: Path,
+    app_index: int,
+    feature: str,
+    operation: str,
+    component_id: str,
 ) -> float | None:
     for item in read_csv(path):
         if (
             int(item["app_index"]) == app_index
+            and item["component_id"] == component_id
             and item["feature"] == feature
             and item["operation"] == operation
         ):
             return float(item["value"]) if item["value"] else None
-    raise AssertionError(f"missing reference {app_index}/{feature}/{operation}")
+    raise AssertionError(
+        f"missing reference {component_id}/{app_index}/{feature}/{operation}"
+    )
 
 
 class FunctionBenchmarkTest(unittest.TestCase):
@@ -186,68 +193,114 @@ class FunctionBenchmarkTest(unittest.TestCase):
         )
         return data, application
 
-    def test_all_thirteen_tasks_prepare_separate_reports(self) -> None:
+    def test_five_complete_functions_prepare_one_report_each(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             data, application = self.make_data(root)
-            for task in TASKS:
-                run_dir = root / "runs" / task.task_id
-                summary = prepare_function_task(task, data, application, run_dir, 0, 0)
+            for function in FUNCTIONS:
+                run_dir = root / "runs" / function.name
+                summary = prepare_complete_function(
+                    function, data, application, run_dir, 0, 0
+                )
                 preview = read_csv(run_dir / "plaintext_reference.csv")
-                write_function_report(run_dir / "benchmark_report.md", summary, preview)
+                write_complete_function_report(
+                    run_dir / "benchmark_report.md", summary, preview
+                )
                 self.assertEqual(summary["backend_status"], "prepared_only")
+                self.assertEqual(summary["bundle_status"], "plaintext_staging_only")
+                self.assertEqual(summary["main_source_scan_count"], 1)
+                self.assertEqual(len(summary["components"]), len(function.components))
                 self.assertTrue(preview)
                 self.assertTrue((run_dir / "kernel_oracle.csv").is_file())
                 self.assertTrue((run_dir / "tensor_manifest.csv").is_file())
+                self.assertTrue((run_dir / "feature_bundle_manifest.json").is_file())
                 self.assertTrue((run_dir / "benchmark_report.md").is_file())
                 report = (run_dir / "benchmark_report.md").read_text(encoding="utf-8")
-                self.assertIn("means the trusted-client Python preparation ran", report)
-                self.assertIn("Not executed in this run", report)
-                self.assertIn("## Source Python and benchmark mapping", report)
-                self.assertIn("## Simplified HEIR arithmetic", report)
+                self.assertIn("## Which parts use HE?", report)
+                self.assertIn("## Original Python flow, shortened", report)
+                self.assertIn("## Ciphertext continuity and bundle storage", report)
+                self.assertIn("not independently\nexecuted benchmarks", report)
                 self.assertEqual(
                     {contract["kernel_id"] for contract in summary["kernel_contracts"]},
-                    set(task.kernel_ids),
+                    {
+                        kernel_id
+                        for component in function.components
+                        for kernel_id in component.kernel_ids
+                    },
                 )
 
-            self.assertEqual(len(TASKS), 13)
+            self.assertEqual(len(FUNCTIONS), 5)
+            self.assertEqual(len(COMPONENTS), 13)
 
     def test_counts_branches_transforms_and_sample_variance(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             data, application = self.make_data(root)
 
-            def prepare(task_id: str) -> Path:
-                path = root / task_id
-                prepare_function_task(get_task(task_id), data, application, path, 0, 0)
+            def prepare(function_name: str) -> Path:
+                path = root / function_name
+                prepare_complete_function(
+                    get_function(function_name), data, application, path, 0, 0
+                )
                 return path / "plaintext_reference.csv"
 
-            pos = prepare("POS01")
-            self.assertEqual(reference_value(pos, 0, "ROW_COUNT", "count"), 2.0)
-            self.assertEqual(reference_value(pos, 2, "ROW_COUNT", "count"), 0.0)
-
-            bureau = prepare("B01")
-            self.assertEqual(reference_value(bureau, 0, "DAYS_CREDIT", "mean"), -15.0)
-            self.assertEqual(reference_value(bureau, 0, "DAYS_CREDIT", "var"), 50.0)
-            self.assertEqual(reference_value(bureau, 0, "MONTHS_BALANCE_SIZE", "sum"), 3.0)
-
-            active = prepare("B02")
-            closed = prepare("B03")
-            self.assertEqual(reference_value(active, 0, "AMT_CREDIT_SUM", "sum"), 100.0)
-            self.assertEqual(reference_value(closed, 0, "AMT_CREDIT_SUM", "sum"), 50.0)
-
-            approved = prepare("P02")
-            refused = prepare("P03")
-            self.assertAlmostEqual(
-                reference_value(approved, 0, "APP_CREDIT_PERC", "mean") or 0, 0.8
+            pos = prepare("pos")
+            self.assertEqual(
+                reference_value(pos, 0, "ROW_COUNT", "count", "POS01"), 2.0
             )
-            self.assertAlmostEqual(
-                reference_value(refused, 0, "APP_CREDIT_PERC", "mean") or 0, 0.5
+            self.assertEqual(
+                reference_value(pos, 2, "ROW_COUNT", "count", "POS01"), 0.0
             )
 
-            difference = prepare("I03")
-            self.assertEqual(reference_value(difference, 0, "PAYMENT_DIFF", "sum"), 10.0)
-            self.assertEqual(reference_value(difference, 0, "PAYMENT_DIFF", "var"), 450.0)
+            bureau = prepare("bureau")
+            self.assertEqual(
+                reference_value(bureau, 0, "DAYS_CREDIT", "mean", "B01"), -15.0
+            )
+            self.assertEqual(
+                reference_value(bureau, 0, "DAYS_CREDIT", "var", "B01"), 50.0
+            )
+            self.assertEqual(
+                reference_value(bureau, 0, "MONTHS_BALANCE_SIZE", "sum", "B01"),
+                3.0,
+            )
+            self.assertEqual(
+                reference_value(bureau, 0, "AMT_CREDIT_SUM", "sum", "B02"),
+                100.0,
+            )
+            self.assertEqual(
+                reference_value(bureau, 0, "AMT_CREDIT_SUM", "sum", "B03"),
+                50.0,
+            )
+
+            previous = prepare("previous")
+            self.assertAlmostEqual(
+                reference_value(
+                    previous, 0, "APP_CREDIT_PERC", "mean", "P02"
+                )
+                or 0,
+                0.8,
+            )
+            self.assertAlmostEqual(
+                reference_value(
+                    previous, 0, "APP_CREDIT_PERC", "mean", "P03"
+                )
+                or 0,
+                0.5,
+            )
+
+            installments = prepare("installments")
+            self.assertEqual(
+                reference_value(
+                    installments, 0, "PAYMENT_DIFF", "sum", "I03"
+                ),
+                10.0,
+            )
+            self.assertEqual(
+                reference_value(
+                    installments, 0, "PAYMENT_DIFF", "var", "I03"
+                ),
+                450.0,
+            )
 
 
 if __name__ == "__main__":

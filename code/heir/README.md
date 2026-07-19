@@ -30,13 +30,13 @@ kernels/
 ├── linear_score.py            S01 special linear score
 └── polynomial_score.py        S02 special polynomial transform
 workloads/
-├── catalog.py                 registry of 13 function benchmark tasks
-├── grouped.py                 workload/feature contracts
-├── bureau_and_balance/        B01-B03 definitions
-├── previous_applications/     P01-P03 definitions
-├── pos_cash/                  POS01-POS02 definitions
-├── installments_payments/     I01-I03 definitions
-└── credit_card_balance/       C01-C02 definitions
+├── catalog.py                 registry of 5 complete function benchmarks
+├── grouped.py                 function/component/feature contracts
+├── bureau_and_balance/        general/active/closed components
+├── previous_applications/     general/approved/refused components
+├── pos_cash/                  count/numeric components
+├── installments_payments/     count/prepared/difference components
+└── credit_card_balance/       count/numeric components
 backends/
 └── generated_ckks.py         strict generated-source execution
 scripts/
@@ -60,28 +60,35 @@ The manifest records `mlir_and_plaintext_oracle_only` until HEIR-generated CKKS
 source is compiled and run. K01 already has a strict generated-source runner;
 the remaining generated runners are the next layer of work.
 
-Prepare all 13 function-specific reports over the shared kernels:
+Prepare one complete function report over the shared kernels:
 
 ```bash
 python3 code/heir/scripts/run_function_benchmarks.py \
-  --task all \
+  --function bureau \
   --application-row-limit 8 \
-  --run-name review_v1
+  --source-row-limit 500000 \
+  --run-name bureau_smoke
 ```
 
-Use `--task B02`, for example, to prepare only the active-bureau branch. Each
-task writes its own `benchmark_report.md`, source-facing
-`plaintext_reference.csv`, raw `kernel_oracle.csv`, and tensor manifest under
-`benchmark_runs/functions/<function>/<task>/<run-name>/`.
+The public choices are `bureau`, `previous`, `pos`, `installments`, and
+`credit_card`. Internal trace IDs such as B01/B02/B03 remain only to map report
+sections back to source operations; they are not independently runnable
+benchmarks. Each function writes one `benchmark_report.md`, consolidated
+`plaintext_reference.csv`, `kernel_oracle.csv`, `tensor_manifest.csv`, and
+`feature_bundle_manifest.json` under
+`benchmark_runs/functions/<function>/<run-name>/`.
 
 The shared preparation engine performs grouping, missing-value compaction,
 ratio/clipping policy, branch-mask construction, fixed-shape padding, and
 client-private identifier mapping. These are trusted client operations; only
 the referenced K01-K03 arithmetic is intended for HEIR execution. Prepared
 tensor CSVs are plaintext staging artifacts and must be encrypted before they
-leave the client.
+leave the client. The bundle manifest is currently
+`plaintext_staging_only`: its ciphertext list remains empty until a generated
+CKKS backend returns and serializes ciphertext outputs.
 
-Prepare the tensors and Markdown report without claiming HE execution:
+The older POS_COUNT-only command remains as a narrow K01 generated-runner test,
+not the public function-benchmark interface:
 
 ```bash
 python3 code/heir/scripts/run_pos_count_benchmark.py \

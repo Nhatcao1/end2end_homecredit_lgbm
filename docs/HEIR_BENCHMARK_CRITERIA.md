@@ -26,7 +26,8 @@ Function workload
 
 - Owns table reading, trusted alignment/grouping, masks, plaintext references,
   tensor interpretation, and real-data benchmarks.
-- Produces a separate report even when another function uses the same kernel.
+- Produces one report for each complete original function. Internal general,
+  branch, count, and moment components share one source scan and report.
 - Records the kernel ID, generated-source hash, vector size, CKKS parameters,
   input scope, privacy boundary, errors, timings, and artifact sizes.
 
@@ -35,7 +36,7 @@ Function workload
 | Label | Meaning | Code policy |
 |---|---|---|
 | `HEIR exact` | Fixed CKKS arithmetic can reproduce the operation | Implement and benchmark |
-| `HEIR statistics` | CKKS returns sufficient statistics; trusted client finishes division or square root | Implement only the encrypted statistics |
+| `HEIR statistics` | CKKS returns encrypted sufficient statistics | Keep ciphertext outputs; encrypted mean/variance finalization is a separate pending continuation gate |
 | `Client only` | The data owner can prepare it more safely and cheaply before encryption | Flag in the report; do not write HEIR code |
 | `Excluded V1` | Comparison, uniqueness, or tree logic is a poor exact-CKKS target | Do not implement in the initial benchmark lane |
 | `Plaintext ML` | Training, validation, or reporting does not benefit from HE | Keep outside HEIR |
@@ -112,51 +113,41 @@ before adding another workload.
 | ID | Original function | HEIR code to build | Client-only flags — no HEIR code | Excluded/plaintext | Status |
 |---|---|---|---|---|---|
 | F01 | `application_train_test()` | None | CSV loading, sentinel/null handling, row filtering, factorization, one-hot encoding, and ratio features at lines 46-68 | General pandas preparation | Flag-only plan complete |
-| F02 | `bureau_and_balance()` | Counts, sums, sums of squares, active/closed masked sums; mean/variance sufficient statistics | Cleaning, category masks, `SK_ID_BUREAU`/`SK_ID_CURR` alignment and grouping | `min`, `max`, exact encrypted division | B01-B03 preparation/oracle/report implemented; generated CKKS pending |
-| F03 | `previous_applications()` | Counts, sums, sums of squares, approved/refused masked sums; mean/variance sufficient statistics | Sentinel/null handling, one-hot/status masks, grouping, `APP_CREDIT_PERC` | `min`, `max`, exact encrypted division | P01-P03 preparation/oracle/report implemented; generated CKKS pending |
-| F04 | `pos_cash()` | `POS_COUNT`, sums, and mean sufficient statistics | One-hot masks and applicant row alignment | `max` | POS01-POS02 preparation/oracle/report implemented; K01 generated runner exists, CKKS execution pending |
-| F05 | `installments_payments()` | Source `PAYMENT_DIFF` plus its mean/sum/variance; counts and supported aggregates over client-prepared DPD/DBD | Null handling, `PAYMENT_PERC`, applicant grouping, and positive clipping at lines 199-226 | `min`, `max`, `nunique`, encrypted clipping/division | I01-I03 preparation/oracle/report implemented; generated CKKS pending |
-| F06 | `credit_card_balance()` | Counts, sums, sums of squares, mean/variance sufficient statistics | One-hot encoding, dropped ID handling, applicant grouping | `min`, `max` | C01-C02 preparation/oracle/report implemented; generated CKKS pending |
+| F02 | `bureau_and_balance()` | Counts, sums, sums of squares, active/closed masked sums; mean/variance sufficient statistics | Cleaning, category masks, `SK_ID_BUREAU`/`SK_ID_CURR` alignment and grouping | `min`, `max`, exact encrypted division | One combined BUREAU preparation/oracle/report implemented; generated CKKS pending |
+| F03 | `previous_applications()` | Counts, sums, sums of squares, approved/refused masked sums; mean/variance sufficient statistics | Sentinel/null handling, one-hot/status masks, grouping, `APP_CREDIT_PERC` | `min`, `max`, exact encrypted division | One combined PREVIOUS preparation/oracle/report implemented; generated CKKS pending |
+| F04 | `pos_cash()` | `POS_COUNT`, sums, and mean sufficient statistics | One-hot masks and applicant row alignment | `max` | One combined POS preparation/oracle/report implemented; K01 generated runner exists, CKKS execution pending |
+| F05 | `installments_payments()` | Source `PAYMENT_DIFF` plus its mean/sum/variance; counts and supported aggregates over client-prepared DPD/DBD | Null handling, `PAYMENT_PERC`, applicant grouping, and positive clipping at lines 199-226 | `min`, `max`, `nunique`, encrypted clipping/division | One combined INSTALLMENTS preparation/oracle/report implemented; generated CKKS pending |
+| F06 | `credit_card_balance()` | Counts, sums, sums of squares, mean/variance sufficient statistics | One-hot encoding, dropped ID handling, applicant grouping | `min`, `max` | One combined CREDIT_CARD preparation/oracle/report implemented; generated CKKS pending |
 | F07 | `kfold_lightgbm()` | None under current CKKS plan | None | Source LightGBM training/inference, KFold, ROC-AUC, feature importance, and plotting at lines 247-316 remain plaintext | Flag-only plan complete |
 
-## Kernel-to-function benchmark mapping
+## Complete function benchmark mapping
 
-| Function report | Function workload | Reusable kernel |
+| Public benchmark | Internal source components in one report | Reusable kernel |
 |---|---|---|
-| `pos_cash/function_report.md` | `POS_COUNT` | K01 |
-| `credit_card_balance/function_report.md` | `CC_COUNT` | K01 |
-| `bureau_and_balance/function_report.md` | General sums and active/closed masked sums | K01; K02 for moments |
-| `previous_applications/function_report.md` | General sums and approved/refused masked sums | K01; K02 for moments |
-| `installments_payments/function_report.md` | `PAYMENT_DIFF` and supported aggregates | K03; K02 for prepared values |
-| `credit_card_balance/function_report.md` | Supported numeric moments | K02 |
+| `bureau` | General, active, and closed bureau aggregates | K01, K02 |
+| `previous` | General, approved, and refused previous-application aggregates | K01, K02 |
+| `pos` | POS count and supported numeric means | K01, K02 |
+| `installments` | Count, client-prepared aggregates, and `PAYMENT_DIFF` moments | K01, K02, K03 |
+| `credit_card` | Credit-card count and supported numeric moments | K01, K02 |
 
-## Implemented function-task catalog
+## Internal computation trace catalog
 
-Every row below has a task definition, trusted preparation path, fixed-shape
-tensor manifest, source-facing plaintext reference, kernel oracle, and Markdown
-report. `Implemented` here does not mean encrypted execution has occurred.
+The IDs below label sections inside the five complete reports. They preserve
+source traceability but are not public or independently executed benchmarks.
 
-| Task | Function-specific benchmark | Reusable kernel(s) | Adapter status |
+| Trace ID | Internal computation component | Reusable kernel(s) | Status inside combined function |
 |---|---|---|---|
-| B01 | Bureau general supported aggregates | K01, K02 | Implemented; generated CKKS pending |
-| B02 | Bureau active-credit masked aggregates | K01, K02 | Implemented; generated CKKS pending |
-| B03 | Bureau closed-credit masked aggregates | K01, K02 | Implemented; generated CKKS pending |
-| P01 | Previous-application general aggregates | K01, K02 | Implemented; generated CKKS pending |
-| P02 | Approved-application masked aggregates | K01, K02 | Implemented; generated CKKS pending |
-| P03 | Refused-application masked aggregates | K01, K02 | Implemented; generated CKKS pending |
-| POS01 | POS row count | K01 | Implemented; strict K01 runner available |
-| POS02 | POS supported numeric means | K02 | Implemented; generated CKKS pending |
-| I01 | Installment row count | K01 | Implemented; K01 runner adaptation pending |
-| I02 | Client-prepared DPD/DBD/payment aggregates | K01, K02 | Implemented; generated CKKS pending |
-| I03 | Encrypted `PAYMENT_DIFF` moments | K03 | Implemented; generated CKKS pending |
-| C01 | Credit-card row count | K01 | Implemented; K01 runner adaptation pending |
-| C02 | Credit-card supported numeric moments | K01, K02 | Implemented; generated CKKS pending |
+| B01-B03 | Bureau general/active/closed | K01, K02 | Prepared together in BUREAU |
+| P01-P03 | Previous general/approved/refused | K01, K02 | Prepared together in PREVIOUS |
+| POS01-POS02 | POS count/numeric means | K01, K02 | Prepared together in POS |
+| I01-I03 | Installment count/prepared/difference | K01, K02, K03 | Prepared together in INSTALLMENTS |
+| C01-C02 | Credit-card count/numeric moments | K01, K02 | Prepared together in CREDIT_CARD |
 
 The current adapters cover source numeric columns. Dynamic category discovery
 and one-hot encoding remain client-only; category-mean benchmarks can be added
 later only against a client-frozen numeric category schema.
 
-### Adapter validation snapshot
+### Historical adapter validation snapshot
 
 On 2026-07-19, all 13 adapters completed a bounded real-data preparation run
 using eight applicants and at most 500,000 rows from each source/auxiliary CSV.
@@ -165,14 +156,24 @@ matched source rows; the two credit-card reports correctly exercised their
 zero-history/padding path within that bounded slice. This snapshot validates
 schema handling and report generation only and remains `prepared_only`.
 
+The public interface has since been consolidated into five function benchmarks;
+automated tests verify that every function scans its main source once and still
+reproduces all internal branch/count/transform assertions.
+
+On 2026-07-19, the consolidated `bureau` smoke run selected eight applicants,
+scanned 500,000 bureau rows once, matched two rows, and prepared B01, B02, and
+B03 in one report. This is a preparation/report integration check, not CKKS
+execution evidence.
+
 Function benchmark output remains separate:
 
 ```text
 benchmark_runs/
-├── pos_cash/pos_count/<run-name>/benchmark_report.md
-├── credit_card_balance/credit_card_count/<run-name>/benchmark_report.md
-├── bureau_and_balance/active_aggregates/<run-name>/benchmark_report.md
-└── previous_applications/approved_aggregates/<run-name>/benchmark_report.md
+├── functions/bureau_and_balance/<run-name>/benchmark_report.md
+├── functions/previous_applications/<run-name>/benchmark_report.md
+├── functions/pos_cash/<run-name>/benchmark_report.md
+├── functions/installments_payments/<run-name>/benchmark_report.md
+└── functions/credit_card_balance/<run-name>/benchmark_report.md
 ```
 
 ## Explicit no-code decisions
@@ -229,16 +230,21 @@ the source configuration of up to 10,000 estimators.
 ## Implementation order
 
 The reusable arithmetic MLIR/oracle layer is complete for K01-K03 and S01-S02,
-and all 13 approved function adapters are implemented. The remaining order is:
+and five combined function preparation/report paths are implemented. The
+remaining order is:
 
 1. Complete the K01 synthetic kernel gate with HEIR-generated CKKS source.
-2. Generalize the K01 generated runner for POS01, I01, C01, and masked sums.
+2. Generalize the K01 generated runner for count and masked-sum components.
 3. Generate and validate K02 CKKS/OpenFHE source once, then reuse its source hash
    across every K02 function report.
-4. Generate and validate K03 CKKS/OpenFHE source for I03.
-5. Execute each function task against its kernel runner and populate accuracy,
+4. Generate and validate K03 CKKS/OpenFHE source for payment differences.
+5. Add encrypted mean/variance finalization so sufficient statistics remain
+   ciphertext through the pipeline.
+6. Serialize function ciphertext outputs and populate the bundle manifests with
+   context/key/layout/scale/level metadata.
+7. Execute each complete function against its kernels and populate accuracy,
    timing, CKKS parameters, evaluation keys, and artifact sizes.
-6. Produce a source-parity coverage report showing reproduced, client-only, and
+8. Produce a source-parity coverage report showing reproduced, client-only, and
    excluded outputs for every original function.
 
 Special experiments run independently after the active source-derived kernels:
