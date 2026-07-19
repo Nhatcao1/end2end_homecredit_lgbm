@@ -1,0 +1,46 @@
+# macOS and Python
+.DS_Store
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+.env
+.env.*
+
+# Home Credit source data and generated datasets
+/data/home_credit/*
+!/data/home_credit/.gitkeep
+!/data/home_credit/README.md
+/data/prepared/*
+!/data/prepared/.gitkeep
+
+# HE/HEIR secrets and generated payloads
+/keys/
+/encrypted_payloads/
+/prepared_payloads/
+/client_runs/
+/server_jobs/
+/server_output/
+/server_returns/
+
+# Generated benchmark/build artifacts
+/benchmark_runs/
+/build/
+/cmake-build-*/
+*.bin
+*.ct
+*.key
+
+# Local model artifacts
+/models/
+*.pkl
+*.pickle
+*.joblib
+*.onnx
+
+# Obsolete notebook retained locally only
+/notebooks/model-tuning-results-random-vs-bayesian-opt.ipynb
+
