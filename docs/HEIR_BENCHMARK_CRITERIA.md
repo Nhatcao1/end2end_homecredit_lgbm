@@ -83,9 +83,9 @@ Function workload
 
 | Kernel ID | Contract | Function uses | Status |
 |---|---|---|---|
-| K01 `dot_product_ct_ct` | `sum(left * right)` over encrypted vectors | Source `size`/count and `sum` aggregations; active/closed and approved/refused filtered sums | MLIR/runner implemented; generated CKKS execution pending |
-| K02 `moments` | Encrypted `count`, `sum(x)`, and helper `sum(x²)` | Reproduces source `mean` and `var` aggregations in bureau, previous applications, POS, installments, and credit cards | Planned; may initially compose K01 calls before a fused optimization |
-| K03 `difference_moments` | Source `PAYMENT_DIFF = AMT_INSTALMENT - AMT_PAYMENT`, followed by its source `mean`, `sum`, and `var` | `installments_payments()` only | Planned |
+| K01 `dot_product_ct_ct` | `sum(left * right)` over encrypted vectors | Source `size`/count and `sum` aggregations; active/closed and approved/refused filtered sums | Contract, MLIR, oracle, and generated-source runner implemented; CKKS execution pending |
+| K02 `moments` | Encrypted `count`, `sum(x)`, and helper `sum(x²)` | Reproduces source `mean` and `var` aggregations in bureau, previous applications, POS, installments, and credit cards | Contract, fused MLIR, and plaintext oracle implemented; generated-source runner pending |
+| K03 `difference_moments` | Source `PAYMENT_DIFF = AMT_INSTALMENT - AMT_PAYMENT`, followed by its source `mean`, `sum`, and `var` | `installments_payments()` only | Contract, fused MLIR, and plaintext oracle implemented; generated-source runner pending |
 
 Do not create separate kernels named `POS_COUNT`, `CC_COUNT`,
 `active_credit_sum`, or `approved_application_sum`; those are workload
@@ -180,16 +180,21 @@ not count toward source-parity coverage.
 
 | Special ID | Experiment | Purpose | Boundary/status |
 |---|---|---|---|
-| S01 | `linear_score_ct_pt` | Measure a CKKS-friendly weighted score over encrypted features | Special non-source benchmark; model must be trained or defined separately |
-| S02 | `polynomial_score` | Measure a low-degree transformation of S01 output | Special non-source benchmark; not LightGBM or sigmoid-exact |
-| S03 | `lightgbm_tree_inference` | Test whether a tiny exported LightGBM tree ensemble can be evaluated obliviously | Feasibility research only; not part of V1 or source-parity acceptance |
+| S01 | `linear_score_ct_pt` | Measure a CKKS-friendly weighted score over encrypted features | Contract, MLIR, and oracle implemented; special non-source; generated-source runner pending |
+| S02 | `polynomial_score` | Measure a low-degree transformation of S01 output | Contract, Horner MLIR, and oracle implemented; special non-source; generated-source runner pending |
+| S03 | `lightgbm_tree_inference` | Test whether a tiny exported LightGBM tree ensemble can be evaluated obliviously | Deferred by decision; documented only, with no implementation or registry entry |
 
-S03 must not claim direct LightGBM support. It requires plaintext training,
+S03 must not claim direct LightGBM support. It is not part of the reusable
+arithmetic layer and currently has no code. A future implementation would
+require plaintext training,
 model export, fixed-tree MLIR generation, encrypted comparison/selection, and
 oblivious evaluation of every retained path. Start with 1-3 shallow trees, not
 the source configuration of up to 10,000 estimators.
 
 ## Implementation order
+
+The reusable arithmetic MLIR/oracle layer is complete for K01-K03 and S01-S02.
+The remaining order is:
 
 1. Complete the K01 synthetic kernel gate with HEIR-generated CKKS source.
 2. Complete the separate `pos_cash()/POS_COUNT` function benchmark using K01.

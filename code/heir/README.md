@@ -11,9 +11,10 @@ client-only and excluded operations are tracked in
 `docs/HEIR_BENCHMARK_CRITERIA.md` without placeholder code. Different function
 reports may reference the same generated kernel source and SHA256 hash.
 
-Linear, polynomial, and tiny exported-tree inference are kept in a separate
-`Special / non-source` experiment lane. They must not be presented as original
-pipeline operations or counted toward function-parity coverage.
+Linear and polynomial scoring are implemented in a separate `Special /
+non-source` experiment lane. They must not be presented as original pipeline
+operations or counted toward function-parity coverage. Tiny exported-tree
+inference remains documented but intentionally has no code.
 
 The first workload sits under `workloads/pos_cash/` and reconstructs the
 original `POS_COUNT` feature with an anonymous padded history mask and a
@@ -21,15 +22,37 @@ HEIR-generated CKKS dot product.
 
 ```text
 kernels/
-└── dot_product.py             reusable K01 arithmetic contract
+├── contracts.py               serializable kernel contract
+├── registry.py                all active non-tree kernels
+├── dot_product.py             K01 encrypted dot product
+├── moments.py                 K02 masked sufficient statistics
+├── difference_moments.py      K03 difference statistics
+├── linear_score.py            S01 special linear score
+└── polynomial_score.py        S02 special polynomial transform
 workloads/
 └── pos_cash/
     └── pos_count.py           function-specific preparation/reference
 backends/
 └── generated_ckks.py         strict generated-source execution
 scripts/
+├── prepare_reusable_kernels.py
 └── run_pos_count_benchmark.py
 ```
+
+Emit reviewable MLIR, source hashes, contracts, and deterministic plaintext
+oracles for every reusable arithmetic kernel:
+
+```bash
+python3 code/heir/scripts/prepare_reusable_kernels.py \
+  --output-dir benchmark_runs/reusable_kernels/arithmetic_layer_v1 \
+  --vector-size 8 \
+  --polynomial-degree 3
+```
+
+This command prepares benchmark inputs but does not claim encrypted execution.
+The manifest records `mlir_and_plaintext_oracle_only` until HEIR-generated CKKS
+source is compiled and run. K01 already has a strict generated-source runner;
+the remaining generated runners are the next layer of work.
 
 Prepare the tensors and Markdown report without claiming HE execution:
 

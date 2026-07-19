@@ -1,6 +1,33 @@
-"""Generate the fixed-size arithmetic kernel lowered by HEIR to CKKS/OpenFHE."""
+"""Reusable encrypted/encrypted dot-product kernel."""
 
 from __future__ import annotations
+
+from collections.abc import Sequence
+
+from code.heir.kernels.contracts import KernelContract
+
+
+CONTRACT = KernelContract(
+    kernel_id="K01",
+    name="dot_product_ct_ct",
+    entry_function="dot_product",
+    lane="source-derived",
+    operation="sum(left[i] * right[i])",
+    inputs=("left: encrypted vector", "right: encrypted vector"),
+    outputs=("dot_product: encrypted scalar",),
+    multiplicative_depth="1",
+    expected_evaluation_keys=("relinearization", "rotations for packed reduction"),
+    generated_ckks_status="runner_available",
+)
+
+
+def dot_product_reference(left: Sequence[float], right: Sequence[float]) -> float:
+    """Plaintext oracle used to validate a decrypted K01 result."""
+    if len(left) != len(right):
+        raise ValueError("left and right must have equal length")
+    if not left:
+        raise ValueError("vectors must not be empty")
+    return sum(float(x) * float(y) for x, y in zip(left, right))
 
 
 def dot_product_mlir(vector_size: int) -> str:
