@@ -108,6 +108,118 @@ sources are rejected by the backend.
     path.write_text(report, encoding="utf-8")
 
 
+def _source_python_excerpt(task: dict[str, Any]) -> str:
+    """Return a short source-equivalent pandas pattern for one task report."""
+    task_id = task["task_id"]
+    if task["function_name"] == "bureau_and_balance":
+        if task_id == "B01":
+            return """# Source pattern (shortened from lines 91-114)
+bureau_agg = bureau.groupby("SK_ID_CURR").agg(num_aggregations)"""
+        branch = "Active" if task_id == "B02" else "Closed"
+        return f"""# Source pattern (shortened from lines 115-126)
+subset = bureau[bureau["CREDIT_ACTIVE_{branch}"] == 1]
+subset_agg = subset.groupby("SK_ID_CURR").agg(num_aggregations)"""
+    if task["function_name"] == "previous_applications":
+        if task_id == "P01":
+            return """# Source pattern (shortened from lines 142-162)
+prev["APP_CREDIT_PERC"] = prev["AMT_APPLICATION"] / prev["AMT_CREDIT"]
+prev_agg = prev.groupby("SK_ID_CURR").agg(num_aggregations)"""
+        branch = "Approved" if task_id == "P02" else "Refused"
+        return f"""# Source pattern (shortened from lines 163-172)
+subset = prev[prev["NAME_CONTRACT_STATUS_{branch}"] == 1]
+subset_agg = subset.groupby("SK_ID_CURR").agg(num_aggregations)"""
+    if task["function_name"] == "pos_cash":
+        if task_id == "POS01":
+            return """# Exact source operation (line 193)
+pos_agg["POS_COUNT"] = pos.groupby("SK_ID_CURR").size()"""
+        return """# Source pattern (shortened from lines 182-191)
+pos_agg = pos.groupby("SK_ID_CURR").agg({
+    "MONTHS_BALANCE": ["mean"],
+    "SK_DPD": ["mean"],
+    "SK_DPD_DEF": ["mean"],
+})"""
+    if task["function_name"] == "installments_payments":
+        if task_id == "I01":
+            return """# Exact source operation (line 226)
+ins_agg["INSTAL_COUNT"] = ins.groupby("SK_ID_CURR").size()"""
+        if task_id == "I03":
+            return """# Source pattern (shortened from lines 202-216)
+ins["PAYMENT_DIFF"] = ins["AMT_INSTALMENT"] - ins["AMT_PAYMENT"]
+ins_agg = ins.groupby("SK_ID_CURR").agg({
+    "PAYMENT_DIFF": ["mean", "sum", "var"],
+})"""
+        return """# Source pattern (shortened from lines 203-223)
+ins["PAYMENT_PERC"] = ins["AMT_PAYMENT"] / ins["AMT_INSTALMENT"]
+ins["DPD"] = (ins["DAYS_ENTRY_PAYMENT"] - ins["DAYS_INSTALMENT"]).clip(lower=0)
+ins_agg = ins.groupby("SK_ID_CURR").agg(aggregations)"""
+    if task_id == "C01":
+        return """# Exact source operation (line 240)
+cc_agg["CC_COUNT"] = cc.groupby("SK_ID_CURR").size()"""
+    return """# Source pattern (shortened from lines 236-238)
+cc = cc.drop(["SK_ID_PREV"], axis=1)
+cc_agg = cc.groupby("SK_ID_CURR").agg(["mean", "sum", "var"])"""
+
+
+def _benchmark_preparation_excerpt(task: dict[str, Any]) -> str:
+    branch = ""
+    if task["branch_column"]:
+        branch = (
+            f'branch_mask = 1.0 if row["{task["branch_column"]}"] '
+            f'== "{task["branch_value"]}" else 0.0\n'
+        )
+    else:
+        branch = "branch_mask = 1.0\n"
+    if task["kind"] == "count":
+        return f"""# Client Python, simplified from prepare_function_task()
+rows = rows_grouped_by_anonymous_applicant
+history_mask = [1.0] * len(rows)  # then zero-pad to fixed width
+
+# HE input per applicant: encrypted history_mask and encrypted unit_weights
+# K01 reference: sum(history_mask[i] * unit_weights[i])"""
+    if task["kind"] == "difference_moments":
+        return f"""# Client Python, simplified from prepare_function_task()
+for row in rows_grouped_by_anonymous_applicant:
+    if row_has_both_numeric_inputs(row):
+        left.append(float(row["AMT_INSTALMENT"]))
+        right.append(float(row["AMT_PAYMENT"]))
+        {branch.rstrip()}
+# left/right/branch_mask are zero-padded and encrypted."""
+    return f"""# Client Python, simplified from prepare_function_task()
+for row in rows_grouped_by_anonymous_applicant:
+    value = client_prepare_numeric_value(row)  # ratio/clipping when configured
+    if value is not None:                       # missing values are compacted here
+        values.append(value)
+        {branch.rstrip()}
+# values and branch_mask are zero-padded and encrypted."""
+
+
+def _kernel_excerpt(kernel_id: str) -> str:
+    examples = {
+        "K01": """# K01 dot_product_ct_ct, simplified
+result = 0.0
+for i in range(width):
+    result += left[i] * right[i]""",
+        "K02": """# K02 moments, simplified
+count = total = sum_squares = 0.0
+for i in range(width):
+    count += mask[i]
+    total += mask[i] * values[i]
+    sum_squares += mask[i] * values[i] * values[i]
+
+# Client after decryption:
+mean = total / count
+sample_var = (sum_squares - total * total / count) / (count - 1)""",
+        "K03": """# K03 difference_moments, simplified
+count = total = sum_squares = 0.0
+for i in range(width):
+    difference = left[i] - right[i]
+    count += mask[i]
+    total += mask[i] * difference
+    sum_squares += mask[i] * difference * difference""",
+    }
+    return examples[kernel_id]
+
+
 def write_function_report(
     path: Path, summary: dict[str, Any], preview: list[dict[str, Any]]
 ) -> None:
@@ -117,9 +229,9 @@ def write_function_report(
         ["Source function and lines recorded", "Pass"],
         ["Raw identifiers and TARGET excluded from HE tensors", "Pass"],
         ["Missing values compacted by client", "Pass"],
-        ["Reusable kernel contracts referenced", "Pass"],
+        ["Reusable kernel contracts and MLIR builders referenced", "Pass"],
         ["Plaintext source reference and kernel oracle recorded", "Pass"],
-        ["HEIR-generated CKKS executed", "Not run"],
+        ["HEIR-generated CKKS executed", "Not run — this is a prepare-only run"],
     ]
     feature_rows = [
         [feature["name"], ", ".join(feature["operations"]), feature["transform"]]
@@ -141,15 +253,52 @@ def write_function_report(
         ]
         for contract in summary["kernel_contracts"]
     ]
+    kernel_code = "\n\n".join(
+        f"### {contract['kernel_id']} `{contract['name']}`\n\n```python\n"
+        f"{_kernel_excerpt(contract['kernel_id'])}\n```"
+        for contract in summary["kernel_contracts"]
+    )
     report = f"""# HEIR CKKS function benchmark: {task['task_id']} {task['title']}
 
 ## Status
 
-`{summary['backend_status']}`
+`{summary['backend_status']}` means the trusted-client Python preparation ran,
+but no homomorphic-encryption program ran.
 
-This report covers `{task['function_name']}()` source lines
-`{task['source_lines']}`. It prepares a function-specific benchmark over shared
-arithmetic kernels; it does not contain copied cryptographic implementation.
+Completed in this run:
+
+- Read the source CSV and select the benchmark applicants.
+- Apply documented client preparation, pack and zero-pad numeric tensors.
+- Calculate the plaintext source reference and the expected reusable-kernel
+  outputs in `kernel_oracle.csv`.
+- Write the tensor manifest and this Markdown report.
+
+Not executed in this run:
+
+- `heir-opt`, `heir-translate`, or HEIR-generated C++.
+- CKKS context/key generation, encryption, encrypted evaluation, decryption,
+  CKKS error measurement, or OpenFHE timing.
+
+So `prepared_only` is a valid preparation/oracle benchmark, not a partial or
+successful encrypted computation.
+
+## Source Python and benchmark mapping
+
+This task covers `{task['function_name']}()` source lines `{task['source_lines']}`.
+The following is a shortened source-equivalent pattern; the complete list of
+retained fields is in the next section.
+
+```python
+{_source_python_excerpt(task)}
+```
+
+The benchmark-specific client preparation is implemented by
+`code/heir/function_benchmark.py::prepare_function_task()` using the task
+definition in `code/heir/workloads/`.
+
+```python
+{_benchmark_preparation_excerpt(task)}
+```
 
 ## Acceptance criteria
 
@@ -166,6 +315,14 @@ trusted compaction; HEIR does not detect missingness.
 ## Reusable kernels
 
 {_table(["ID", "Kernel", "Depth", "Generated CKKS"], contract_rows)}
+
+## Simplified HEIR arithmetic
+
+The following snippets are the arithmetic contracts represented by the reusable
+MLIR builders. They explain the intended encrypted calculation; the snippets
+themselves are not the encrypted backend.
+
+{kernel_code}
 
 ## Privacy and calculation boundary
 

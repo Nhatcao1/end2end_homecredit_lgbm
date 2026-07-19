@@ -200,6 +200,11 @@ class FunctionBenchmarkTest(unittest.TestCase):
                 self.assertTrue((run_dir / "kernel_oracle.csv").is_file())
                 self.assertTrue((run_dir / "tensor_manifest.csv").is_file())
                 self.assertTrue((run_dir / "benchmark_report.md").is_file())
+                report = (run_dir / "benchmark_report.md").read_text(encoding="utf-8")
+                self.assertIn("means the trusted-client Python preparation ran", report)
+                self.assertIn("Not executed in this run", report)
+                self.assertIn("## Source Python and benchmark mapping", report)
+                self.assertIn("## Simplified HEIR arithmetic", report)
                 self.assertEqual(
                     {contract["kernel_id"] for contract in summary["kernel_contracts"]},
                     set(task.kernel_ids),
