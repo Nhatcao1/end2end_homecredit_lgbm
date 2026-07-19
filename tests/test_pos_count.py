@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 from code.heir.common import read_csv
-from code.heir.workloads.pos_count import prepare_pos_count
+from code.heir.workloads.pos_cash.pos_count import prepare_pos_count
 
 
 def write_rows(path: Path, fields: list[str], rows: list[dict[str, object]]) -> None:

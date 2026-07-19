@@ -144,13 +144,13 @@ HEIR should be treated as a compiler for fixed numerical computations over encry
 | Notebook operation | HEIR suitability | Recommended approach |
 |---|---:|---|
 | CSV reading | Not suitable | Read data before encryption |
-| Arbitrary missing-value detection | Low | Clean and encode missingness on the trusted client |
-| Sentinel replacement | Low | Replace abnormal values before encryption |
-| String factorization | Not suitable | Convert categories into numerical representations before encryption |
-| One-hot encoding | Not suitable inside HE | Trusted client supplies numeric one-hot vectors or category masks |
+| Arbitrary missing-value detection | Client only; no HEIR workload | Clean/impute locally and optionally include a prepared missing-indicator feature |
+| Sentinel replacement | Client only; no HEIR workload | Replace abnormal values before encryption |
+| String factorization | Client only; no HEIR workload | Convert categories into numerical representations before encryption |
+| One-hot encoding | Client only; no HEIR workload | Trusted client supplies numeric one-hot vectors or category masks |
 | Addition and subtraction | High | Direct encrypted arithmetic |
 | Multiplication | High | Ciphertext-ciphertext or ciphertext-plaintext multiplication |
-| Ratio features | Medium to low | Compute client-side, multiply by a plaintext reciprocal or use polynomial approximation |
+| Ratio features | Client only for V1 | Compute on the trusted client before encrypting the final numeric feature |
 | Count | High | Sum encrypted binary masks |
 | Sum | High | Packed additions and rotations |
 | Mean | High | Compute encrypted sum and count, then divide after authorized decryption |
@@ -159,10 +159,10 @@ HEIR should be treated as a compiler for fixed numerical computations over encry
 | Category default rate | High | Compute masked count and masked target sum |
 | Active/closed aggregation | High with masks | Trusted client provides active and closed masks |
 | Approved/refused aggregation | High with masks | Trusted client provides approved and refused masks |
-| Minimum and maximum | Low under CKKS | Require comparisons, polynomial approximation or Boolean HE |
-| `nunique` | Very low | Compute before encryption or use a set/PSI protocol |
-| Arbitrary `groupby` | Limited | Pre-group data or provide fixed encrypted group masks |
-| DataFrame joins | Not directly suitable | Join before encryption or use PSI/private matching |
+| Minimum and maximum | Excluded V1 | Require comparisons or approximation and will not receive an initial CKKS workload |
+| `nunique` | Excluded V1 | Compute before encryption; do not implement as an initial CKKS workload |
+| Arbitrary `groupby` | Client only | Establish row grouping before encryption, then run selected fixed arithmetic kernels |
+| DataFrame joins | Client only | Join and align rows before encryption |
 | KFold splitting | Little HE benefit | Perform outside HE |
 | LightGBM training | Not practical | Train in plaintext or a trusted environment |
 | LightGBM inference | Possible but complex | Requires encrypted comparisons and oblivious tree traversal |

@@ -1,4 +1,4 @@
-"""Prepare the exact POS_COUNT feature as anonymous fixed-shape tensors."""
+"""Prepare the `pos_cash()` POS_COUNT feature as anonymous fixed-shape tensors."""
 
 from __future__ import annotations
 

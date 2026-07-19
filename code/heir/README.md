@@ -1,7 +1,19 @@
 # HEIR benchmark code
 
-The first workload reconstructs the original `POS_COUNT` feature with an
-anonymous padded history mask and a HEIR-generated CKKS dot product.
+Workloads are organized under the original functions from
+`lightgbm_with_simple_features.py`. Each function package contains only the
+sub-operations selected for HEIR; client-only and excluded operations are
+tracked in `docs/HEIR_BENCHMARK_CRITERIA.md` without placeholder code.
+
+The first workload sits under `workloads/pos_cash/` and reconstructs the
+original `POS_COUNT` feature with an anonymous padded history mask and a
+HEIR-generated CKKS dot product.
+
+```text
+workloads/
+└── pos_cash/
+    └── pos_count.py
+```
 
 Prepare the tensors and Markdown report without claiming HE execution:
 

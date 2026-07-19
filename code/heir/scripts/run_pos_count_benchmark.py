@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from code.heir.common import path_size, read_csv, write_csv, write_json
 from code.heir.report import write_pos_count_report
-from code.heir.workloads.pos_count import prepare_pos_count
+from code.heir.workloads.pos_cash.pos_count import prepare_pos_count
 
 
 def parse_args() -> argparse.Namespace:
