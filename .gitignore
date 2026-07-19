@@ -11,10 +11,12 @@ venv/
 .env.*
 
 # Home Credit source data and generated datasets
-/data/home_credit/*
+# Ignore every data artifact regardless of which subdirectory receives it.
+/data/**
+!/data/home_credit/
 !/data/home_credit/.gitkeep
 !/data/home_credit/README.md
-/data/prepared/*
+!/data/prepared/
 !/data/prepared/.gitkeep
 
 # HE/HEIR secrets and generated payloads
@@ -43,4 +45,3 @@ venv/
 
 # Obsolete notebook retained locally only
 /notebooks/model-tuning-results-random-vs-bayesian-opt.ipynb
-
