@@ -156,7 +156,7 @@ HEIR should be treated as a compiler for fixed numerical computations over encry
 | Mean | High | Compute encrypted sum and count, then divide after authorized decryption |
 | Variance | High | Compute count, sum and sum of squares |
 | Category count | High | Sum an encoded category mask |
-| Category default rate | High | Compute masked count and masked target sum |
+| Category default rate | Not present in this source pipeline | No active workload; this belongs to a separate encrypted-EDA use case |
 | Active/closed aggregation | High with masks | Trusted client provides active and closed masks |
 | Approved/refused aggregation | High with masks | Trusted client provides approved and refused masks |
 | Minimum and maximum | Excluded V1 | Require comparisons or approximation and will not receive an initial CKKS workload |
@@ -172,9 +172,14 @@ HEIR should be treated as a compiler for fixed numerical computations over encry
 
 ---
 
-## 6. Strong HEIR Candidates
+## 6. Additional HEIR Candidates Outside Source Parity
 
-### 6.1 Encrypted Exploratory Data Analysis
+The EDA and correlation examples in sections 6.1 and 6.2 do not exist in
+`lightgbm_with_simple_features.py`. They illustrate other possible HE use
+cases, but they are excluded from the active implementation plan. Sections 6.3
+and 6.4 describe aggregate patterns that do exist in the source pipeline.
+
+### 6.1 Encrypted Exploratory Data Analysis — Not an Active Workload
 
 The following EDA statistics are strong HE candidates:
 
@@ -213,7 +218,7 @@ The encrypting/client side must provide the encoded category mask because the HE
 
 ---
 
-### 6.2 Encrypted Correlation Statistics
+### 6.2 Encrypted Correlation Statistics — Not an Active Workload
 
 Instead of calculating the final correlation coefficient entirely under HE, the service can compute sufficient statistics:
 
@@ -449,17 +454,17 @@ This is technically possible but should be treated as a later research experimen
 
 ---
 
-## 10. Recommended HE-Compatible Scoring Model
+## 10. Non-Source Scoring Alternative — Not in the Active Plan
 
-Instead of deploying the original LightGBM model first, use a simpler model:
+A simpler model such as the following would be more compatible with CKKS:
 
 ```text
 z = b + w1*x1 + w2*x2 + ... + wm*xm
 ```
 
-This can be implemented as an encrypted dot product.
+It could be implemented as an encrypted dot product.
 
-Optionally, apply a low-degree polynomial approximation of the sigmoid function:
+It could also use a low-degree polynomial approximation of the sigmoid function:
 
 ```text
 risk_score = P(z)
@@ -475,7 +480,7 @@ Encrypted feature vector
         -> Authorized decryption
 ```
 
-This model is much more compatible with CKKS because it primarily uses:
+Such a model would be compatible with CKKS because it primarily uses:
 
 - Addition.
 - Multiplication.
@@ -483,20 +488,23 @@ This model is much more compatible with CKKS because it primarily uses:
 - Summation.
 - Low-degree polynomial evaluation.
 
+However, neither a linear model nor polynomial scoring exists in
+`lightgbm_with_simple_features.py`. They are not part of the source-parity
+implementation plan and should not be coded unless separately approved as a
+new model experiment.
+
 ---
 
-## 11. Recommended HE Reconstruction of the Notebook
+## 11. Source-Parity HE Reconstruction of the Notebook
 
 | HE task | Scope | Main output |
 |---|---|---|
-| Task 1 — Plaintext baseline | Run the original pipeline and record feature values, runtime and AUC | Reference results |
-| Task 2 — Encrypted EDA | Count, sum, mean, variance, target rate and group statistics | Encrypted aggregate results |
-| Task 3 — Encrypted masked aggregation | Active/closed bureau and approved/refused previous applications | Segmented customer-history features |
-| Task 4 — Encrypted numeric feature engineering | Differences, weighted sums and selected multiplication features | Encrypted derived features |
-| Task 5 — Customer-level encrypted feature vector | Select a small HE-compatible feature subset | Packed feature vector |
-| Task 6 — Plaintext model selection | Compare logistic regression, scorecard and LightGBM | Selected model for deployment |
-| Task 7 — HE-compatible scoring | Implement linear or polynomial scoring in HEIR | Encrypted risk score |
-| Task 8 — Accuracy and performance evaluation | Compare plaintext and HE outputs | Error, latency and ciphertext metrics |
+| Task 1 — Function plaintext references | Reproduce the existing outputs of each original feature function | Reference feature values |
+| Task 2 — Exact count and sum kernels | Reproduce source `size`, count, `sum`, and filtered sums | Encrypted aggregate features |
+| Task 3 — Moment sufficient statistics | Reproduce source `mean` and `var` using count, sum, and sum of squares | Encrypted sufficient statistics; final division after decryption |
+| Task 4 — `PAYMENT_DIFF` kernel | Reproduce the source installment subtraction and its supported aggregates | Encrypted payment-difference features |
+| Task 5 — Function coverage reports | Report reproduced, client-only, and excluded outputs for every source function | Function-level Markdown reports |
+| Task 6 — Accuracy and performance evaluation | Compare plaintext and decrypted HE outputs | Error, latency, padding, and artifact metrics |
 
 ---
 
@@ -506,12 +514,12 @@ This model is much more compatible with CKKS because it primarily uses:
 flowchart LR
     A["Trusted client<br/>clean, encode, join"] --> B["Numeric vectors<br/>values and masks"]
     B --> C["HE Client SDK<br/>encode and encrypt"]
-    C --> D["HEIR aggregate kernels<br/>count, sum, mean, variance"]
-    D --> E["Encrypted selected features"]
-    E --> F["HEIR scoring kernel<br/>linear or polynomial"]
-    F --> G["Encrypted risk score"]
-    G --> H["Authorized decrypt"]
-    H --> I["Risk decision or report"]
+    C --> D["HEIR source-derived kernels<br/>count, sum, moments, PAYMENT_DIFF"]
+    D --> E["Encrypted supported feature outputs"]
+    E --> F["Authorized decrypt"]
+    F --> G["Finish mean/variance math"]
+    G --> H["Compare with original function outputs"]
+    H --> I["Original LightGBM remains outside HE"]
 ```
 
 The recommended division of responsibility is:
@@ -530,14 +538,15 @@ The recommended division of responsibility is:
 - Evaluate fixed arithmetic kernels.
 - Compute encrypted aggregates.
 - Compute masked aggregates.
-- Produce selected encrypted features.
-- Evaluate a linear or polynomial risk score.
+- Compute sufficient statistics for source mean and variance operations.
+- Compute the source `PAYMENT_DIFF` arithmetic and supported aggregates.
 
 ### Authorized result side
 
-- Decrypt aggregate results or risk scores.
+- Decrypt supported aggregate results.
 - Perform final divisions and square roots when necessary.
-- Generate reports, dashboards or credit decisions.
+- Compare with the original feature-function outputs.
+- Run the original LightGBM workflow outside the HE runtime when required.
 
 ---
 
@@ -545,7 +554,7 @@ The recommended division of responsibility is:
 
 | Pipeline stage | Present in notebook? | HEIR suitability |
 |---|---:|---:|
-| Exploratory data analysis | Almost absent | Selected aggregate EDA is highly suitable |
+| Exploratory data analysis | Almost absent | No active workload because it is not part of source parity |
 | Data cleaning | Present | Mostly trusted-client side |
 | Categorical encoding | Present | Trusted-client side |
 | Feature engineering | Extensive | Arithmetic and masked aggregations are suitable |
@@ -553,7 +562,7 @@ The recommended division of responsibility is:
 | Model selection | Absent | Normally plaintext |
 | LightGBM training | Present | Not practical under HE |
 | LightGBM inference | Present | Possible but complex and expensive |
-| Linear/polynomial scoring | Not present | Best initial HEIR modeling target |
+| Linear/polynomial scoring | Not present | Non-source idea; excluded from the active implementation plan |
 | Model evaluation | ROC-AUC present | Most evaluation should remain outside HE |
 
 ---
@@ -566,13 +575,11 @@ The notebook should be described as:
 
 For HEIR, the most reusable parts are:
 
-- Encrypted EDA aggregates.
 - Count, sum, mean and variance.
 - Masked category and subgroup statistics.
 - Active/closed credit aggregates.
 - Approved/refused application aggregates.
 - Selected arithmetic feature transformations.
-- Linear or polynomial encrypted risk scoring.
 
 The following parts should remain outside the HE runtime:
 
@@ -585,4 +592,4 @@ The following parts should remain outside the HE runtime:
 
 The recommended prototype is therefore:
 
-> Reuse the notebook's aggregate feature-engineering logic, express filters as client-provided numeric masks, compute selected statistics using HEIR, and replace encrypted LightGBM with a compact linear or polynomial credit-risk scoring kernel.
+> Reproduce only arithmetic operations that exist in the original feature functions, using reusable HEIR CKKS kernels for count, sum, masked sum, moment sufficient statistics and `PAYMENT_DIFF`; keep the original LightGBM code outside the HE runtime.
