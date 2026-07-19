@@ -452,6 +452,44 @@ Possible approaches include:
 
 This is technically possible but should be treated as a later research experiment rather than the first HEIR prototype.
 
+### 9.3 HEIR Implementation Decision
+
+HEIR can lower standard MLIR arithmetic to CKKS and emit OpenFHE C++, and it
+includes passes for data-oblivious control flow, comparison-to-sign rewriting,
+and polynomial approximation. These capabilities make a small fixed-tree
+experiment possible. They do not provide a direct importer or encrypted
+runtime for a trained `LGBMClassifier`.
+
+Relevant official HEIR capabilities:
+
+- [HEIR pipelines](https://heir.dev/docs/pipelines/) document CKKS lowering,
+  OpenFHE emission, data-oblivious transformation, and polynomial approximation.
+- [HEIR passes](https://heir.dev/docs/passes/) document comparison-to-sign
+  rewriting and CKKS parameter/ciphertext management.
+- [HEIR getting started](https://heir.dev/docs/getting_started/) notes that
+  normal C/C++ input-language support remains experimental; the stable entry
+  path is explicit MLIR.
+- [HEIR supported backends](https://github.com/google/heir#supported-backends-and-schemes)
+  show CKKS with OpenFHE and CGGI with TFHE-oriented backends as separate paths.
+
+Therefore a HEIR LightGBM inference experiment requires custom code to:
+
+1. Train LightGBM in plaintext and export every tree, threshold, child index,
+   default direction, and leaf value.
+2. Convert the fixed model into MLIR.
+3. Replace secret-dependent branches with oblivious comparison and selection.
+4. Evaluate all retained paths and sum tree outputs.
+5. Validate approximation error near thresholds and benchmark multiplicative
+   depth, bootstrapping, latency, and artifact size.
+
+The source configuration allows up to 10,000 estimators with maximum depth 8.
+Even when early stopping reduces the final tree count, oblivious evaluation of
+the full ensemble would be very expensive. The active decision is:
+
+> Keep full LightGBM training and inference outside V1. Permit a special
+> non-source feasibility benchmark using 1-3 shallow exported trees. Do not
+> describe that experiment as full encrypted LightGBM.
+
 ---
 
 ## 10. Non-Source Scoring Alternative — Not in the Active Plan
@@ -489,9 +527,8 @@ Such a model would be compatible with CKKS because it primarily uses:
 - Low-degree polynomial evaluation.
 
 However, neither a linear model nor polynomial scoring exists in
-`lightgbm_with_simple_features.py`. They are not part of the source-parity
-implementation plan and should not be coded unless separately approved as a
-new model experiment.
+`lightgbm_with_simple_features.py`. They belong to the clearly labeled special
+non-source experiment lane and do not count toward source-parity completion.
 
 ---
 
@@ -562,7 +599,7 @@ The recommended division of responsibility is:
 | Model selection | Absent | Normally plaintext |
 | LightGBM training | Present | Not practical under HE |
 | LightGBM inference | Present | Possible but complex and expensive |
-| Linear/polynomial scoring | Not present | Non-source idea; excluded from the active implementation plan |
+| Linear/polynomial scoring | Not present | Retained only as special non-source experiments |
 | Model evaluation | ROC-AUC present | Most evaluation should remain outside HE |
 
 ---

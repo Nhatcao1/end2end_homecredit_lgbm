@@ -171,12 +171,23 @@ missing-count HEIR workload will be implemented here.
 - Encrypted division merely to reproduce a value the client can prepare before
   encryption.
 
-## Non-source ideas — not in the implementation plan
+## Special non-source experiment lane
 
-Linear scoring, logistic regression, sigmoid approximation, and polynomial
-scoring do not exist in `lightgbm_with_simple_features.py`. They were considered
-as possible HE-friendly replacements for LightGBM, but they are not source
-parity work and will not be coded under this plan.
+These experiments do not exist in `lightgbm_with_simple_features.py`. They are
+kept because they help compare practical HE modeling options, but they must be
+labeled `Special / non-source` in code, reports, and result summaries. They do
+not count toward source-parity coverage.
+
+| Special ID | Experiment | Purpose | Boundary/status |
+|---|---|---|---|
+| S01 | `linear_score_ct_pt` | Measure a CKKS-friendly weighted score over encrypted features | Special non-source benchmark; model must be trained or defined separately |
+| S02 | `polynomial_score` | Measure a low-degree transformation of S01 output | Special non-source benchmark; not LightGBM or sigmoid-exact |
+| S03 | `lightgbm_tree_inference` | Test whether a tiny exported LightGBM tree ensemble can be evaluated obliviously | Feasibility research only; not part of V1 or source-parity acceptance |
+
+S03 must not claim direct LightGBM support. It requires plaintext training,
+model export, fixed-tree MLIR generation, encrypted comparison/selection, and
+oblivious evaluation of every retained path. Start with 1-3 shallow trees, not
+the source configuration of up to 10,000 estimators.
 
 ## Implementation order
 
@@ -188,3 +199,10 @@ parity work and will not be coded under this plan.
 5. Implement K03 and benchmark `installments_payments()/PAYMENT_DIFF`.
 6. Produce a source-parity coverage report showing reproduced, client-only, and
    excluded outputs for every original function.
+
+Special experiments run independently after the active source-derived kernels:
+
+1. S01 linear score.
+2. S02 polynomial score only if S01 requires an encrypted transformation.
+3. S03 tiny LightGBM inference feasibility trial; stop before a full-model
+   benchmark unless the tiny-tree accuracy and latency gates are acceptable.

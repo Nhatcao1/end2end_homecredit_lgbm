@@ -11,6 +11,10 @@ client-only and excluded operations are tracked in
 `docs/HEIR_BENCHMARK_CRITERIA.md` without placeholder code. Different function
 reports may reference the same generated kernel source and SHA256 hash.
 
+Linear, polynomial, and tiny exported-tree inference are kept in a separate
+`Special / non-source` experiment lane. They must not be presented as original
+pipeline operations or counted toward function-parity coverage.
+
 The first workload sits under `workloads/pos_cash/` and reconstructs the
 original `POS_COUNT` feature with an anonymous padded history mask and a
 HEIR-generated CKKS dot product.
