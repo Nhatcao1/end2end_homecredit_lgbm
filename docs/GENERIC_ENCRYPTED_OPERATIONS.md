@@ -92,6 +92,34 @@ FHEW comparison experiment.
 
 ## First ciphertext proof: `PAYMENT_PERC` and `PAYMENT_DIFF`
 
+### Required precision probe: `PAYMENT_PERC` before aggregation
+
+`PAYMENT_PERC` is a reciprocal approximation, so it must be validated alone
+before it is passed to any aggregation kernel. The dedicated probe requests a
+CKKS multiplicative-depth budget explicitly and records the parameter calls
+emitted by HEIR/OpenFHE in `result.json`. It deliberately does not run sum.
+
+```bash
+python3 code/heir/scripts/run_payment_perc_depth_probe.py \
+  --output-dir benchmark_runs/payment_perc_depth12_01 \
+  --overwrite \
+  --vector-size 8 \
+  --ckks-mul-depth 12 \
+  --openfhe-dir /usr/local/lib/OpenFHE
+```
+
+The client only prepares a safe denominator and encrypted validity flag:
+missing, non-positive, or out-of-range installment values are replaced with the
+public scale before encryption, and the encrypted result is masked afterward.
+It never computes the ratio client-side. The current public contract is
+`AMT_INSTALMENT / 1000` in `[0.5, 1.0]`; change and validate that contract for
+real data before using this kernel.
+
+Only after `comparison.csv` shows acceptable relative error should the result
+ciphertext be passed into encrypted sum. Do not introduce bootstrapping before
+this isolated depth-12 probe has failed and its generated parameters have been
+reviewed.
+
 Use this focused command to encrypt only `AMT_PAYMENT` and
 `AMT_INSTALMENT`, calculate both requested features, and pass each encrypted
 feature vector to a separate HEIR-generated `sum` kernel. Decryption happens
