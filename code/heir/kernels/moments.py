@@ -43,16 +43,21 @@ def moments_reference(
 
 
 def moments_mlir(vector_size: int) -> str:
-    """Build fixed-shape MLIR; mean and variance remain trusted post-processing."""
+    """Build fixed-shape encrypted count, sum, and squared-sum reduction."""
     if vector_size <= 0:
         raise ValueError("vector_size must be positive")
     return f"""func.func @moments(
     %values: tensor<{vector_size}xf64> {{secret.secret}},
     %mask: tensor<{vector_size}xf64> {{secret.secret}}
 ) -> (f64, f64, f64) {{
-  %zero = arith.constant 0.0 : f64
-  %count_result, %sum_result, %square_result = affine.for %i = 0 to {vector_size}
-      iter_args(%count = %zero, %sum = %zero, %sum_squares = %zero)
+  %zero_index = arith.constant 0 : index
+  %first_value = tensor.extract %values[%zero_index] : tensor<{vector_size}xf64>
+  %first_weight = tensor.extract %mask[%zero_index] : tensor<{vector_size}xf64>
+  %first_sum = arith.mulf %first_weight, %first_value : f64
+  %first_square = arith.mulf %first_value, %first_value : f64
+  %first_weighted_square = arith.mulf %first_weight, %first_square : f64
+  %count_result, %sum_result, %square_result = affine.for %i = 1 to {vector_size}
+      iter_args(%count = %first_weight, %sum = %first_sum, %sum_squares = %first_weighted_square)
       -> (f64, f64, f64) {{
     %value = tensor.extract %values[%i] : tensor<{vector_size}xf64>
     %weight = tensor.extract %mask[%i] : tensor<{vector_size}xf64>

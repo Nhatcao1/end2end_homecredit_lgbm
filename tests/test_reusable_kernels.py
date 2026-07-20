@@ -13,6 +13,7 @@ from code.heir.kernels.difference_moments import (
 from code.heir.kernels.dot_product import dot_product_mlir, dot_product_reference
 from code.heir.kernels.linear_score import linear_score_mlir, linear_score_reference
 from code.heir.kernels.moments import moments_mlir, moments_reference
+from code.heir.kernels.statistics import mean_sample_variance_mlir
 from code.heir.kernels.polynomial_score import (
     polynomial_score_mlir,
     polynomial_score_reference,
@@ -53,6 +54,10 @@ class ReusableKernelReferenceTest(unittest.TestCase):
         self.assertEqual(dot_product_mlir(4).count("{secret.secret}"), 2)
         self.assertEqual(moments_mlir(4).count("{secret.secret}"), 2)
         self.assertEqual(difference_moments_mlir(4).count("{secret.secret}"), 3)
+        finalization = mean_sample_variance_mlir()
+        self.assertIn("@mean_sample_variance", finalization)
+        self.assertIn("%count_reciprocal", finalization)
+        self.assertIn("%sample_variance", finalization)
 
         linear = linear_score_mlir(4)
         self.assertIn("@linear_score_ct_pt", linear)

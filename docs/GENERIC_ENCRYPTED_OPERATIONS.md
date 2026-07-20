@@ -160,6 +160,28 @@ that feature. The generated feature and sum contexts both use the explicit
 depth requested by `--ckks-mul-depth`; the script records the inferred and
 requested values for each generated kernel in `result.json`.
 
+### First encrypted mean and variance chain
+
+The next focused chain uses exact `PAYMENT_DIFF` so statistics infrastructure
+can be checked independently of reciprocal-feature noise. One encrypted feature
+vector is consumed once to produce encrypted `count`, `sum`, and `sum_squares`.
+The finalizer consumes those encrypted scalars to produce encrypted mean and
+sample variance. For the tiny review data its public valid-count range is
+`[2, 4]`, and it uses a depth-24 CKKS context; no bootstrap is used.
+
+```bash
+python3 code/heir/scripts/run_payment_diff_moments_demo.py \
+  --output-dir benchmark_runs/payment_diff_moments_01 \
+  --overwrite \
+  --vector-size 8 \
+  --ckks-mul-depth 24 \
+  --openfhe-dir /usr/local/lib/OpenFHE
+```
+
+Review `feature_comparison.csv` and `statistics_comparison.csv`. Ciphertexts
+for the source feature, count, sum, squared sum, mean, and variance remain in
+`ciphertexts/`.
+
 ## Timing and accuracy
 
 Every benchmark records four independent durations:
