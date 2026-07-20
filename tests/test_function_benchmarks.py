@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import csv
+import json
 import tempfile
 import unittest
 from pathlib import Path
 
 from code.heir.common import read_csv
 from code.heir.function_benchmark import prepare_complete_function
+from code.heir.join_benchmark import run_join_benchmarks
 from code.heir.report import write_complete_function_report
 from code.heir.workloads.catalog import COMPONENTS, FUNCTIONS, get_function
 
@@ -301,6 +303,81 @@ class FunctionBenchmarkTest(unittest.TestCase):
                 ),
                 450.0,
             )
+
+    def test_individual_and_end_to_end_join_benchmarks(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            data, application = self.make_data(root)
+            function_runs: list[tuple[object, Path]] = []
+            for function in FUNCTIONS:
+                run_dir = root / "functions" / function.function_name / "complete_01"
+                prepare_complete_function(function, data, application, run_dir, 0, 0)
+                function_runs.append((function, run_dir))
+
+            output_dir = root / "joins" / "complete_01"
+            run_summary = run_join_benchmarks(function_runs, output_dir)
+
+            self.assertEqual(run_summary["status"], "join_benchmarks_completed")
+            self.assertFalse(run_summary["psi_timing_included"])
+            self.assertEqual(len(run_summary["individual"]), 5)
+            for function in FUNCTIONS:
+                individual_dir = output_dir / "individual" / function.function_name
+                summary = json.loads(
+                    (individual_dir / "benchmark_summary.json").read_text(
+                        encoding="utf-8"
+                    )
+                )
+                self.assertEqual(summary["status"], "prepared_join_contract_only")
+                self.assertEqual(summary["he_operation_counts"]["rotations"], 0)
+                self.assertEqual(len(summary["function_bundles"]), 1)
+                self.assertTrue((individual_dir / "benchmark_report.md").is_file())
+
+            end_summary = json.loads(
+                (output_dir / "end_to_end" / "benchmark_summary.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(len(end_summary["function_bundles"]), 5)
+            self.assertEqual(end_summary["compatibility"]["applicant_count"], 3)
+            self.assertEqual(
+                end_summary["audit_reference_rows"],
+                sum(
+                    json.loads(
+                        (
+                            output_dir
+                            / "individual"
+                            / function.function_name
+                            / "benchmark_summary.json"
+                        ).read_text(encoding="utf-8")
+                    )["audit_reference_rows"]
+                    for function in FUNCTIONS
+                ),
+            )
+            report = (output_dir / "end_to_end" / "benchmark_report.md").read_text(
+                encoding="utf-8"
+            )
+            self.assertIn("HE rotations/multiplications/additions used for join | 0 / 0 / 0", report)
+            self.assertIn("PSI execution is outside this benchmark", report)
+
+    def test_end_to_end_join_rejects_different_applicant_layouts(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            data, application = self.make_data(root)
+            function_runs = []
+            for function in FUNCTIONS:
+                run_dir = root / "functions" / function.function_name / "bad_layout"
+                prepare_complete_function(function, data, application, run_dir, 0, 0)
+                function_runs.append((function, run_dir))
+            changed_layout = (
+                function_runs[-1][1] / "client_private" / "applicant_layout.json"
+            )
+            value = json.loads(changed_layout.read_text(encoding="utf-8"))
+            value["private_applicant_order_sha256"] = "different-layout"
+            changed_layout.write_text(json.dumps(value), encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "different app_index layouts"):
+                run_join_benchmarks(function_runs, root / "joins")
+            self.assertFalse((root / "joins").exists())
 
 
 if __name__ == "__main__":

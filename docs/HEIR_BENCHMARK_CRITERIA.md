@@ -252,6 +252,24 @@ The optional SecretFlow PSI integration is tracked separately in
 `PSI_BENCHMARK_CRITERIA.md`. PSI aligns private identifiers before CKKS; it is
 not an HEIR arithmetic kernel and does not count as HEIR-generated execution.
 
+## Pre-aligned join benchmarks
+
+The source joins every applicant-level feature table back to the application
+table on `SK_ID_CURR`. PSI replaces repeated identifier comparison with one
+saved anonymous `app_index` layout. Each function must produce its feature
+bundle in that layout before encryption.
+
+| Join ID | Scope | Implemented measurement | HE use | Status |
+|---|---|---|---|---|
+| J01 | Individual function-to-application join | Validate one function schema/layout and assemble its zero-copy bundle index | No HE arithmetic: already aligned, depth 0 | Implemented and unit tested |
+| J02 | End-to-end join | Validate all five layouts/context contracts and assemble one five-function bundle index | No HE arithmetic: already aligned, depth 0 | Implemented and unit tested |
+| J03 | Misaligned encrypted slot permutation | Rotations plus plaintext masks to rearrange an already encrypted bundle | Special experiment only; not needed by normal pipeline | Deferred |
+
+J01 and J02 report bundle-index assembly separately from writing the plaintext
+audit reference. PSI runtime is excluded. When real ciphertext files replace
+the current staging manifests, the same join contract retains ciphertexts and
+references them without decryption.
+
 Special experiments run independently after the active source-derived kernels:
 
 1. S01 linear score.

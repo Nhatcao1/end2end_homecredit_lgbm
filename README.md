@@ -38,6 +38,21 @@ tensor manifest, and bundle-ready schema. Generated CKKS/OpenFHE execution and
 ciphertext serialization remain pending and must not be inferred from a
 `prepared_only` / `plaintext_staging_only` report.
 
+After running all five functions with one common run name, benchmark their
+individual application joins and combined end-to-end bundle assembly with:
+
+```bash
+python3 code/heir/scripts/run_join_benchmarks.py \
+  --function-run-name full_01 \
+  --run-name full_01
+```
+
+This join assumes the function bundles already share one PSI-derived
+`app_index` layout. It therefore uses zero HE arithmetic and keeps PSI timing
+outside the join report. Reports are written under
+`benchmark_runs/joins/full_01/individual/` and
+`benchmark_runs/joins/full_01/end_to_end/`.
+
 The function registry and current acceptance status are maintained in
 `docs/HEIR_BENCHMARK_CRITERIA.md`.
 
