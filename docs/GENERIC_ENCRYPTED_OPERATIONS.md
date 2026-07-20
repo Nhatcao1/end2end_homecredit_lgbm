@@ -75,6 +75,7 @@ evaluates, decrypts for audit, and writes one result table:
 ```bash
 python3 code/heir/scripts/run_quick_installments_heir_demo.py \
   --output-dir benchmark_runs/quick_installments_heir_01 \
+  --overwrite \
   --vector-size 8 \
   --openfhe-dir /usr/local/lib/OpenFHE
 ```

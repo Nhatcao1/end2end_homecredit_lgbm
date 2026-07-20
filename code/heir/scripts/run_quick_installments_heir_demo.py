@@ -210,6 +210,11 @@ def _write_report(path: Path, rows: list[dict[str, Any]], result: dict[str, Any]
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="remove and recreate exactly --output-dir (useful after a failed demo run)",
+    )
     parser.add_argument("--vector-size", type=int, default=8)
     parser.add_argument("--heir-opt", default="heir-opt")
     parser.add_argument("--heir-translate", default="heir-translate")
@@ -219,7 +224,12 @@ def main() -> None:
         raise ValueError("vector size must fit the three demo rows")
     root = args.output_dir
     if root.exists():
-        raise FileExistsError(f"refusing to overwrite: {root}")
+        if not args.overwrite:
+            raise FileExistsError(f"refusing to overwrite: {root}; rerun with --overwrite")
+        resolved = root.resolve()
+        if resolved == Path.cwd().resolve() or resolved == resolved.parent:
+            raise ValueError("refusing to remove the current directory or a filesystem root")
+        shutil.rmtree(resolved)
     root.mkdir(parents=True)
     valid = [1.0] * len(DEMO_ROWS) + [0.0] * (args.vector_size - len(DEMO_ROWS))
     inputs = {
