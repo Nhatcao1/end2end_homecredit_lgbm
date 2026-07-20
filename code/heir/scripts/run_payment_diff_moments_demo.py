@@ -79,9 +79,11 @@ int main(int argc, char** argv) {
     require(Serial::SerializeToFile(argv[4], encryptedFeature, SerType::BINARY), "cannot save feature ciphertext");
     auto featureAudit = encrypted_subtract__decrypt__result0(context, encryptedFeature, keys.secretKey);
     auto encryptedMoments = moments(context, encryptedFeature, encryptedValid);
-    auto encryptedCount = std::get<0>(encryptedMoments); auto encryptedSum = std::get<1>(encryptedMoments); auto encryptedSquares = std::get<2>(encryptedMoments);
+    // HEIR lowers multiple MLIR results to a generated <entry>Struct with
+    // arg0, arg1, ... fields; it is not a std::tuple.
+    auto encryptedCount = encryptedMoments.arg0; auto encryptedSum = encryptedMoments.arg1; auto encryptedSquares = encryptedMoments.arg2;
     auto encryptedFinal = mean_sample_variance(context, encryptedCount, encryptedSum, encryptedSquares);
-    auto encryptedMean = std::get<0>(encryptedFinal); auto encryptedVariance = std::get<1>(encryptedFinal);
+    auto encryptedMean = encryptedFinal.arg0; auto encryptedVariance = encryptedFinal.arg1;
     require(Serial::SerializeToFile(argv[5], encryptedCount, SerType::BINARY), "cannot save count ciphertext");
     require(Serial::SerializeToFile(argv[6], encryptedSum, SerType::BINARY), "cannot save sum ciphertext");
     require(Serial::SerializeToFile(argv[7], encryptedSquares, SerType::BINARY), "cannot save sum-square ciphertext");
