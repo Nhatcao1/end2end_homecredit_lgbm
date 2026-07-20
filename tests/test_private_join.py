@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import re
 import json
 import tempfile
 import unittest
@@ -243,9 +244,12 @@ class PrivateJoinTest(unittest.TestCase):
                     encoding="utf-8"
                 )
             )
-            self.assertNotIn("101", public_text)
-            self.assertNotIn("102", public_text)
-            self.assertNotIn("103", public_text)
+            # Raw IDs must not occur as standalone values.  Opaque hashes and
+            # random layout IDs may coincidentally contain the same digit run.
+            for identifier in ("101", "102", "103"):
+                self.assertIsNone(
+                    re.search(rf"(?<![0-9A-Za-z]){identifier}(?![0-9A-Za-z])", public_text)
+                )
 
             data = root / "data"
             write_table(

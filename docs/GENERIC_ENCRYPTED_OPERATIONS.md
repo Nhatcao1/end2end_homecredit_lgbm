@@ -66,6 +66,25 @@ python3 code/heir/scripts/run_representative_benchmarks.py \
   --run-name payment_diff_8192_01
 ```
 
+## Tiny review example: `PAYMENT_PERC`, `DPD`, and `DBD`
+
+For an inspectable three-row example—not a benchmark—emit both expected
+notebook-style plaintext outputs and the proposed HEIR MLIR:
+
+```bash
+python3 code/heir/examples/quick_installments_features.py \
+  --output-dir benchmark_runs/quick_installments_features \
+  --vector-size 8
+```
+
+Read `expected_plaintext.json` first. `payment_perc_newton.mlir` shows a
+two-step reciprocal approximation entirely after encryption. The public scale
+is a representation/range policy; it does not calculate a feature client-side.
+`positive_difference_smoothstep.mlir` is one generic ordered operation:
+use entry-payment minus installment for DPD, and reverse the inputs for DBD.
+It is approximate near zero. Exact clipping is still the separate OpenFHE
+CKKS-to-FHEW comparison experiment.
+
 ## Timing and accuracy
 
 Every benchmark records four independent durations:
