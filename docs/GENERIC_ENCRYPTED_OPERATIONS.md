@@ -112,6 +112,14 @@ contains the encrypted feature `result.ct` plus encrypted
 decryption before aggregation. `PAYMENT_PERC` uses an approximate encrypted
 reciprocal; `PAYMENT_DIFF` is native CKKS subtraction.
 
+For this HEIR build, an encrypted `tensor<8xf64>` is emitted in C++ as
+`std::vector<CiphertextT>`, not one packed `CiphertextT`. Therefore
+`result.ct` is a serialized ciphertext-vector container. The runner must not
+reinterpret that container as one OpenFHE ciphertext. Feature calculation and
+all four returned statistics are consequently expressed in one HEIR MLIR
+graph; the runner only encrypts arguments, invokes the generated function,
+serializes its five encrypted results, and audit-decrypts them.
+
 The tiny demo treats its three-row group count as public grouping metadata, so
 encrypted mean and Pandas sample variance multiply encrypted sums by public
 `1/count` and `1/(count-1)`. A later private-cardinality experiment would need

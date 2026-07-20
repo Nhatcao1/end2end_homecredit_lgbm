@@ -7,6 +7,10 @@ from code.heir.examples.quick_installments_features import (
     payment_perc_newton_mlir,
     positive_difference_mlir,
 )
+from code.heir.examples.payment_aggregate_kernels import (
+    payment_diff_aggregate_mlir,
+    payment_perc_aggregate_mlir,
+)
 from code.heir.scripts.run_payment_features_ciphertext_demo import (
     RUNNER,
     sample_statistics,
@@ -35,8 +39,11 @@ class QuickInstallmentsFeaturesTest(unittest.TestCase):
             sample_statistics([1.0, 2.0, 3.0]),
             {"count": 3.0, "sum": 6.0, "mean": 2.0, "var": 1.0},
         )
-        self.assertIn("context->EvalSum(encryptedMasked", RUNNER)
-        self.assertIn('aggregateDir / "var.ct"', RUNNER)
+        self.assertIn("std::get<4>(encryptedOutputs)", RUNNER)
+        self.assertIn("__decrypt__result4", RUNNER)
+        self.assertIn("SerializeToFile(argv[11], encryptedVariance", RUNNER)
+        self.assertIn("@payment_perc_aggregate", payment_perc_aggregate_mlir(8, 3))
+        self.assertIn("%variance = arith.mulf", payment_diff_aggregate_mlir(8, 3))
 
 
 if __name__ == "__main__":

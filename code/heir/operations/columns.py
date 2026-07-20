@@ -61,3 +61,25 @@ def binary_mlir(vector_size: int, operation: str) -> str:
   return %result : {tensor}
 }}
 """
+
+
+def masked_binary_mlir(vector_size: int, operation: str) -> str:
+    """Emit a binary column operation with an encrypted row/group mask."""
+    if vector_size <= 0:
+        raise ValueError("vector_size must be positive")
+    require_implemented(operation)
+    opcode = {"add": "addf", "subtract": "subf", "multiply": "mulf"}.get(operation)
+    if opcode is None:
+        raise ValueError(f"{operation} is not a binary column operation")
+    name = f"encrypted_masked_{operation}"
+    tensor = f"tensor<{vector_size}xf64>"
+    return f"""func.func @{name}(
+    %left: {tensor} {{secret.secret}},
+    %right: {tensor} {{secret.secret}},
+    %mask: {tensor} {{secret.secret}}
+) -> {tensor} {{
+  %raw = arith.{opcode} %left, %right : {tensor}
+  %result = arith.mulf %raw, %mask : {tensor}
+  return %result : {tensor}
+}}
+"""
