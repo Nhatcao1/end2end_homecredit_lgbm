@@ -136,7 +136,11 @@ def main() -> None:
     run(configure, work); run(["cmake", "--build", str(build.resolve()), "--target", "moments_runner"], work)
     ciphertexts = root / "ciphertexts"; ciphertexts.mkdir(); audit = root / "feature_audit.csv"; metrics = root / "metrics.json"
     command = [str((build / "moments_runner").resolve()), str((inputs / "due.csv").resolve()), str((inputs / "paid.csv").resolve()), str((inputs / "valid.csv").resolve()), str((ciphertexts / "payment_diff.ct").resolve()), str((ciphertexts / "count.ct").resolve()), str((ciphertexts / "sum.ct").resolve()), str((ciphertexts / "sum_squares.ct").resolve()), str((ciphertexts / "mean.ct").resolve()), str((ciphertexts / "variance.ct").resolve()), str(audit.resolve()), str(metrics.resolve())]
-    run(command, work)
+    try:
+        run(command, work)
+    except RuntimeError as error:
+        (work / "runner_failure.log").write_text(str(error) + "\n", encoding="utf-8")
+        raise
     feature_values = [float(row["value"]) for row in read_csv(audit)]; actual = json.loads(metrics.read_text())
     expected_values = [left - right for left, right in zip(due, paid)]; expected_sum = sum(expected_values); expected_mean = expected_sum / len(expected_values); expected_var = sum((value - expected_mean) ** 2 for value in expected_values) / (len(expected_values) - 1)
     rows = [{"row": index, "python": expected, "he": feature_values[index], "absolute_error": abs(expected - feature_values[index])} for index, expected in enumerate(expected_values)]

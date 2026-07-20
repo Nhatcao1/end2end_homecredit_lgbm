@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 
 from code.heir.examples.quick_installments_features import (
     expected_plaintext,
@@ -9,6 +10,7 @@ from code.heir.examples.quick_installments_features import (
 )
 from code.heir.kernels.sum import encrypted_sum_mlir
 from code.heir.scripts.run_payment_features_ciphertext_demo import RUNNER
+from code.heir.scripts.run_payment_features_ciphertext_demo import run
 
 
 class QuickInstallmentsFeaturesTest(unittest.TestCase):
@@ -54,6 +56,10 @@ class QuickInstallmentsFeaturesTest(unittest.TestCase):
         self.assertNotIn("EvalSum", RUNNER)
         self.assertNotIn("encryptedMean", RUNNER)
         self.assertNotIn("encryptedVariance", RUNNER)
+
+    def test_failed_command_reports_exit_code(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "exit code"):
+            run(["false"], Path.cwd())
 
 
 if __name__ == "__main__":

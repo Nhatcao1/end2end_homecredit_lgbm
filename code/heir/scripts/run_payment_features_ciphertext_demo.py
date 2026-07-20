@@ -165,7 +165,11 @@ def run(
         completed = subprocess.run(command, cwd=cwd, text=True, capture_output=True)
         text = completed.stdout + completed.stderr
     if completed.returncode:
-        raise RuntimeError(f"command failed: {' '.join(command)}\n{text}")
+        detail = text if text.strip() else "(process produced no stdout or stderr)"
+        raise RuntimeError(
+            f"command failed with exit code {completed.returncode}: "
+            f"{' '.join(command)}\n{detail}"
+        )
     return time.perf_counter() - started, text
 
 
