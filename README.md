@@ -53,6 +53,13 @@ outside the join report. Reports are written under
 `benchmark_runs/joins/full_01/individual/` and
 `benchmark_runs/joins/full_01/end_to_end/`.
 
+For a real sequential ciphertext-continuity trial, use the persistent DAG
+runner documented in `docs/ENCRYPTED_DAG.md`. It creates one shared CKKS
+session, runs bureau/previous/POS/installments/credit-card in separate
+processes, serializes each stage's encrypted sufficient statistics, verifies a
+fresh process can reload a ciphertext, and finalizes a zero-copy encrypted
+bundle index only after all integrity gates pass.
+
 The function registry and current acceptance status are maintained in
 `docs/HEIR_BENCHMARK_CRITERIA.md`.
 

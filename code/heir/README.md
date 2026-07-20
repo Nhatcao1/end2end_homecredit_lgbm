@@ -41,6 +41,8 @@ backends/
 └── generated_ckks.py         strict generated-source execution
 scripts/
 ├── prepare_reusable_kernels.py
+├── generate_dag_ckks_kernels.py
+├── run_dag_stage.py
 ├── run_function_benchmarks.py
 └── run_pos_count_benchmark.py
 ```
@@ -116,3 +118,12 @@ python3 code/heir/scripts/run_pos_count_benchmark.py \
 The backend rejects BGV, BFV, and BinFHE generated source. Benchmark outputs
 are written under `benchmark_runs/` and remain local because they can become
 large.
+
+## Persistent sequential DAG
+
+`dag/` adds the downstream-ready execution contract missing from the older
+one-shot runner. It uses one serialized CKKS context/key set, runs one feature
+function per process, serializes encrypted K01/K02/K03 outputs, probes
+ciphertext reload in a fresh process, and appends an integrity-checked bundle
+checkpoint. See `docs/ENCRYPTED_DAG.md` for the server commands and explicit
+scope limitations.

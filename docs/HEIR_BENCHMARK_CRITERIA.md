@@ -248,6 +248,24 @@ remaining order is:
 8. Produce a source-parity coverage report showing reproduced, client-only, and
    excluded outputs for every original function.
 
+## Persistent ciphertext DAG status
+
+| DAG ID | Criterion | Code status | Cryptographic status |
+|---|---|---|---|
+| D01 | Generate K01-K03 through HEIR CKKS/OpenFHE with one vector size | Implemented | Server execution pending |
+| D02 | Create one shared context, public key, evaluation keys, and client-private secret key | Implemented | Server execution pending |
+| D03 | Run one function process at a time and enforce predecessor completion | Implemented and unit tested | Server execution pending |
+| D04 | Serialize non-empty OpenFHE ciphertext outputs without stage decryption | Implemented for K01-K03 generated APIs | Server execution pending |
+| D05 | Start a fresh process and reload/reserialize one stage ciphertext | Implemented | Server execution pending |
+| D06 | Bind stage files to session/layout/key IDs and SHA256 completion records | Implemented and unit tested | Not cryptographic attestation |
+| D07 | Append zero-copy individual checkpoints and final five-function index | Implemented and unit tested | Server execution pending |
+| D08 | Preserve K02/K03 encrypted sufficient statistics across stages | Implemented output contract | Exact encrypted mean/variance pending |
+
+The production CLI has no mock backend. Unit tests use an internal fixture only
+to validate the DAG scheduler and integrity failures. A stage is downstream
+ready only after generated CKKS execution creates non-empty ciphertexts and a
+fresh-process reload probe succeeds.
+
 The optional SecretFlow PSI integration is tracked separately in
 `PSI_BENCHMARK_CRITERIA.md`. PSI aligns private identifiers before CKKS; it is
 not an HEIR arithmetic kernel and does not count as HEIR-generated execution.

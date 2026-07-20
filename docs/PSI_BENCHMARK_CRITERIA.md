@@ -23,7 +23,7 @@ for the ordinary single-owner Home Credit pipeline.
 | PSI10 | Generate a PSI/bridge Markdown report and manifests | Implemented and unit tested |
 | PSI11 | Record SecretFlow logs/traces and wall time | Runner implemented; server execution pending |
 | PSI11A | Bind the recorded server summary to exact PSI output hashes in the Markdown report | Implemented and unit tested |
-| PSI12 | Encrypt aligned tensors and retain ciphertext across functions | Pending HEIR backend work |
+| PSI12 | Encrypt aligned tensors and retain ciphertext across functions | Persistent DAG code implemented; server CKKS execution pending |
 | PSI13 | Production TLS and malicious-party review | Out of current benchmark scope |
 
 ## Benchmark artifacts
