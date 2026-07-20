@@ -97,9 +97,7 @@ int main(int argc, char** argv) {
     @ENCRYPT_VALID@
     const auto featureStarted = std::chrono::steady_clock::now();
     auto encryptedResult = @ENTRY@(context, @CALL_ARGUMENTS@);
-    const auto sumStarted = std::chrono::steady_clock::now();
-    auto encryptedSum = encrypted_sum(context, encryptedResult);
-    const auto auditStarted = std::chrono::steady_clock::now();
+    const auto featureAuditStarted = std::chrono::steady_clock::now();
 
     require(Serial::SerializeToFile(argv[@FIRST_CT@], encryptedFirst,
                                     SerType::BINARY),
@@ -111,12 +109,17 @@ int main(int argc, char** argv) {
     require(Serial::SerializeToFile(argv[@RESULT_CT@], encryptedResult,
                                     SerType::BINARY),
             "cannot save result ciphertext container");
-    require(Serial::SerializeToFile(argv[@SUM_CT@], encryptedSum,
-                                    SerType::BINARY),
-            "cannot save sum ciphertext");
 
     auto decrypted = @ENTRY@__decrypt__result0(
         context, encryptedResult, keys.secretKey);
+    // HEIR's generated sum may reuse ciphertext storage in place. The feature
+    // artifact and audit therefore happen before sum consumes this edge.
+    const auto sumStarted = std::chrono::steady_clock::now();
+    auto encryptedSum = encrypted_sum(context, encryptedResult);
+    const auto sumAuditStarted = std::chrono::steady_clock::now();
+    require(Serial::SerializeToFile(argv[@SUM_CT@], encryptedSum,
+                                    SerType::BINARY),
+            "cannot save sum ciphertext");
     const double decryptedSum = encrypted_sum__decrypt__result0(
         context, encryptedSum, keys.secretKey);
     const auto done = std::chrono::steady_clock::now();
@@ -130,11 +133,13 @@ int main(int argc, char** argv) {
             << "  \"encryption_seconds\": "
             << std::chrono::duration<double>(featureStarted - encryptionStarted).count()
             << ",\n  \"encrypted_feature_seconds\": "
-            << std::chrono::duration<double>(sumStarted - featureStarted).count()
+            << std::chrono::duration<double>(featureAuditStarted - featureStarted).count()
+            << ",\n  \"feature_audit_seconds\": "
+            << std::chrono::duration<double>(sumStarted - featureAuditStarted).count()
             << ",\n  \"encrypted_sum_seconds\": "
-            << std::chrono::duration<double>(auditStarted - sumStarted).count()
-            << ",\n  \"audit_seconds\": "
-            << std::chrono::duration<double>(done - auditStarted).count()
+            << std::chrono::duration<double>(sumAuditStarted - sumStarted).count()
+            << ",\n  \"sum_audit_seconds\": "
+            << std::chrono::duration<double>(done - sumAuditStarted).count()
             << ",\n  \"sum_audit\": " << std::setprecision(17) << decryptedSum
             << "\n}\n";
     return 0;

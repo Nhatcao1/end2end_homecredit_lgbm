@@ -147,6 +147,12 @@ The sum uses a balanced ciphertext-only addition tree. It deliberately avoids a
 plaintext-zero loop accumulator, so it can preserve the CKKS level of a feature
 ciphertext produced by the preceding kernel.
 
+The generated HEIR/OpenFHE sum may consume its ciphertext input in place. The
+runner therefore writes `result.ct` and performs the optional feature audit
+before passing that in-memory edge to sum. In a branching encrypted DAG, a
+feature needed by more than one downstream consumer must be materialized as a
+separate ciphertext artifact before any in-place consumer runs.
+
 This step implements only ungrouped sum. It does not attempt groupby, count,
 mean, variance, categorical means, or max. Padding contributes zero to the sum;
 the validity mask remains part of `PAYMENT_PERC` so padded rows cannot affect

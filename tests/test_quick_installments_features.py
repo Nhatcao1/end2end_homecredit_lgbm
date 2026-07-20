@@ -41,6 +41,14 @@ class QuickInstallmentsFeaturesTest(unittest.TestCase):
         self.assertIn(
             "auto encryptedSum = encrypted_sum(context, encryptedResult);", RUNNER
         )
+        self.assertLess(
+            RUNNER.index("auto decrypted = @ENTRY@__decrypt__result0"),
+            RUNNER.index("auto encryptedSum = encrypted_sum(context, encryptedResult);"),
+        )
+        self.assertLess(
+            RUNNER.index("SerializeToFile(argv[@RESULT_CT@], encryptedResult"),
+            RUNNER.index("auto encryptedSum = encrypted_sum(context, encryptedResult);"),
+        )
         self.assertIn("cannot save result ciphertext container", RUNNER)
         self.assertIn("cannot save sum ciphertext", RUNNER)
         self.assertNotIn("EvalSum", RUNNER)
