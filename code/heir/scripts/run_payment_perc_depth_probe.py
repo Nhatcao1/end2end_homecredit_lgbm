@@ -152,20 +152,38 @@ def run(command: list[str], cwd: Path, output: Path | None = None) -> tuple[floa
 def scheme_to_openfhe_option(
     *, mul_depth: int, first_mod_size: int, scaling_mod_size: int
 ) -> str:
-    """Create the documented HEIR pipeline option as one subprocess argument."""
+    """Return the portable pipeline option supported by the installed HEIR.
+
+    Some HEIR releases expose only ``entry-function`` on the
+    ``scheme-to-openfhe`` pipeline. The requested context depth is therefore
+    patched in the translated OpenFHE C++ below, where the setting is consumed.
+    """
     if mul_depth <= 0:
         raise ValueError("ckks mul depth must be positive")
-    options = ["entry-function=payment_perc_newton", f"mul-depth={mul_depth}"]
-    if first_mod_size:
-        options.append(f"first-mod-size={first_mod_size}")
-    if scaling_mod_size:
-        options.append(f"scaling-mod-size={scaling_mod_size}")
-    return "--scheme-to-openfhe=" + " ".join(options)
+    if first_mod_size or scaling_mod_size:
+        raise ValueError(
+            "this probe's installed-HEIR compatibility mode supports explicit "
+            "mul depth only; leave modulus sizes at 0"
+        )
+    return "--scheme-to-openfhe=entry-function=payment_perc_newton"
 
 
 def generated_parameter(source: str, name: str) -> int | None:
     match = re.search(rf"{re.escape(name)}\((\d+)\);", source)
     return int(match.group(1)) if match else None
+
+
+def patch_translated_mul_depth(source: str, requested_depth: int) -> tuple[str, int]:
+    """Adjust the OpenFHE context budget emitted by an older HEIR release."""
+    pattern = r"(SetMultiplicativeDepth\()\d+(\s*\);)"
+    existing = re.search(pattern, source)
+    if existing is None:
+        raise ValueError("translated HEIR C++ does not configure multiplicative depth")
+    original_depth = int(re.search(r"\d+", existing.group(0)).group(0))
+    patched, count = re.subn(pattern, rf"\g<1>{requested_depth}\g<2>", source)
+    if count != 1:
+        raise ValueError(f"expected exactly one SetMultiplicativeDepth call; found {count}")
+    return patched, original_depth
 
 
 def generate(
@@ -217,14 +235,18 @@ def generate(
         root,
         cpp,
     )
-    emitted = cpp.read_text(encoding="utf-8", errors="replace")
+    translated = cpp.read_text(encoding="utf-8", errors="replace")
+    emitted, inferred_depth = patch_translated_mul_depth(translated, mul_depth)
+    cpp.write_text(emitted, encoding="utf-8")
     return {
         "requested": {
             "mul_depth": mul_depth,
             "first_mod_size": first_mod_size or "HEIR default",
             "scaling_mod_size": scaling_mod_size or "HEIR default",
+            "method": "patch translated OpenFHE context for installed-HEIR compatibility",
         },
         "emitted_openfhe": {
+            "inferred_multiplicative_depth_before_patch": inferred_depth,
             "multiplicative_depth": generated_parameter(emitted, "SetMultiplicativeDepth"),
             "first_mod_size": generated_parameter(emitted, "SetFirstModSize"),
             "scaling_mod_size": generated_parameter(emitted, "SetScalingModSize"),

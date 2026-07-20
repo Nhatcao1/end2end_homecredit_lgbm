@@ -2,25 +2,28 @@ from __future__ import annotations
 
 import unittest
 
-from code.heir.scripts.run_payment_perc_depth_probe import scheme_to_openfhe_option
+from code.heir.scripts.run_payment_perc_depth_probe import (
+    patch_translated_mul_depth,
+    scheme_to_openfhe_option,
+)
 
 
 class PaymentPercDepthProbeTest(unittest.TestCase):
-    def test_explicit_mul_depth_is_sent_to_the_heir_pipeline(self) -> None:
+    def test_legacy_pipeline_only_receives_entry_function(self) -> None:
         option = scheme_to_openfhe_option(
             mul_depth=12, first_mod_size=0, scaling_mod_size=0
         )
         self.assertEqual(
             option,
-            "--scheme-to-openfhe=entry-function=payment_perc_newton mul-depth=12",
+            "--scheme-to-openfhe=entry-function=payment_perc_newton",
         )
 
-    def test_optional_modulus_sizes_are_explicit_when_requested(self) -> None:
-        option = scheme_to_openfhe_option(
-            mul_depth=12, first_mod_size=60, scaling_mod_size=50
+    def test_depth_is_patched_in_translated_openfhe_context(self) -> None:
+        patched, inferred = patch_translated_mul_depth(
+            "params.SetMultiplicativeDepth(8);", requested_depth=12
         )
-        self.assertIn("first-mod-size=60", option)
-        self.assertIn("scaling-mod-size=50", option)
+        self.assertEqual(inferred, 8)
+        self.assertEqual(patched, "params.SetMultiplicativeDepth(12);")
 
 
 if __name__ == "__main__":

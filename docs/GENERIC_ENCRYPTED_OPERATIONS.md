@@ -97,7 +97,11 @@ FHEW comparison experiment.
 `PAYMENT_PERC` is a reciprocal approximation, so it must be validated alone
 before it is passed to any aggregation kernel. The dedicated probe requests a
 CKKS multiplicative-depth budget explicitly and records the parameter calls
-emitted by HEIR/OpenFHE in `result.json`. It deliberately does not run sum.
+emitted by HEIR/OpenFHE in `result.json`. The server's installed HEIR release
+does not expose `mul-depth` through its `scheme-to-openfhe` pipeline, so this
+probe patches only the translated OpenFHE `SetMultiplicativeDepth(...)` call
+before compilation and records both the inferred and requested values. It
+deliberately does not run sum.
 
 ```bash
 python3 code/heir/scripts/run_payment_perc_depth_probe.py \
