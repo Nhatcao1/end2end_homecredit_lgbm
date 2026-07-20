@@ -13,6 +13,13 @@ See `docs/GENERIC_ENCRYPTED_OPERATIONS.md` before adding a workload adapter.
 Only null/value-mask packing is permitted before encryption; a source feature
 expression must be evaluated after encryption or reported as not implemented.
 
+The first compact source benchmark is `installments_payment_diff`, the exact
+two-column subtraction from `installments_payments()`. It has its own
+generation and execution commands in that document. It does not require the
+historical multi-stage DAG. Ratio and comparison source expressions are
+deliberately emitted as deferred reports until their approximate/scheme-switch
+routes are separately implemented and benchmarked.
+
 ## Historical function adapters
 
 The implementation also has the following historical layers:

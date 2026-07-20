@@ -32,6 +32,40 @@ does not derive ratios, differences, means, or other business features.
 | `x > threshold` | CKKS sign polynomial | Planned |
 | `min` / `max` | OpenFHE CKKS-to-FHEW switching | Planned, separate from HEIR-generated CKKS |
 
+## Representative source benchmarks
+
+We deliberately test a compact set of source expressions rather than treating
+every original feature function as a separate HE program.
+
+| Benchmark | Original source expression | Current status | Why it is included |
+|---|---|---|---|
+| `installments_payment_diff` | `AMT_INSTALMENT - AMT_PAYMENT` | Executable exact CKKS | Validates raw two-column arithmetic, null packing, HEIR lowering, timing, and decryption accuracy. |
+| `application_days_employed_perc` | `DAYS_EMPLOYED / DAYS_BIRTH` | Deferred | Validates the required reciprocal/division design and source sentinel-to-null handling. |
+| `installments_dpd_clip` | `max(DAYS_ENTRY_PAYMENT - DAYS_INSTALMENT, 0)` | Deferred | Covers comparison/clipping, which must remain visibly separate from ordinary CKKS arithmetic. |
+
+After the arithmetic benchmark, encrypted mask combination and masked grouped
+reductions use the same generic `multiply` / `count_sum_squares` contracts.
+`min`, `max`, and `nunique` are not silently included in this first lane.
+
+Generate and run the exact first benchmark on the HEIR/OpenFHE server:
+
+```bash
+python3 code/heir/scripts/generate_generic_binary_ckks.py \
+  --operation subtract \
+  --vector-size 8192 \
+  --output-dir benchmark_runs/generated_ckks/generic_subtract_8192
+
+python3 code/heir/scripts/run_representative_benchmarks.py \
+  --benchmark installments_payment_diff \
+  --backend heir-generated-ckks \
+  --data-dir data/home_credit \
+  --row-limit 8192 \
+  --vector-size 8192 \
+  --generated-dir benchmark_runs/generated_ckks/generic_subtract_8192 \
+  --openfhe-dir /usr/local/lib/OpenFHE \
+  --run-name payment_diff_8192_01
+```
+
 ## Timing and accuracy
 
 Every benchmark records four independent durations:
