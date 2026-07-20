@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from code.heir.common import sha256_file
 from code.heir.dag.contracts import STAGE_ORDER
+from code.heir.dag import generated_backend
 from code.heir.dag.generated_backend import GeneratedCkksBackend
 from code.heir.dag.pipeline import (
     dag_status,
@@ -139,6 +140,27 @@ def write_generation_manifest(path: Path, vector_size: int) -> None:
 
 
 class DagPipelineTest(unittest.TestCase):
+    def test_cmake_receives_absolute_workspace_paths(self) -> None:
+        commands: list[tuple[list[str], Path]] = []
+
+        def fake_run(command: list[str], cwd: Path) -> tuple[float, str]:
+            commands.append((command, cwd))
+            return 0.0, "ok\n"
+
+        with tempfile.TemporaryDirectory() as temp:
+            work = Path(temp) / "relative-style" / "workspace"
+            work.mkdir(parents=True)
+            with patch.object(generated_backend, "_run", side_effect=fake_run):
+                generated_backend._configure_and_build(work, "example", "/openfhe")
+
+            configure, configure_cwd = commands[0]
+            build, build_cwd = commands[1]
+            self.assertTrue(Path(configure[2]).is_absolute())
+            self.assertTrue(Path(configure[4]).is_absolute())
+            self.assertTrue(Path(build[2]).is_absolute())
+            self.assertEqual(configure_cwd, work.resolve())
+            self.assertEqual(build_cwd, work.resolve())
+
     def test_generation_sets_ciphertext_degree_to_vector_size(self) -> None:
         commands: list[list[str]] = []
 

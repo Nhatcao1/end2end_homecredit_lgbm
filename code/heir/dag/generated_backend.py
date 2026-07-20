@@ -349,6 +349,9 @@ def _cmake(project: str, target: str, runner: str) -> str:
 def _configure_and_build(
     work_dir: Path, target: str, openfhe_dir: str
 ) -> dict[str, float]:
+    # `_run` uses `work_dir` as its CWD.  CMake must therefore receive absolute
+    # source/build paths; otherwise a relative workspace is appended to itself.
+    work_dir = work_dir.resolve()
     build_dir = work_dir / "build"
     configure = ["cmake", "-S", str(work_dir), "-B", str(build_dir)]
     if openfhe_dir:
@@ -378,8 +381,8 @@ class GeneratedCkksBackend:
     def __init__(
         self, generated_root: Path, build_root: Path, openfhe_dir: str = ""
     ) -> None:
-        self.generated_root = generated_root
-        self.build_root = build_root
+        self.generated_root = generated_root.resolve()
+        self.build_root = build_root.resolve()
         self.openfhe_dir = openfhe_dir
 
     def generated_dir(self, kernel_id: str) -> Path:
@@ -388,6 +391,7 @@ class GeneratedCkksBackend:
     def initialize_session(
         self, session_dir: Path, provider_kernel: str = "K03"
     ) -> dict[str, Any]:
+        session_dir = session_dir.resolve()
         info = KERNELS[provider_kernel]
         generated = self.generated_dir(provider_kernel)
         proof = _generated_proof(generated, info["entry"])
@@ -498,6 +502,9 @@ class GeneratedCkksBackend:
         input_paths: list[Path],
         output_dir: Path,
     ) -> dict[str, Any]:
+        session_dir = session_dir.resolve()
+        input_paths = [path.resolve() for path in input_paths]
+        output_dir = output_dir.resolve()
         expected_arity = int(KERNELS[kernel_id]["arity"])
         if len(input_paths) != expected_arity:
             raise ValueError(
@@ -540,6 +547,9 @@ class GeneratedCkksBackend:
     def continuity_probe(
         self, session_dir: Path, ciphertext: Path, output_path: Path
     ) -> dict[str, Any]:
+        session_dir = session_dir.resolve()
+        ciphertext = ciphertext.resolve()
+        output_path = output_path.resolve()
         work = self.build_root / "continuity_probe"
         executable = work / "build" / "continuity_probe"
         if not executable.is_file():
