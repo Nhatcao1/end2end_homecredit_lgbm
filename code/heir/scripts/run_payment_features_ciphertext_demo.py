@@ -19,6 +19,7 @@ from code.heir.examples.quick_installments_features import (
     DEMO_ROWS,
     payment_perc_newton_mlir,
 )
+from code.heir.kernels.sum import encrypted_sum_mlir
 from code.heir.operations.columns import binary_mlir
 
 
@@ -30,7 +31,7 @@ find_package(OpenFHE CONFIG REQUIRED)
 set(HEIR_FLAGS "${OpenFHE_CXX_FLAGS}")
 string(REPLACE "-Werror" "" HEIR_FLAGS "${HEIR_FLAGS}")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${HEIR_FLAGS}")
-add_executable(ciphertext_runner heir_output.cpp ciphertext_runner.cpp)
+add_executable(ciphertext_runner feature_output.cpp sum_output.cpp ciphertext_runner.cpp)
 target_include_directories(ciphertext_runner PRIVATE
   "${OpenFHE_INCLUDE}" "${OpenFHE_INCLUDE}/third-party/include"
   "${OpenFHE_INCLUDE}/core" "${OpenFHE_INCLUDE}/pke"
@@ -50,7 +51,8 @@ RUNNER = r'''
 #include <stdexcept>
 #include <string>
 #include <vector>
-#include "heir_output.h"
+#include "feature_output.h"
+#include "sum_output.h"
 #include "ciphertext-ser.h"
 #include "cryptocontext-ser.h"
 #include "key/key-ser.h"
@@ -86,13 +88,16 @@ int main(int argc, char** argv) {
     auto keys = context->KeyGen();
     require(keys.good(), "OpenFHE key generation failed");
     context = @ENTRY@__configure_crypto_context(context, keys.secretKey);
+    context = encrypted_sum__configure_crypto_context(context, keys.secretKey);
 
     const auto encryptionStarted = std::chrono::steady_clock::now();
     auto encryptedFirst = @ENTRY@__encrypt__arg0(context, first, keys.publicKey);
     auto encryptedSecond = @ENTRY@__encrypt__arg1(context, second, keys.publicKey);
     @ENCRYPT_VALID@
-    const auto evaluationStarted = std::chrono::steady_clock::now();
+    const auto featureStarted = std::chrono::steady_clock::now();
     auto encryptedResult = @ENTRY@(context, @CALL_ARGUMENTS@);
+    const auto sumStarted = std::chrono::steady_clock::now();
+    auto encryptedSum = encrypted_sum(context, encryptedResult);
     const auto auditStarted = std::chrono::steady_clock::now();
 
     require(Serial::SerializeToFile(argv[@FIRST_CT@], encryptedFirst,
@@ -105,9 +110,14 @@ int main(int argc, char** argv) {
     require(Serial::SerializeToFile(argv[@RESULT_CT@], encryptedResult,
                                     SerType::BINARY),
             "cannot save result ciphertext container");
+    require(Serial::SerializeToFile(argv[@SUM_CT@], encryptedSum,
+                                    SerType::BINARY),
+            "cannot save sum ciphertext");
 
     auto decrypted = @ENTRY@__decrypt__result0(
         context, encryptedResult, keys.secretKey);
+    const double decryptedSum = encrypted_sum__decrypt__result0(
+        context, encryptedSum, keys.secretKey);
     const auto done = std::chrono::steady_clock::now();
 
     std::ofstream audit(argv[@AUDIT@]);
@@ -117,11 +127,14 @@ int main(int argc, char** argv) {
     std::ofstream metrics(argv[@METRICS@]);
     metrics << "{\n"
             << "  \"encryption_seconds\": "
-            << std::chrono::duration<double>(evaluationStarted - encryptionStarted).count()
-            << ",\n  \"encrypted_evaluation_seconds\": "
-            << std::chrono::duration<double>(auditStarted - evaluationStarted).count()
+            << std::chrono::duration<double>(featureStarted - encryptionStarted).count()
+            << ",\n  \"encrypted_feature_seconds\": "
+            << std::chrono::duration<double>(sumStarted - featureStarted).count()
+            << ",\n  \"encrypted_sum_seconds\": "
+            << std::chrono::duration<double>(auditStarted - sumStarted).count()
             << ",\n  \"audit_seconds\": "
             << std::chrono::duration<double>(done - auditStarted).count()
+            << ",\n  \"sum_audit\": " << std::setprecision(17) << decryptedSum
             << "\n}\n";
     return 0;
   } catch (const std::exception& error) {
@@ -157,6 +170,7 @@ def generate(
     size: int,
     heir_opt: str,
     heir_translate: str,
+    arity: int,
 ) -> dict[str, Any]:
     directory.mkdir()
     source = (directory / "source.mlir").resolve()
@@ -197,8 +211,7 @@ def generate(
     generated = header.read_text(errors="replace") + cpp.read_text(errors="replace")
     required = (
         entry,
-        f"{entry}__encrypt__arg0",
-        f"{entry}__encrypt__arg1",
+        *(f"{entry}__encrypt__arg{index}" for index in range(arity)),
         f"{entry}__decrypt__result0",
     )
     missing = [symbol for symbol in required if symbol not in generated]
@@ -217,8 +230,19 @@ def generate(
     }
 
 
+def copy_generated_sources(source_dir: Path, work: Path, prefix: str) -> None:
+    """Rename one HEIR output pair so two generated kernels can link together."""
+    header = (source_dir / "heir_output.h").read_text(encoding="utf-8")
+    header = header.replace("HEIR_OUTPUT", f"{prefix.upper()}_OUTPUT")
+    (work / f"{prefix}_output.h").write_text(header, encoding="utf-8")
+    cpp = (source_dir / "heir_output.cpp").read_text(encoding="utf-8")
+    cpp = cpp.replace('"heir_output.h"', f'"{prefix}_output.h"')
+    (work / f"{prefix}_output.cpp").write_text(cpp, encoding="utf-8")
+
+
 def execute(
     directory: Path,
+    sum_directory: Path,
     entry: str,
     size: int,
     first: Path,
@@ -229,12 +253,12 @@ def execute(
     has_valid = valid is not None
     work = directory / "runner"
     work.mkdir()
-    for name in ("heir_output.cpp", "heir_output.h"):
-        shutil.copy2(directory / name, work / name)
+    copy_generated_sources(directory, work, "feature")
+    copy_generated_sources(sum_directory, work, "sum")
 
     options = (
         {
-            "@ARGC@": "10",
+            "@ARGC@": "11",
             "@READ_VALID@": 'const auto valid = readVector(argv[3]); require(valid.size() == @VECTOR_SIZE@, "bad validity size");',
             "@ENCRYPT_VALID@": "auto encryptedValid = @ENTRY@__encrypt__arg2(context, valid, keys.publicKey);",
             "@CALL_ARGUMENTS@": "encryptedFirst, encryptedSecond, encryptedValid",
@@ -242,12 +266,13 @@ def execute(
             "@SECOND_CT@": "5",
             "@SAVE_VALID@": 'require(Serial::SerializeToFile(argv[6], encryptedValid, SerType::BINARY), "cannot save validity ciphertext container");',
             "@RESULT_CT@": "7",
-            "@AUDIT@": "8",
-            "@METRICS@": "9",
+            "@SUM_CT@": "8",
+            "@AUDIT@": "9",
+            "@METRICS@": "10",
         }
         if has_valid
         else {
-            "@ARGC@": "8",
+            "@ARGC@": "9",
             "@READ_VALID@": "",
             "@ENCRYPT_VALID@": "",
             "@CALL_ARGUMENTS@": "encryptedFirst, encryptedSecond",
@@ -255,8 +280,9 @@ def execute(
             "@SECOND_CT@": "4",
             "@SAVE_VALID@": "",
             "@RESULT_CT@": "5",
-            "@AUDIT@": "6",
-            "@METRICS@": "7",
+            "@SUM_CT@": "6",
+            "@AUDIT@": "7",
+            "@METRICS@": "8",
         }
     )
     source = RUNNER.replace("@ENTRY@", entry).replace("@VECTOR_SIZE@", str(size))
@@ -295,6 +321,7 @@ def execute(
             str((ciphertexts / "second.ct").resolve()),
             str((ciphertexts / "validity.ct").resolve()),
             str((ciphertexts / "result.ct").resolve()),
+            str((ciphertexts / "sum.ct").resolve()),
             str(audit.resolve()),
             str(metrics.resolve()),
         ]
@@ -303,6 +330,7 @@ def execute(
             str((ciphertexts / "first.ct").resolve()),
             str((ciphertexts / "second.ct").resolve()),
             str((ciphertexts / "result.ct").resolve()),
+            str((ciphertexts / "sum.ct").resolve()),
             str(audit.resolve()),
             str(metrics.resolve()),
         ]
@@ -321,7 +349,7 @@ def execute(
             "ciphertext_files": [
                 str(item) for item in sorted(ciphertexts.glob("*.ct"))
             ],
-            "scope": "feature calculation only; no aggregation",
+            "scope": "feature calculation followed only by encrypted sum",
         }
     )
     return values, result
@@ -362,7 +390,17 @@ def main() -> None:
 
     perc_dir = root / "payment_perc"
     diff_dir = root / "payment_diff"
+    sum_dir = root / "sum_kernel"
     generated = {
+        "sum": generate(
+            sum_dir,
+            "encrypted_sum",
+            encrypted_sum_mlir(args.vector_size),
+            args.vector_size,
+            args.heir_opt,
+            args.heir_translate,
+            1,
+        ),
         "payment_perc": generate(
             perc_dir,
             "payment_perc_newton",
@@ -370,6 +408,7 @@ def main() -> None:
             args.vector_size,
             args.heir_opt,
             args.heir_translate,
+            3,
         ),
         "payment_diff": generate(
             diff_dir,
@@ -378,10 +417,12 @@ def main() -> None:
             args.vector_size,
             args.heir_opt,
             args.heir_translate,
+            2,
         ),
     }
     perc, perc_info = execute(
         perc_dir,
+        sum_dir,
         "payment_perc_newton",
         args.vector_size,
         payment_path,
@@ -391,6 +432,7 @@ def main() -> None:
     )
     diff, diff_info = execute(
         diff_dir,
+        sum_dir,
         "encrypted_subtract",
         args.vector_size,
         installment_path,
@@ -417,18 +459,45 @@ def main() -> None:
             }
         )
     write_csv(root / "comparison.csv", list(rows[0]), rows)
+    sum_rows = [
+        {
+            "feature": "PAYMENT_PERC",
+            "python_sum": sum(row["PAYMENT_PERC_python"] for row in rows),
+            "he_sum": perc_info["sum_audit"],
+            "absolute_error": abs(
+                sum(row["PAYMENT_PERC_python"] for row in rows)
+                - perc_info["sum_audit"]
+            ),
+        },
+        {
+            "feature": "PAYMENT_DIFF",
+            "python_sum": sum(row["PAYMENT_DIFF_python"] for row in rows),
+            "he_sum": diff_info["sum_audit"],
+            "absolute_error": abs(
+                sum(row["PAYMENT_DIFF_python"] for row in rows)
+                - diff_info["sum_audit"]
+            ),
+        },
+    ]
+    write_csv(root / "sum_comparison.csv", list(sum_rows[0]), sum_rows)
     result = {
         "status": "heir_generated_ckks_executed",
-        "scope": "PAYMENT_PERC and PAYMENT_DIFF only; no aggregation",
+        "scope": "PAYMENT_PERC and PAYMENT_DIFF followed only by encrypted sum",
         "generated": generated,
         "execution": {"payment_perc": perc_info, "payment_diff": diff_info},
         "comparison": rows,
-        "note": "PAYMENT_PERC is approximate reciprocal CKKS; PAYMENT_DIFF is native CKKS subtraction.",
+        "sum_comparison": sum_rows,
+        "note": "The separate HEIR encrypted_sum kernel consumes each feature ciphertext directly in the same CKKS context. No mean, variance, grouping, or max is run.",
     }
     write_json(root / "result.json", result)
     print(
         json.dumps(
-            {"status": result["status"], "comparison": rows, "output_dir": str(root)},
+            {
+                "status": result["status"],
+                "comparison": rows,
+                "sum_comparison": sum_rows,
+                "output_dir": str(root),
+            },
             indent=2,
         )
     )

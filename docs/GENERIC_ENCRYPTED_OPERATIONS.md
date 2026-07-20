@@ -93,8 +93,9 @@ FHEW comparison experiment.
 ## First ciphertext proof: `PAYMENT_PERC` and `PAYMENT_DIFF`
 
 Use this focused command to encrypt only `AMT_PAYMENT` and
-`AMT_INSTALMENT`, calculate both requested features, save their ciphertexts,
-and decrypt only for the audit comparison:
+`AMT_INSTALMENT`, calculate both requested features, and pass each encrypted
+feature vector to a separate HEIR-generated `sum` kernel. Decryption happens
+only after both encrypted calculations for the audit comparison:
 
 ```bash
 python3 code/heir/scripts/run_payment_features_ciphertext_demo.py \
@@ -104,11 +105,16 @@ python3 code/heir/scripts/run_payment_features_ciphertext_demo.py \
   --openfhe-dir /usr/local/lib/OpenFHE
 ```
 
-The only review table is `comparison.csv`. The encrypted input and result
-containers remain under `payment_perc/ciphertexts/` and
-`payment_diff/ciphertexts/`. This command does not attempt groupby, count, sum,
-mean, variance, categorical means, or max. Those remain separate future steps
-until this feature-only proof succeeds on the server.
+Review `comparison.csv` for row-level feature accuracy and
+`sum_comparison.csv` for the two sums. Each feature directory keeps both
+`ciphertexts/result.ct` (the encrypted feature vector) and
+`ciphertexts/sum.ct` (the encrypted scalar sum), along with encrypted inputs.
+The generated sum MLIR remains in `sum_kernel/source.mlir`.
+
+This step implements only ungrouped sum. It does not attempt groupby, count,
+mean, variance, categorical means, or max. Padding contributes zero to the sum;
+the validity mask remains part of `PAYMENT_PERC` so padded rows cannot affect
+that feature.
 
 ## Timing and accuracy
 
