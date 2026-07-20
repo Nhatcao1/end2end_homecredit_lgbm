@@ -120,6 +120,45 @@ class PrivateJoinTest(unittest.TestCase):
                     root / "bad_manifest.json",
                 )
 
+    def test_prepare_inputs_unions_multiple_sender_tables(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            receiver = root / "application.csv"
+            sender_one = root / "bureau.csv"
+            sender_two = root / "pos.csv"
+            write_table(
+                receiver,
+                ["SK_ID_CURR"],
+                [{"SK_ID_CURR": 101}, {"SK_ID_CURR": 102}, {"SK_ID_CURR": 103}],
+            )
+            write_table(
+                sender_one,
+                ["SK_ID_CURR"],
+                [{"SK_ID_CURR": 101}, {"SK_ID_CURR": 101}, {"SK_ID_CURR": 900}],
+            )
+            write_table(
+                sender_two,
+                ["SK_ID_CURR"],
+                [{"SK_ID_CURR": 102}, {"SK_ID_CURR": 900}, {"SK_ID_CURR": 901}],
+            )
+
+            manifest = prepare_secretflow_inputs(
+                receiver,
+                [sender_one, sender_two],
+                root / "receiver.csv",
+                root / "sender.csv",
+                root / "manifest.json",
+            )
+
+            self.assertEqual(manifest["sender"]["source_rows"], 6)
+            self.assertEqual(manifest["sender"]["unique_keys"], 4)
+            self.assertEqual(manifest["sender"]["duplicate_rows_removed"], 2)
+            self.assertEqual(len(manifest["sender"]["source_files"]), 2)
+            self.assertEqual(
+                [row["SK_ID_CURR"] for row in read_csv(root / "sender.csv")],
+                ["101", "102", "900", "901"],
+            )
+
     def test_psi_outputs_must_have_identical_order(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

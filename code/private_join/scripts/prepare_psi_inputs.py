@@ -16,7 +16,16 @@ from code.private_join.secretflow_adapter import prepare_secretflow_inputs
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--receiver-source", type=Path, required=True)
-    parser.add_argument("--sender-source", type=Path, required=True)
+    parser.add_argument(
+        "--sender-source",
+        type=Path,
+        action="append",
+        required=True,
+        help=(
+            "sender CSV containing the join key; repeat once per table to build "
+            "one sender key universe"
+        ),
+    )
     parser.add_argument("--key", default="SK_ID_CURR")
     parser.add_argument(
         "--receiver-output",

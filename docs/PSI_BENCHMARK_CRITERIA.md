@@ -12,6 +12,7 @@ for the ordinary single-owner Home Credit pipeline.
 |---|---|---|
 | PSI01 | Extract receiver identifiers and reject blank/duplicate keys | Implemented and unit tested |
 | PSI02 | Deduplicate repeated history-table identifiers | Implemented and unit tested |
+| PSI02A | Union and audit identifiers across all sender-owned feature tables | Implemented and unit tested |
 | PSI03 | Run two SecretFlow PSI v2 roles concurrently | Docker Compose/config implemented; server execution pending |
 | PSI04 | Require identical ordered receiver/sender outputs | Implemented and unit tested |
 | PSI05 | Reject PSI results absent from receiver applications | Implemented and unit tested |

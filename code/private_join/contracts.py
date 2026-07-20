@@ -5,7 +5,7 @@ from __future__ import annotations
 import csv
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 from code.heir.common import sha256_file, write_csv
 
@@ -86,6 +86,64 @@ def prepare_key_file(
         output_file=str(output_path),
         output_sha256=sha256_file(output_path),
     )
+
+
+def prepare_key_union(
+    source_paths: Sequence[Path],
+    output_path: Path,
+    key_column: str,
+) -> dict[str, Any]:
+    """Create one deterministic PSI input from the union of several CSV key sets."""
+    if not source_paths:
+        raise ValueError("at least one sender source is required")
+
+    all_keys: set[str] = set()
+    source_rows = 0
+    source_summaries: list[dict[str, Any]] = []
+    for source_path in source_paths:
+        rows = 0
+        keys_in_source: set[str] = set()
+        with source_path.open("r", encoding="utf-8-sig", newline="") as source:
+            reader = csv.DictReader(source)
+            fields = _fieldnames(source_path, reader)
+            if key_column not in fields:
+                raise ValueError(f"{source_path} is missing key column {key_column}")
+            for row_number, row in enumerate(reader, start=2):
+                rows += 1
+                key = (row.get(key_column) or "").strip()
+                if not key:
+                    raise ValueError(
+                        f"{source_path}:{row_number} has an empty {key_column}"
+                    )
+                keys_in_source.add(key)
+                all_keys.add(key)
+        if not keys_in_source:
+            raise ValueError(f"{source_path} contains no PSI keys")
+        source_rows += rows
+        source_summaries.append(
+            {
+                "source_file": str(source_path),
+                "source_sha256": sha256_file(source_path),
+                "source_rows": rows,
+                "unique_keys": len(keys_in_source),
+                "duplicate_rows_removed": rows - len(keys_in_source),
+            }
+        )
+
+    ordered_keys = sorted(all_keys)
+    write_csv(
+        output_path,
+        [key_column],
+        ({key_column: key} for key in ordered_keys),
+    )
+    return {
+        "source_rows": source_rows,
+        "unique_keys": len(ordered_keys),
+        "duplicate_rows_removed": source_rows - len(ordered_keys),
+        "source_files": source_summaries,
+        "output_file": str(output_path),
+        "output_sha256": sha256_file(output_path),
+    }
 
 
 def read_unique_keys(path: Path, key_column: str) -> list[str]:

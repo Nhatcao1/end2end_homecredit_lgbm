@@ -14,16 +14,22 @@ server before recording final performance numbers.
 
 ## Server smoke run
 
-From the repository root, prepare a receiver application set and one sender
-history set. The sender history may contain repeated applicants; the adapter
-deduplicates them before PSI.
+From the repository root, prepare a receiver application set and the union of
+all five sender history-table applicant sets. Repeat `--sender-source` once per
+table. The adapter deduplicates applicants both within and across the tables.
+`bureau_balance.csv` is not listed because it has `SK_ID_BUREAU`, not
+`SK_ID_CURR`; its applicant association comes through `bureau.csv`.
 
 ```bash
 mkdir -p data/psi/receiver data/psi/sender
 
 python3 code/private_join/scripts/prepare_psi_inputs.py \
   --receiver-source data/home_credit/application_train.csv \
-  --sender-source data/home_credit/bureau.csv
+  --sender-source data/home_credit/bureau.csv \
+  --sender-source data/home_credit/previous_application.csv \
+  --sender-source data/home_credit/POS_CASH_balance.csv \
+  --sender-source data/home_credit/installments_payments.csv \
+  --sender-source data/home_credit/credit_card_balance.csv
 ```
 
 Pull the official image, inspect its immutable digest, and copy the example
@@ -61,8 +67,8 @@ python3 code/bridge/psi_to_heir.py \
   --receiver-source data/home_credit/application_train.csv \
   --receiver-psi-output data/psi/receiver/psi_output.csv \
   --sender-psi-output data/psi/sender/psi_output.csv \
-  --sender-name bureau \
-  --output-dir benchmark_runs/psi/bureau/rr22_smoke
+  --sender-name home_credit_history_union \
+  --output-dir benchmark_runs/psi/home_credit_history_union/rr22_smoke
 ```
 
 Finally, confirm that a complete function benchmark consumes the sender layout.
@@ -71,14 +77,14 @@ Keep the application limit small for this smoke test:
 ```bash
 python3 code/heir/scripts/run_function_benchmarks.py \
   --function bureau \
-  --application benchmark_runs/psi/bureau/rr22_smoke/private_exchange/sender_application_layout.csv \
+  --application benchmark_runs/psi/home_credit_history_union/rr22_smoke/private_exchange/sender_application_layout.csv \
   --application-row-limit 8 \
   --source-row-limit 500000 \
   --run-name bureau_after_psi_smoke
 ```
 
 The PSI bridge report is written to
-`benchmark_runs/psi/bureau/rr22_smoke/psi_bridge_report.md`. The function report
+`benchmark_runs/psi/home_credit_history_union/rr22_smoke/psi_bridge_report.md`. The function report
 is written under
 `benchmark_runs/functions/bureau_and_balance/bureau_after_psi_smoke/`.
 

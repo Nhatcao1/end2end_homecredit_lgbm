@@ -3,18 +3,19 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 from code.heir.common import write_json
 from code.private_join.contracts import (
     prepare_key_file,
+    prepare_key_union,
     validate_aligned_outputs,
 )
 
 
 def prepare_secretflow_inputs(
     receiver_source: Path,
-    sender_source: Path,
+    sender_source: Path | Sequence[Path],
     receiver_output: Path,
     sender_output: Path,
     manifest_path: Path,
@@ -24,16 +25,18 @@ def prepare_secretflow_inputs(
     receiver = prepare_key_file(
         receiver_source, receiver_output, key_column, deduplicate=False
     )
-    # Home Credit history tables contain many rows per applicant by design.
-    sender = prepare_key_file(
-        sender_source, sender_output, key_column, deduplicate=True
+    # Home Credit history tables contain many rows per applicant by design. A
+    # single sender may contribute several tables, so PSI uses their key union.
+    sender_sources = (
+        [sender_source] if isinstance(sender_source, Path) else list(sender_source)
     )
+    sender = prepare_key_union(sender_sources, sender_output, key_column)
     manifest: dict[str, Any] = {
         "status": "psi_inputs_prepared",
         "implementation": "SecretFlow PSI v2 external container",
         "key_column": key_column,
         "receiver": receiver.to_dict(),
-        "sender": sender.to_dict(),
+        "sender": sender,
         "privacy_rule": (
             "files contain raw PSI identifiers and must remain party-private; "
             "they are never HEIR tensors"
