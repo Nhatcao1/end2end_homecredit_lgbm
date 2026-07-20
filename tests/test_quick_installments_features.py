@@ -32,6 +32,9 @@ class QuickInstallmentsFeaturesTest(unittest.TestCase):
         sum_source = encrypted_sum_mlir(8)
         self.assertIn("@encrypted_sum", sum_source)
         self.assertIn("arith.addf", sum_source)
+        self.assertEqual(sum_source.count("arith.addf"), 7)
+        self.assertNotIn("arith.constant 0.0", sum_source)
+        self.assertNotIn("affine.for", sum_source)
         self.assertIn("auto encryptedResult", RUNNER)
         self.assertIn(
             "auto encryptedSum = encrypted_sum(context, encryptedResult);", RUNNER

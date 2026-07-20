@@ -110,6 +110,9 @@ Review `comparison.csv` for row-level feature accuracy and
 `ciphertexts/result.ct` (the encrypted feature vector) and
 `ciphertexts/sum.ct` (the encrypted scalar sum), along with encrypted inputs.
 The generated sum MLIR remains in `sum_kernel/source.mlir`.
+The sum uses a balanced ciphertext-only addition tree. It deliberately avoids a
+plaintext-zero loop accumulator, so it can preserve the CKKS level of a feature
+ciphertext produced by the preceding kernel.
 
 This step implements only ungrouped sum. It does not attempt groupby, count,
 mean, variance, categorical means, or max. Padding contributes zero to the sum;
