@@ -13,7 +13,7 @@ class QuickInstallmentsFeaturesTest(unittest.TestCase):
     def test_notebook_equivalent_tiny_expected_output(self) -> None:
         self.assertEqual(expected_plaintext(), [
             {"PAYMENT_PERC": 0.8, "PAYMENT_DIFF": 160.0, "DPD": 10.0, "DBD": 0.0},
-            {"PAYMENT_PERC": 1.2, "PAYMENT_DIFF": -100.0, "DPD": 0.0, "DBD": 5.0},
+            {"PAYMENT_PERC": 1.2, "PAYMENT_DIFF": -100.0, "DPD": 0.0, "DBD": 10.0},
             {"PAYMENT_PERC": 1.0, "PAYMENT_DIFF": 0.0, "DPD": 0.0, "DBD": 0.0},
         ])
 

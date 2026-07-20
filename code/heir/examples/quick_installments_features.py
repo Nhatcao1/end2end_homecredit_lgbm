@@ -16,7 +16,7 @@ from typing import Any
 
 DEMO_ROWS = (
     {"AMT_INSTALMENT": 800.0, "AMT_PAYMENT": 640.0, "DAYS_ENTRY_PAYMENT": -10.0, "DAYS_INSTALMENT": -20.0},
-    {"AMT_INSTALMENT": 500.0, "AMT_PAYMENT": 600.0, "DAYS_ENTRY_PAYMENT": -10.0, "DAYS_INSTALMENT": -5.0},
+    {"AMT_INSTALMENT": 500.0, "AMT_PAYMENT": 600.0, "DAYS_ENTRY_PAYMENT": -20.0, "DAYS_INSTALMENT": -10.0},
     {"AMT_INSTALMENT": 1000.0, "AMT_PAYMENT": 1000.0, "DAYS_ENTRY_PAYMENT": -15.0, "DAYS_INSTALMENT": -15.0},
 )
 
@@ -69,7 +69,7 @@ def payment_perc_newton_mlir(vector_size: int, amount_scale: float = 1000.0) -> 
 '''
 
 
-def positive_difference_mlir(vector_size: int, days_range: float = 3650.0) -> str:
+def positive_difference_mlir(vector_size: int, days_range: float = 10.0) -> str:
     """Approximate ``max(left - right, 0)`` with a CKKS sign polynomial.
 
     This one generic kernel represents DPD when left is DAYS_ENTRY_PAYMENT and
@@ -161,6 +161,7 @@ def emit(output_dir: Path, vector_size: int) -> dict[str, Any]:
             "route": "CKKS smoothstep sign polynomial",
             "accuracy": "approximate near zero; not an exact comparison",
             "input_order": {"DPD": "DAYS_ENTRY_PAYMENT - DAYS_INSTALMENT", "DBD": "DAYS_INSTALMENT - DAYS_ENTRY_PAYMENT"},
+            "range_requirement": "the tiny demo uses absolute day differences at most 10; production needs a separately validated public range policy",
         },
     }
     (output_dir / "expected_plaintext.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
