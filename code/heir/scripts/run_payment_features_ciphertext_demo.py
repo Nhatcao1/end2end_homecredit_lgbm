@@ -21,6 +21,7 @@ from code.heir.examples.quick_installments_features import (
 )
 from code.heir.kernels.sum import encrypted_sum_mlir
 from code.heir.operations.columns import binary_mlir
+from code.heir.scripts.run_payment_perc_depth_probe import patch_translated_mul_depth
 
 
 CMAKE = r'''cmake_minimum_required(VERSION 3.16)
@@ -171,6 +172,7 @@ def generate(
     heir_opt: str,
     heir_translate: str,
     arity: int,
+    ckks_mul_depth: int,
 ) -> dict[str, Any]:
     directory.mkdir()
     source = (directory / "source.mlir").resolve()
@@ -208,6 +210,11 @@ def generate(
         directory,
         cpp,
     )
+    translated = cpp.read_text(encoding="utf-8", errors="replace")
+    generated_cpp, inferred_depth = patch_translated_mul_depth(
+        translated, ckks_mul_depth
+    )
+    cpp.write_text(generated_cpp, encoding="utf-8")
     generated = header.read_text(errors="replace") + cpp.read_text(errors="replace")
     required = (
         entry,
@@ -219,6 +226,11 @@ def generate(
         raise ValueError(f"unexpected generated CKKS source; missing={missing}")
     return {
         "entry": entry,
+        "ckks_context": {
+            "inferred_multiplicative_depth": inferred_depth,
+            "requested_multiplicative_depth": ckks_mul_depth,
+            "method": "patch translated OpenFHE context for installed-HEIR compatibility",
+        },
         "source_sha256": sha256_file(source),
         "header_sha256": sha256_file(header),
         "cpp_sha256": sha256_file(cpp),
@@ -363,6 +375,7 @@ def main() -> None:
     parser.add_argument("--heir-opt", default="heir-opt")
     parser.add_argument("--heir-translate", default="heir-translate")
     parser.add_argument("--openfhe-dir", default="/usr/local/lib/OpenFHE")
+    parser.add_argument("--ckks-mul-depth", type=int, default=12)
     args = parser.parse_args()
 
     if args.vector_size < len(DEMO_ROWS):
@@ -400,6 +413,7 @@ def main() -> None:
             args.heir_opt,
             args.heir_translate,
             1,
+            args.ckks_mul_depth,
         ),
         "payment_perc": generate(
             perc_dir,
@@ -409,6 +423,7 @@ def main() -> None:
             args.heir_opt,
             args.heir_translate,
             3,
+            args.ckks_mul_depth,
         ),
         "payment_diff": generate(
             diff_dir,
@@ -418,6 +433,7 @@ def main() -> None:
             args.heir_opt,
             args.heir_translate,
             2,
+            args.ckks_mul_depth,
         ),
     }
     perc, perc_info = execute(

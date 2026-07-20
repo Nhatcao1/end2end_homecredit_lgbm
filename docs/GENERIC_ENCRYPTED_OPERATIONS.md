@@ -134,6 +134,7 @@ python3 code/heir/scripts/run_payment_features_ciphertext_demo.py \
   --output-dir benchmark_runs/payment_features_ciphertext \
   --overwrite \
   --vector-size 8 \
+  --ckks-mul-depth 12 \
   --openfhe-dir /usr/local/lib/OpenFHE
 ```
 
@@ -149,7 +150,9 @@ ciphertext produced by the preceding kernel.
 This step implements only ungrouped sum. It does not attempt groupby, count,
 mean, variance, categorical means, or max. Padding contributes zero to the sum;
 the validity mask remains part of `PAYMENT_PERC` so padded rows cannot affect
-that feature.
+that feature. The generated feature and sum contexts both use the explicit
+depth requested by `--ckks-mul-depth`; the script records the inferred and
+requested values for each generated kernel in `result.json`.
 
 ## Timing and accuracy
 
