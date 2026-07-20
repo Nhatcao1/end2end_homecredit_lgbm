@@ -180,7 +180,7 @@ def _evaluate(
     (work / "build.log").write_text(configure_log + build_log, encoding="utf-8")
     metrics_path, output_path = feature_dir / "metrics.json", feature_dir / "decrypted_audit.csv"
     runner_seconds, runner_log = _run(
-        [str(build / "feature_runner"), str(first.resolve()), str(second.resolve()), str(valid.resolve()), str(metrics_path.resolve()), str(output_path.resolve())], work
+        [str((build / "feature_runner").resolve()), str(first.resolve()), str(second.resolve()), str(valid.resolve()), str(metrics_path.resolve()), str(output_path.resolve())], work
     )
     (work / "runner.log").write_text(runner_log, encoding="utf-8")
     values = [float(row["value"]) for row in read_csv(output_path)]

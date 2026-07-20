@@ -90,6 +90,25 @@ entry-payment minus installment for DPD, and reverse inputs for DBD. It is
 approximate near zero. Exact clipping is still the separate OpenFHE CKKS-to-
 FHEW comparison experiment.
 
+## First ciphertext proof: `PAYMENT_PERC` and `PAYMENT_DIFF`
+
+Use this focused command to encrypt only `AMT_PAYMENT` and
+`AMT_INSTALMENT`, calculate both requested features, save their ciphertexts,
+and decrypt only for the audit comparison:
+
+```bash
+python3 code/heir/scripts/run_payment_features_ciphertext_demo.py \
+  --output-dir benchmark_runs/payment_features_ciphertext \
+  --overwrite \
+  --vector-size 8 \
+  --openfhe-dir /usr/local/lib/OpenFHE
+```
+
+The review table is `comparison.csv`. The encrypted files remain under
+`payment_perc/ciphertexts/` and `payment_diff/ciphertexts/`. `PAYMENT_PERC`
+uses an approximate encrypted reciprocal; `PAYMENT_DIFF` is native CKKS
+subtraction.
+
 ## Timing and accuracy
 
 Every benchmark records four independent durations:
