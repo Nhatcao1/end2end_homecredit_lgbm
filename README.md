@@ -60,6 +60,10 @@ processes, serializes each stage's encrypted sufficient statistics, verifies a
 fresh process can reload a ciphertext, and finalizes a zero-copy encrypted
 bundle index only after all integrity gates pass.
 
+The complete trust boundaries, serial DAG, per-stage sequence, checkpoint
+contract, and artifact tree are illustrated in
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
 The function registry and current acceptance status are maintained in
 `docs/HEIR_BENCHMARK_CRITERIA.md`.
 
