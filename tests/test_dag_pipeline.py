@@ -16,6 +16,7 @@ from code.heir.dag.pipeline import (
     initialize_dag,
     run_function_stage,
 )
+from code.heir.scripts import generate_dag_ckks_kernels as dag_generator
 from tests import test_function_benchmarks as function_fixture
 
 
@@ -138,6 +139,29 @@ def write_generation_manifest(path: Path, vector_size: int) -> None:
 
 
 class DagPipelineTest(unittest.TestCase):
+    def test_generation_sets_ciphertext_degree_to_vector_size(self) -> None:
+        commands: list[list[str]] = []
+
+        def fake_run(command: list[str], output_path: Path) -> float:
+            commands.append(command)
+            output_path.write_text("// CKKS generated test source\n", encoding="utf-8")
+            return 0.0
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "generated"
+            with patch.object(dag_generator, "_run", side_effect=fake_run):
+                manifest = dag_generator.generate(root, 8192, "heir-opt", "heir-translate")
+
+        lowering = [command for command in commands if command[0] == "heir-opt"]
+        self.assertEqual(len(lowering), 3)
+        self.assertTrue(
+            all(
+                "--mlir-to-ckks=ciphertext-degree=8192" in command
+                for command in lowering
+            )
+        )
+        self.assertEqual(manifest["ciphertext_degree"], 8192)
+
     def test_production_evaluator_has_no_secret_key_or_decryption_path(self) -> None:
         backend = GeneratedCkksBackend(
             Path("generated"), Path("build"), openfhe_dir=""

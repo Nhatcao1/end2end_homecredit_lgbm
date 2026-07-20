@@ -57,7 +57,11 @@ def generate(
         lower_seconds = _run(
             [
                 heir_opt,
-                "--mlir-to-ckks",
+                # Keep every logical vector in one CKKS ciphertext.  HEIR's
+                # default ciphertext degree is smaller than the 8,192-slot
+                # workload and otherwise splits it into incompatible chunks
+                # during a scalar reduction.
+                f"--mlir-to-ckks=ciphertext-degree={vector_size}",
                 f"--scheme-to-openfhe=entry-function={entry}",
                 str(source),
             ],
@@ -104,6 +108,7 @@ def generate(
         "status": "heir_generated_ckks_sources_ready",
         "scheme": "CKKS",
         "vector_size": vector_size,
+        "ciphertext_degree": vector_size,
         "kernels": records,
     }
     write_json(output_root / "generation_manifest.json", manifest)

@@ -43,10 +43,12 @@ python3 code/heir/scripts/generate_dag_ckks_kernels.py \
   --vector-size 8192
 ```
 
-The command runs HEIR's `--mlir-to-ckks` and `--scheme-to-openfhe` pipelines,
-then emits installed-OpenFHE C++ and a hash-bound generation manifest. DAG
-initialization rejects BGV/BFV output, a missing kernel, or a vector-size
-mismatch.
+The command runs HEIR's `--mlir-to-ckks` pipeline with
+`ciphertext-degree == vector-size`, then `--scheme-to-openfhe`. This keeps a
+logical workload vector in one CKKS ciphertext rather than silently chunking it
+at HEIR's default degree. It emits installed-OpenFHE C++ and a hash-bound
+generation manifest. DAG initialization rejects BGV/BFV output, a missing
+kernel, or a vector-size mismatch.
 
 ## Initialize one resumable run
 
