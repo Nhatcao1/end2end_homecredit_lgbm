@@ -41,7 +41,8 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${HEIR_FLAGS}")
 add_executable(feature_runner heir_output.cpp feature_runner.cpp)
 target_include_directories(feature_runner PRIVATE
   "${OpenFHE_INCLUDE}" "${OpenFHE_INCLUDE}/third-party/include"
-  "${OpenFHE_INCLUDE}/core" "${OpenFHE_INCLUDE}/pke")
+  "${OpenFHE_INCLUDE}/core" "${OpenFHE_INCLUDE}/pke"
+  "${OpenFHE_INCLUDE}/binfhe")
 target_link_directories(feature_runner PRIVATE "${OpenFHE_LIBDIR}")
 target_link_libraries(feature_runner PRIVATE ${OpenFHE_SHARED_LIBRARIES})
 set_target_properties(feature_runner PROPERTIES BUILD_RPATH "${OpenFHE_LIBDIR}")
