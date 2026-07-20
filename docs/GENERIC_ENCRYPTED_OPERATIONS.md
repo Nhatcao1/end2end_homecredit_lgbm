@@ -104,29 +104,11 @@ python3 code/heir/scripts/run_payment_features_ciphertext_demo.py \
   --openfhe-dir /usr/local/lib/OpenFHE
 ```
 
-The row-feature review table is `comparison.csv`; encrypted aggregate checks
-are in `aggregates_comparison.csv`. The encrypted files remain under
-`payment_perc/ciphertexts/` and `payment_diff/ciphertexts/`. Each directory
-contains the encrypted feature `result.ct` plus encrypted
-`aggregates/{count,sum,mean,var}.ct`. There is no intermediate feature
-decryption before aggregation. `PAYMENT_PERC` uses an approximate encrypted
-reciprocal; `PAYMENT_DIFF` is native CKKS subtraction.
-
-For this HEIR build, an encrypted `tensor<8xf64>` is emitted in C++ as
-`std::vector<CiphertextT>`, not one packed `CiphertextT`. Therefore
-`result.ct` is a serialized ciphertext-vector container. The runner must not
-reinterpret that container as one OpenFHE ciphertext. Feature calculation and
-all four returned statistics are consequently expressed in one HEIR MLIR
-graph; the runner only encrypts arguments, invokes the generated function,
-serializes its five encrypted results, and audit-decrypts them.
-
-The tiny demo treats its three-row group count as public grouping metadata, so
-encrypted mean and Pandas sample variance multiply encrypted sums by public
-`1/count` and `1/(count-1)`. A later private-cardinality experiment would need
-the encrypted reciprocal-count route. `max` remains deferred to the comparison
-or CKKS-to-FHEW lane. The same encrypted mean operation can later consume
-encrypted one-hot categorical columns; categorical preparation is outside this
-two-payment-feature proof.
+The only review table is `comparison.csv`. The encrypted input and result
+containers remain under `payment_perc/ciphertexts/` and
+`payment_diff/ciphertexts/`. This command does not attempt groupby, count, sum,
+mean, variance, categorical means, or max. Those remain separate future steps
+until this feature-only proof succeeds on the server.
 
 ## Timing and accuracy
 

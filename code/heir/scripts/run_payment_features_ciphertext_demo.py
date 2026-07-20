@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Encrypt two raw columns, calculate PAYMENT_PERC/PAYMENT_DIFF, audit-decrypt."""
+"""Encrypt, calculate, and audit-decrypt PAYMENT_PERC and PAYMENT_DIFF only."""
 
 from __future__ import annotations
 
@@ -15,11 +15,11 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from code.heir.common import read_csv, sha256_file, write_csv, write_json, write_values
-from code.heir.examples.payment_aggregate_kernels import (
-    payment_diff_aggregate_mlir,
-    payment_perc_aggregate_mlir,
+from code.heir.examples.quick_installments_features import (
+    DEMO_ROWS,
+    payment_perc_newton_mlir,
 )
-from code.heir.examples.quick_installments_features import DEMO_ROWS
+from code.heir.operations.columns import binary_mlir
 
 
 CMAKE = r'''cmake_minimum_required(VERSION 3.16)
@@ -33,7 +33,8 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${HEIR_FLAGS}")
 add_executable(ciphertext_runner heir_output.cpp ciphertext_runner.cpp)
 target_include_directories(ciphertext_runner PRIVATE
   "${OpenFHE_INCLUDE}" "${OpenFHE_INCLUDE}/third-party/include"
-  "${OpenFHE_INCLUDE}/core" "${OpenFHE_INCLUDE}/pke" "${OpenFHE_INCLUDE}/binfhe")
+  "${OpenFHE_INCLUDE}/core" "${OpenFHE_INCLUDE}/pke"
+  "${OpenFHE_INCLUDE}/binfhe")
 target_link_directories(ciphertext_runner PRIVATE "${OpenFHE_LIBDIR}")
 target_link_libraries(ciphertext_runner PRIVATE ${OpenFHE_SHARED_LIBRARIES})
 set_target_properties(ciphertext_runner PROPERTIES BUILD_RPATH "${OpenFHE_LIBDIR}")
@@ -48,7 +49,6 @@ RUNNER = r'''
 #include <iostream>
 #include <stdexcept>
 #include <string>
-#include <tuple>
 #include <vector>
 #include "heir_output.h"
 #include "ciphertext-ser.h"
@@ -60,69 +60,87 @@ using namespace lbcrypto;
 std::vector<double> readVector(const std::filesystem::path& path) {
   std::ifstream input(path);
   if (!input) throw std::runtime_error("cannot open " + path.string());
-  std::string line; std::getline(input, line); std::vector<double> values;
-  while (std::getline(input, line)) if (!line.empty()) values.push_back(std::stod(line));
+  std::string line;
+  std::getline(input, line);
+  std::vector<double> values;
+  while (std::getline(input, line)) {
+    if (!line.empty()) values.push_back(std::stod(line));
+  }
   return values;
 }
-void require(bool ok, const std::string& message) { if (!ok) throw std::runtime_error(message); }
+
+void require(bool ok, const std::string& message) {
+  if (!ok) throw std::runtime_error(message);
+}
 
 int main(int argc, char** argv) {
-  if (argc != 14) return 2;
+  if (argc != @ARGC@) return 2;
   try {
-    const auto first = readVector(argv[1]); const auto second = readVector(argv[2]);
-    const auto mask = readVector(argv[3]);
-    require(first.size() == @VECTOR_SIZE@ && second.size() == @VECTOR_SIZE@ &&
-                mask.size() == @VECTOR_SIZE@,
+    const auto first = readVector(argv[1]);
+    const auto second = readVector(argv[2]);
+    require(first.size() == @VECTOR_SIZE@ && second.size() == @VECTOR_SIZE@,
             "input vectors must equal generated vector size");
-    auto context = @ENTRY@__generate_crypto_context(); auto keys = context->KeyGen();
+    @READ_VALID@
+
+    auto context = @ENTRY@__generate_crypto_context();
+    auto keys = context->KeyGen();
     require(keys.good(), "OpenFHE key generation failed");
     context = @ENTRY@__configure_crypto_context(context, keys.secretKey);
+
     const auto encryptionStarted = std::chrono::steady_clock::now();
     auto encryptedFirst = @ENTRY@__encrypt__arg0(context, first, keys.publicKey);
     auto encryptedSecond = @ENTRY@__encrypt__arg1(context, second, keys.publicKey);
-    auto encryptedMask = @ENTRY@__encrypt__arg2(context, mask, keys.publicKey);
+    @ENCRYPT_VALID@
     const auto evaluationStarted = std::chrono::steady_clock::now();
-    auto encryptedOutputs = @ENTRY@(context, encryptedFirst, encryptedSecond, encryptedMask);
-    const auto& encryptedFeature = std::get<0>(encryptedOutputs);
-    const auto& encryptedCount = std::get<1>(encryptedOutputs);
-    const auto& encryptedSum = std::get<2>(encryptedOutputs);
-    const auto& encryptedMean = std::get<3>(encryptedOutputs);
-    const auto& encryptedVariance = std::get<4>(encryptedOutputs);
+    auto encryptedResult = @ENTRY@(context, @CALL_ARGUMENTS@);
     const auto auditStarted = std::chrono::steady_clock::now();
-    require(Serial::SerializeToFile(argv[4], encryptedFirst, SerType::BINARY), "cannot save first ciphertext");
-    require(Serial::SerializeToFile(argv[5], encryptedSecond, SerType::BINARY), "cannot save second ciphertext");
-    require(Serial::SerializeToFile(argv[6], encryptedMask, SerType::BINARY), "cannot save group-mask ciphertext");
-    require(Serial::SerializeToFile(argv[7], encryptedFeature, SerType::BINARY), "cannot save feature ciphertext");
-    require(Serial::SerializeToFile(argv[8], encryptedCount, SerType::BINARY), "cannot save count ciphertext");
-    require(Serial::SerializeToFile(argv[9], encryptedSum, SerType::BINARY), "cannot save sum ciphertext");
-    require(Serial::SerializeToFile(argv[10], encryptedMean, SerType::BINARY), "cannot save mean ciphertext");
-    require(Serial::SerializeToFile(argv[11], encryptedVariance, SerType::BINARY), "cannot save variance ciphertext");
-    auto decrypted = @ENTRY@__decrypt__result0(context, encryptedFeature, keys.secretKey);
-    const double countAudit = @ENTRY@__decrypt__result1(context, encryptedCount, keys.secretKey);
-    const double sumAudit = @ENTRY@__decrypt__result2(context, encryptedSum, keys.secretKey);
-    const double meanAudit = @ENTRY@__decrypt__result3(context, encryptedMean, keys.secretKey);
-    const double varianceAudit = @ENTRY@__decrypt__result4(context, encryptedVariance, keys.secretKey);
+
+    require(Serial::SerializeToFile(argv[@FIRST_CT@], encryptedFirst,
+                                    SerType::BINARY),
+            "cannot save first ciphertext container");
+    require(Serial::SerializeToFile(argv[@SECOND_CT@], encryptedSecond,
+                                    SerType::BINARY),
+            "cannot save second ciphertext container");
+    @SAVE_VALID@
+    require(Serial::SerializeToFile(argv[@RESULT_CT@], encryptedResult,
+                                    SerType::BINARY),
+            "cannot save result ciphertext container");
+
+    auto decrypted = @ENTRY@__decrypt__result0(
+        context, encryptedResult, keys.secretKey);
     const auto done = std::chrono::steady_clock::now();
-    std::ofstream audit(argv[12]); audit << "value\n" << std::setprecision(17);
+
+    std::ofstream audit(argv[@AUDIT@]);
+    audit << "value\n" << std::setprecision(17);
     for (const auto& value : decrypted) audit << value << '\n';
-    std::ofstream metrics(argv[13]); metrics << std::setprecision(17);
-    metrics << "{\n  \"encryption_seconds\": " << std::chrono::duration<double>(evaluationStarted-encryptionStarted).count()
-            << ",\n  \"encrypted_feature_and_aggregation_seconds\": " << std::chrono::duration<double>(auditStarted-evaluationStarted).count()
-            << ",\n  \"audit_seconds\": " << std::chrono::duration<double>(done-auditStarted).count()
-            << ",\n  \"aggregate_audit\": {\"count\": " << countAudit
-            << ", \"sum\": " << sumAudit << ", \"mean\": " << meanAudit
-            << ", \"var\": " << varianceAudit << "}\n}\n";
+
+    std::ofstream metrics(argv[@METRICS@]);
+    metrics << "{\n"
+            << "  \"encryption_seconds\": "
+            << std::chrono::duration<double>(evaluationStarted - encryptionStarted).count()
+            << ",\n  \"encrypted_evaluation_seconds\": "
+            << std::chrono::duration<double>(auditStarted - evaluationStarted).count()
+            << ",\n  \"audit_seconds\": "
+            << std::chrono::duration<double>(done - auditStarted).count()
+            << "\n}\n";
     return 0;
-  } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
+  } catch (const std::exception& error) {
+    std::cerr << error.what() << '\n';
+    return 1;
+  }
 }
 '''
 
 
-def run(command: list[str], cwd: Path, output: Path | None = None) -> tuple[float, str]:
+def run(
+    command: list[str], cwd: Path, output: Path | None = None
+) -> tuple[float, str]:
     started = time.perf_counter()
     if output:
         with output.open("w", encoding="utf-8") as handle:
-            completed = subprocess.run(command, cwd=cwd, text=True, stdout=handle, stderr=subprocess.PIPE)
+            completed = subprocess.run(
+                command, cwd=cwd, text=True, stdout=handle, stderr=subprocess.PIPE
+            )
         text = completed.stderr
     else:
         completed = subprocess.run(command, cwd=cwd, text=True, capture_output=True)
@@ -132,99 +150,289 @@ def run(command: list[str], cwd: Path, output: Path | None = None) -> tuple[floa
     return time.perf_counter() - started, text
 
 
-def generate(directory: Path, entry: str, mlir: str, size: int, heir_opt: str, heir_translate: str) -> dict[str, Any]:
+def generate(
+    directory: Path,
+    entry: str,
+    mlir: str,
+    size: int,
+    heir_opt: str,
+    heir_translate: str,
+) -> dict[str, Any]:
     directory.mkdir()
-    source = (directory / "source.mlir").resolve(); source.write_text(mlir, encoding="utf-8")
+    source = (directory / "source.mlir").resolve()
+    source.write_text(mlir, encoding="utf-8")
     lowered = directory / "lowered_openfhe.mlir"
     header = directory / "heir_output.h"
     cpp = directory / "heir_output.cpp"
-    lower, _ = run([heir_opt, f"--mlir-to-ckks=ciphertext-degree={size}", f"--scheme-to-openfhe=entry-function={entry}", str(source)], directory, lowered)
-    header_seconds, _ = run([heir_translate, "--emit-openfhe-pke-header", "--openfhe-include-type=install-relative", str(lowered.resolve())], directory, header)
-    cpp_seconds, _ = run([heir_translate, "--emit-openfhe-pke", "--openfhe-include-type=install-relative", str(lowered.resolve())], directory, cpp)
-    content = header.read_text(errors="replace") + cpp.read_text(errors="replace")
+    lower, _ = run(
+        [
+            heir_opt,
+            f"--mlir-to-ckks=ciphertext-degree={size}",
+            f"--scheme-to-openfhe=entry-function={entry}",
+            str(source),
+        ],
+        directory,
+        lowered,
+    )
+    header_seconds, _ = run(
+        [
+            heir_translate,
+            "--emit-openfhe-pke-header",
+            "--openfhe-include-type=install-relative",
+            str(lowered.resolve()),
+        ],
+        directory,
+        header,
+    )
+    cpp_seconds, _ = run(
+        [
+            heir_translate,
+            "--emit-openfhe-pke",
+            "--openfhe-include-type=install-relative",
+            str(lowered.resolve()),
+        ],
+        directory,
+        cpp,
+    )
+    generated = header.read_text(errors="replace") + cpp.read_text(errors="replace")
     required = (
         entry,
         f"{entry}__encrypt__arg0",
         f"{entry}__encrypt__arg1",
-        f"{entry}__encrypt__arg2",
-        *(f"{entry}__decrypt__result{index}" for index in range(5)),
+        f"{entry}__decrypt__result0",
     )
-    missing = [symbol for symbol in required if symbol not in content]
-    if missing or ("CKKS" not in content and "CryptoContextCKKSRNS" not in content):
+    missing = [symbol for symbol in required if symbol not in generated]
+    if missing or ("CKKS" not in generated and "CryptoContextCKKSRNS" not in generated):
         raise ValueError(f"unexpected generated CKKS source; missing={missing}")
-    return {"entry": entry, "source_sha256": sha256_file(source), "header_sha256": sha256_file(header), "cpp_sha256": sha256_file(cpp), "timings_seconds": {"lower": lower, "header": header_seconds, "cpp": cpp_seconds}}
+    return {
+        "entry": entry,
+        "source_sha256": sha256_file(source),
+        "header_sha256": sha256_file(header),
+        "cpp_sha256": sha256_file(cpp),
+        "timings_seconds": {
+            "lower": lower,
+            "header": header_seconds,
+            "cpp": cpp_seconds,
+        },
+    }
 
 
-def execute(directory: Path, entry: str, size: int, first: Path, second: Path, group_mask: Path, openfhe_dir: str) -> tuple[list[float], dict[str, Any]]:
-    work = directory / "runner"; work.mkdir()
-    for name in ("heir_output.cpp", "heir_output.h"): shutil.copy2(directory / name, work / name)
+def execute(
+    directory: Path,
+    entry: str,
+    size: int,
+    first: Path,
+    second: Path,
+    valid: Path | None,
+    openfhe_dir: str,
+) -> tuple[list[float], dict[str, Any]]:
+    has_valid = valid is not None
+    work = directory / "runner"
+    work.mkdir()
+    for name in ("heir_output.cpp", "heir_output.h"):
+        shutil.copy2(directory / name, work / name)
+
+    options = (
+        {
+            "@ARGC@": "10",
+            "@READ_VALID@": 'const auto valid = readVector(argv[3]); require(valid.size() == @VECTOR_SIZE@, "bad validity size");',
+            "@ENCRYPT_VALID@": "auto encryptedValid = @ENTRY@__encrypt__arg2(context, valid, keys.publicKey);",
+            "@CALL_ARGUMENTS@": "encryptedFirst, encryptedSecond, encryptedValid",
+            "@FIRST_CT@": "4",
+            "@SECOND_CT@": "5",
+            "@SAVE_VALID@": 'require(Serial::SerializeToFile(argv[6], encryptedValid, SerType::BINARY), "cannot save validity ciphertext container");',
+            "@RESULT_CT@": "7",
+            "@AUDIT@": "8",
+            "@METRICS@": "9",
+        }
+        if has_valid
+        else {
+            "@ARGC@": "8",
+            "@READ_VALID@": "",
+            "@ENCRYPT_VALID@": "",
+            "@CALL_ARGUMENTS@": "encryptedFirst, encryptedSecond",
+            "@FIRST_CT@": "3",
+            "@SECOND_CT@": "4",
+            "@SAVE_VALID@": "",
+            "@RESULT_CT@": "5",
+            "@AUDIT@": "6",
+            "@METRICS@": "7",
+        }
+    )
     source = RUNNER.replace("@ENTRY@", entry).replace("@VECTOR_SIZE@", str(size))
-    (work / "ciphertext_runner.cpp").write_text(source, encoding="utf-8"); (work / "CMakeLists.txt").write_text(CMAKE, encoding="utf-8")
-    build = work / "build"; configure = ["cmake", "-S", str(work.resolve()), "-B", str(build.resolve())]
-    if openfhe_dir: configure.append(f"-DOpenFHE_DIR={openfhe_dir}")
-    configure_seconds, configure_log = run(configure, work); build_seconds, build_log = run(["cmake", "--build", str(build.resolve()), "--target", "ciphertext_runner"], work)
+    for marker, value in options.items():
+        source = source.replace(
+            marker,
+            value.replace("@ENTRY@", entry).replace("@VECTOR_SIZE@", str(size)),
+        )
+    (work / "ciphertext_runner.cpp").write_text(source, encoding="utf-8")
+    (work / "CMakeLists.txt").write_text(CMAKE, encoding="utf-8")
+
+    build = work / "build"
+    configure = ["cmake", "-S", str(work.resolve()), "-B", str(build.resolve())]
+    if openfhe_dir:
+        configure.append(f"-DOpenFHE_DIR={openfhe_dir}")
+    configure_seconds, configure_log = run(configure, work)
+    build_seconds, build_log = run(
+        ["cmake", "--build", str(build.resolve()), "--target", "ciphertext_runner"],
+        work,
+    )
     (work / "build.log").write_text(configure_log + build_log, encoding="utf-8")
-    ciphertexts = directory / "ciphertexts"; ciphertexts.mkdir(); aggregates = ciphertexts / "aggregates"; aggregates.mkdir()
-    audit, metrics = directory / "decrypted_audit.csv", directory / "metrics.json"
+
+    ciphertexts = directory / "ciphertexts"
+    ciphertexts.mkdir()
+    audit = directory / "decrypted_audit.csv"
+    metrics = directory / "metrics.json"
     command = [
-        str((build / "ciphertext_runner").resolve()), str(first.resolve()), str(second.resolve()), str(group_mask.resolve()),
-        str((ciphertexts / "first.ct").resolve()), str((ciphertexts / "second.ct").resolve()),
-        str((ciphertexts / "group_mask.ct").resolve()), str((ciphertexts / "result.ct").resolve()),
-        str((aggregates / "count.ct").resolve()), str((aggregates / "sum.ct").resolve()),
-        str((aggregates / "mean.ct").resolve()), str((aggregates / "var.ct").resolve()),
-        str(audit.resolve()), str(metrics.resolve()),
+        str((build / "ciphertext_runner").resolve()),
+        str(first.resolve()),
+        str(second.resolve()),
     ]
-    wall, log = run(command, work); (work / "runner.log").write_text(log, encoding="utf-8")
-    values = [float(row["value"]) for row in read_csv(audit)]; result = json.loads(metrics.read_text())
-    result.update({"build_seconds":{"configure":configure_seconds,"build":build_seconds}, "runner_wall_seconds":wall, "ciphertext_files":[str(item) for item in sorted(ciphertexts.rglob("*.ct"))], "execution_boundary":"one HEIR graph returns encrypted feature/count/sum/mean/sample-var"})
+    if has_valid:
+        command += [
+            str(valid.resolve()),
+            str((ciphertexts / "first.ct").resolve()),
+            str((ciphertexts / "second.ct").resolve()),
+            str((ciphertexts / "validity.ct").resolve()),
+            str((ciphertexts / "result.ct").resolve()),
+            str(audit.resolve()),
+            str(metrics.resolve()),
+        ]
+    else:
+        command += [
+            str((ciphertexts / "first.ct").resolve()),
+            str((ciphertexts / "second.ct").resolve()),
+            str((ciphertexts / "result.ct").resolve()),
+            str(audit.resolve()),
+            str(metrics.resolve()),
+        ]
+    wall, log = run(command, work)
+    (work / "runner.log").write_text(log, encoding="utf-8")
+
+    values = [float(row["value"]) for row in read_csv(audit)]
+    result = json.loads(metrics.read_text())
+    result.update(
+        {
+            "build_seconds": {
+                "configure": configure_seconds,
+                "build": build_seconds,
+            },
+            "runner_wall_seconds": wall,
+            "ciphertext_files": [
+                str(item) for item in sorted(ciphertexts.glob("*.ct"))
+            ],
+            "scope": "feature calculation only; no aggregation",
+        }
+    )
     return values, result
-
-
-def sample_statistics(values: list[float]) -> dict[str, float]:
-    count = len(values)
-    total = sum(values)
-    mean = total / count
-    variance = sum((value - mean) ** 2 for value in values) / (count - 1)
-    return {"count": float(count), "sum": total, "mean": mean, "var": variance}
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output-dir", type=Path, required=True); parser.add_argument("--overwrite", action="store_true")
-    parser.add_argument("--vector-size", type=int, default=8); parser.add_argument("--heir-opt", default="heir-opt"); parser.add_argument("--heir-translate", default="heir-translate"); parser.add_argument("--openfhe-dir", default="/usr/local/lib/OpenFHE")
+    parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--overwrite", action="store_true")
+    parser.add_argument("--vector-size", type=int, default=8)
+    parser.add_argument("--heir-opt", default="heir-opt")
+    parser.add_argument("--heir-translate", default="heir-translate")
+    parser.add_argument("--openfhe-dir", default="/usr/local/lib/OpenFHE")
     args = parser.parse_args()
-    if args.vector_size < len(DEMO_ROWS): raise ValueError("vector size must fit demo rows")
+
+    if args.vector_size < len(DEMO_ROWS):
+        raise ValueError("vector size must fit demo rows")
     root = args.output_dir.resolve()
     if root.exists():
-        if not args.overwrite: raise FileExistsError(f"refusing to overwrite: {root}; pass --overwrite")
-        if root == Path.cwd().resolve() or root == root.parent: raise ValueError("unsafe output directory")
+        if not args.overwrite:
+            raise FileExistsError(f"refusing to overwrite: {root}; pass --overwrite")
+        if root == Path.cwd().resolve() or root == root.parent:
+            raise ValueError("unsafe output directory")
         shutil.rmtree(root)
-    root.mkdir(parents=True); inputs = root / "plaintext_inputs"; inputs.mkdir()
-    payment, installment = [row["AMT_PAYMENT"] for row in DEMO_ROWS], [row["AMT_INSTALMENT"] for row in DEMO_ROWS]; pad = [0.0] * (args.vector_size-len(DEMO_ROWS))
-    payment_path, installment_path, valid_path = inputs / "amt_payment.csv", inputs / "amt_installment.csv", inputs / "validity.csv"
-    write_values(payment_path, payment+pad); write_values(installment_path, installment+pad); write_values(valid_path, [1.0]*len(DEMO_ROWS)+pad)
-    perc_dir, diff_dir = root / "payment_perc", root / "payment_diff"
-    group_count = len(DEMO_ROWS)
+    root.mkdir(parents=True)
+
+    inputs = root / "plaintext_inputs"
+    inputs.mkdir()
+    payment = [row["AMT_PAYMENT"] for row in DEMO_ROWS]
+    installment = [row["AMT_INSTALMENT"] for row in DEMO_ROWS]
+    padding = [0.0] * (args.vector_size - len(DEMO_ROWS))
+    payment_path = inputs / "amt_payment.csv"
+    installment_path = inputs / "amt_installment.csv"
+    valid_path = inputs / "validity.csv"
+    write_values(payment_path, payment + padding)
+    write_values(installment_path, installment + padding)
+    write_values(valid_path, [1.0] * len(DEMO_ROWS) + padding)
+
+    perc_dir = root / "payment_perc"
+    diff_dir = root / "payment_diff"
     generated = {
-        "payment_perc": generate(perc_dir, "payment_perc_aggregate", payment_perc_aggregate_mlir(args.vector_size, group_count), args.vector_size, args.heir_opt, args.heir_translate),
-        "payment_diff": generate(diff_dir, "payment_diff_aggregate", payment_diff_aggregate_mlir(args.vector_size, group_count), args.vector_size, args.heir_opt, args.heir_translate),
+        "payment_perc": generate(
+            perc_dir,
+            "payment_perc_newton",
+            payment_perc_newton_mlir(args.vector_size),
+            args.vector_size,
+            args.heir_opt,
+            args.heir_translate,
+        ),
+        "payment_diff": generate(
+            diff_dir,
+            "encrypted_subtract",
+            binary_mlir(args.vector_size, "subtract"),
+            args.vector_size,
+            args.heir_opt,
+            args.heir_translate,
+        ),
     }
-    perc, perc_info = execute(perc_dir, "payment_perc_aggregate", args.vector_size, payment_path, installment_path, valid_path, args.openfhe_dir)
-    diff, diff_info = execute(diff_dir, "payment_diff_aggregate", args.vector_size, installment_path, payment_path, valid_path, args.openfhe_dir)
-    rows = [{"row":i, "AMT_PAYMENT":paid, "AMT_INSTALMENT":due, "PAYMENT_PERC_python":paid/due, "PAYMENT_PERC_he":perc[i], "PAYMENT_PERC_abs_error":abs(paid/due-perc[i]), "PAYMENT_DIFF_python":due-paid, "PAYMENT_DIFF_he":diff[i], "PAYMENT_DIFF_abs_error":abs(due-paid-diff[i])} for i,(paid,due) in enumerate(zip(payment,installment))]
+    perc, perc_info = execute(
+        perc_dir,
+        "payment_perc_newton",
+        args.vector_size,
+        payment_path,
+        installment_path,
+        valid_path,
+        args.openfhe_dir,
+    )
+    diff, diff_info = execute(
+        diff_dir,
+        "encrypted_subtract",
+        args.vector_size,
+        installment_path,
+        payment_path,
+        None,
+        args.openfhe_dir,
+    )
+
+    rows = []
+    for index, (paid, due) in enumerate(zip(payment, installment)):
+        expected_perc = paid / due
+        expected_diff = due - paid
+        rows.append(
+            {
+                "row": index,
+                "AMT_PAYMENT": paid,
+                "AMT_INSTALMENT": due,
+                "PAYMENT_PERC_python": expected_perc,
+                "PAYMENT_PERC_he": perc[index],
+                "PAYMENT_PERC_abs_error": abs(expected_perc - perc[index]),
+                "PAYMENT_DIFF_python": expected_diff,
+                "PAYMENT_DIFF_he": diff[index],
+                "PAYMENT_DIFF_abs_error": abs(expected_diff - diff[index]),
+            }
+        )
     write_csv(root / "comparison.csv", list(rows[0]), rows)
-    aggregate_rows = []
-    for feature, plaintext_values, info in (
-        ("PAYMENT_PERC", [paid / due for paid, due in zip(payment, installment)], perc_info),
-        ("PAYMENT_DIFF", [due - paid for paid, due in zip(payment, installment)], diff_info),
-    ):
-        expected = sample_statistics(plaintext_values)
-        actual = info["aggregate_audit"]
-        for operation in ("count", "sum", "mean", "var"):
-            aggregate_rows.append({"feature":feature, "operation":operation, "python":expected[operation], "he":actual[operation], "absolute_error":abs(expected[operation]-actual[operation])})
-    write_csv(root / "aggregates_comparison.csv", list(aggregate_rows[0]), aggregate_rows)
-    result = {"status":"heir_generated_ckks_executed", "generated":generated, "execution":{"payment_perc":perc_info,"payment_diff":diff_info}, "comparison":rows, "aggregates_comparison":aggregate_rows, "implemented_aggregations":["sum","mean","var"], "deferred_aggregations":["max"], "execution_model":"each feature and its count/sum/mean/sample-var are one HEIR MLIR graph; the generated ABI is not manually reinterpreted", "note":"No intermediate decryption occurs. PAYMENT_PERC is an approximate reciprocal CKKS graph; PAYMENT_DIFF is masked CKKS subtraction."}
-    write_json(root / "result.json", result); print(json.dumps({"status":result["status"],"comparison":rows,"output_dir":str(root)}, indent=2))
+    result = {
+        "status": "heir_generated_ckks_executed",
+        "scope": "PAYMENT_PERC and PAYMENT_DIFF only; no aggregation",
+        "generated": generated,
+        "execution": {"payment_perc": perc_info, "payment_diff": diff_info},
+        "comparison": rows,
+        "note": "PAYMENT_PERC is approximate reciprocal CKKS; PAYMENT_DIFF is native CKKS subtraction.",
+    }
+    write_json(root / "result.json", result)
+    print(
+        json.dumps(
+            {"status": result["status"], "comparison": rows, "output_dir": str(root)},
+            indent=2,
+        )
+    )
 
 
-if __name__ == "__main__": main()
+if __name__ == "__main__":
+    main()

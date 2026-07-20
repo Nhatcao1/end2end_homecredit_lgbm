@@ -6,7 +6,6 @@ from code.heir.operations.benchmarking import run_expression_benchmark
 from code.heir.operations.columns import (
     binary_mlir,
     binary_reference,
-    masked_binary_mlir,
     prepare_nullable_column,
 )
 from code.heir.operations.contracts import operation_contract, require_implemented
@@ -24,8 +23,6 @@ class GenericOperationsTest(unittest.TestCase):
         self.assertEqual(binary_reference([4, 3], [1, 5], "multiply"), [4.0, 15.0])
         self.assertIn("arith.subf", binary_mlir(8, "subtract"))
         self.assertIn("tensor<8xf64>", binary_mlir(8, "multiply"))
-        self.assertIn("@encrypted_masked_subtract", masked_binary_mlir(8, "subtract"))
-        self.assertIn("%result = arith.mulf %raw, %mask", masked_binary_mlir(8, "subtract"))
 
     def test_deferred_operations_fail_before_feature_execution(self) -> None:
         for operation in ("divide", "mean", "variance", "threshold", "min_max"):
