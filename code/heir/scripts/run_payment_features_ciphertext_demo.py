@@ -48,6 +48,9 @@ RUNNER = r'''
 #include <vector>
 #include "heir_output.h"
 #include "ciphertext-ser.h"
+#include "cryptocontext-ser.h"
+#include "key/key-ser.h"
+#include "scheme/ckksrns/ckksrns-ser.h"
 using namespace lbcrypto;
 
 std::vector<double> readVector(const std::filesystem::path& path) {
