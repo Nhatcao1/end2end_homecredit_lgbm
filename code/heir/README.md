@@ -1,6 +1,21 @@
 # HEIR benchmark code
 
-The implementation has two layers:
+## Active simplified direction
+
+New development begins with `operations/`, not whole-function DAGs. These are
+function-agnostic encrypted-column expressions. Each one has an explicit
+capability route, an MLIR builder or a deferred status, and a benchmark timing
+contract that compares Python calculation time only with encrypted evaluation
+time. Encryption and decryption are recorded separately for operational and
+accuracy evidence.
+
+See `docs/GENERIC_ENCRYPTED_OPERATIONS.md` before adding a workload adapter.
+Only null/value-mask packing is permitted before encryption; a source feature
+expression must be evaluated after encryption or reported as not implemented.
+
+## Historical function adapters
+
+The implementation also has the following historical layers:
 
 - `kernels/` contains reusable HEIR arithmetic independent of Home Credit.
 - `workloads/` contains preparation and benchmarks organized under the
@@ -29,6 +44,10 @@ kernels/
 ├── difference_moments.py      K03 difference statistics
 ├── linear_score.py            S01 special linear score
 └── polynomial_score.py        S02 special polynomial transform
+operations/
+├── contracts.py               explicit exact/approximate/switching capability matrix
+├── columns.py                 generic encrypted add/subtract/multiply MLIR
+└── benchmarking.py            separate calculation/encryption/decryption timing
 workloads/
 ├── catalog.py                 registry of 5 complete function benchmarks
 ├── grouped.py                 function/component/feature contracts
