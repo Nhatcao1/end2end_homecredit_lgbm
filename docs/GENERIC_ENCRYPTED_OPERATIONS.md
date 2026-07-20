@@ -104,10 +104,21 @@ python3 code/heir/scripts/run_payment_features_ciphertext_demo.py \
   --openfhe-dir /usr/local/lib/OpenFHE
 ```
 
-The review table is `comparison.csv`. The encrypted files remain under
-`payment_perc/ciphertexts/` and `payment_diff/ciphertexts/`. `PAYMENT_PERC`
-uses an approximate encrypted reciprocal; `PAYMENT_DIFF` is native CKKS
-subtraction.
+The row-feature review table is `comparison.csv`; encrypted aggregate checks
+are in `aggregates_comparison.csv`. The encrypted files remain under
+`payment_perc/ciphertexts/` and `payment_diff/ciphertexts/`. Each directory
+contains the encrypted feature `result.ct` plus encrypted
+`aggregates/{count,sum,mean,var}.ct`. There is no intermediate feature
+decryption before aggregation. `PAYMENT_PERC` uses an approximate encrypted
+reciprocal; `PAYMENT_DIFF` is native CKKS subtraction.
+
+The tiny demo treats its three-row group count as public grouping metadata, so
+encrypted mean and Pandas sample variance multiply encrypted sums by public
+`1/count` and `1/(count-1)`. A later private-cardinality experiment would need
+the encrypted reciprocal-count route. `max` remains deferred to the comparison
+or CKKS-to-FHEW lane. The same encrypted mean operation can later consume
+encrypted one-hot categorical columns; categorical preparation is outside this
+two-payment-feature proof.
 
 ## Timing and accuracy
 

@@ -7,6 +7,10 @@ from code.heir.examples.quick_installments_features import (
     payment_perc_newton_mlir,
     positive_difference_mlir,
 )
+from code.heir.scripts.run_payment_features_ciphertext_demo import (
+    RUNNER,
+    sample_statistics,
+)
 
 
 class QuickInstallmentsFeaturesTest(unittest.TestCase):
@@ -25,6 +29,14 @@ class QuickInstallmentsFeaturesTest(unittest.TestCase):
         self.assertIn("@positive_difference_smoothstep", positive)
         self.assertIn("%raw_difference = arith.subf %l, %r", positive)
         self.assertIn("%range = arith.constant 10.0 : f64", positive)
+
+    def test_payment_demo_keeps_encrypted_aggregate_stage(self) -> None:
+        self.assertEqual(
+            sample_statistics([1.0, 2.0, 3.0]),
+            {"count": 3.0, "sum": 6.0, "mean": 2.0, "var": 1.0},
+        )
+        self.assertIn("context->EvalSum(encryptedMasked", RUNNER)
+        self.assertIn('aggregateDir / "var.ct"', RUNNER)
 
 
 if __name__ == "__main__":
