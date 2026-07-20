@@ -67,11 +67,13 @@ int main(int argc, char** argv) {
   try {
     auto due = readVector(argv[1]); auto paid = readVector(argv[2]); auto valid = readVector(argv[3]);
     require(due.size() == @SIZE@ && paid.size() == @SIZE@ && valid.size() == @SIZE@, "bad vector size");
-    auto context = encrypted_subtract__generate_crypto_context(); auto keys = context->KeyGen();
+    // The finalizer is the deepest stage and HEIR has inserted a bootstrap in
+    // it. Its generated context therefore owns the one shared CKKS session.
+    auto context = mean_sample_variance__generate_crypto_context(); auto keys = context->KeyGen();
     require(keys.good(), "key generation failed");
+    context = mean_sample_variance__configure_crypto_context(context, keys.secretKey);
     context = encrypted_subtract__configure_crypto_context(context, keys.secretKey);
     context = moments__configure_crypto_context(context, keys.secretKey);
-    context = mean_sample_variance__configure_crypto_context(context, keys.secretKey);
     auto encryptedDue = encrypted_subtract__encrypt__arg0(context, due, keys.publicKey);
     auto encryptedPaid = encrypted_subtract__encrypt__arg1(context, paid, keys.publicKey);
     auto encryptedValid = moments__encrypt__arg1(context, valid, keys.publicKey);

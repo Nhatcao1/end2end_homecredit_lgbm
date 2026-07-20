@@ -181,6 +181,10 @@ python3 code/heir/scripts/run_payment_diff_moments_demo.py \
 Review `feature_comparison.csv` and `statistics_comparison.csv`. Ciphertexts
 for the source feature, count, sum, squared sum, mean, and variance remain in
 `ciphertexts/`.
+Because HEIR inserts a bootstrap for this depth-24 finalizer, the finalizer
+creates the shared context and bootstrap keys before the shallower feature and
+moments stages are configured. This is a controlled bootstrap experiment, not
+the default path for ordinary sum.
 
 ## Timing and accuracy
 
