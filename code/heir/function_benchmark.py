@@ -18,20 +18,33 @@ from code.heir.workloads.grouped import FeatureSpec, FunctionSpec, TaskSpec
 def _read_applications(path: Path, row_limit: int) -> list[dict[str, str]]:
     with path.open("r", encoding="utf-8-sig", newline="") as source:
         reader = csv.DictReader(source)
-        required = {"SK_ID_CURR", "TARGET"}
-        missing = required.difference(reader.fieldnames or [])
+        fields = set(reader.fieldnames or [])
+        required = {"SK_ID_CURR"}
+        missing = required.difference(fields)
         if missing:
             raise ValueError(f"application input is missing columns: {sorted(missing)}")
         rows: list[dict[str, str]] = []
         for index, row in enumerate(reader):
             if row_limit > 0 and index >= row_limit:
                 break
-            rows.append(row)
+            if (
+                "app_index" in fields
+                and (row.get("app_index") or "").strip() != str(index)
+            ):
+                raise ValueError(
+                    "application layout app_index must be dense and match CSV row order"
+                )
+            normalized = dict(row)
+            normalized["SK_ID_CURR"] = (row.get("SK_ID_CURR") or "").strip()
+            normalized["TARGET"] = (row.get("TARGET") or "").strip()
+            rows.append(normalized)
     if not rows:
         raise ValueError("application input produced no benchmark rows")
-    identifiers = [row["SK_ID_CURR"] for row in rows]
+    identifiers = [row["SK_ID_CURR"] for row in rows if row["SK_ID_CURR"]]
     if len(identifiers) != len(set(identifiers)):
-        raise ValueError("SK_ID_CURR must be unique in selected applications")
+        raise ValueError(
+            "non-empty SK_ID_CURR values must be unique in selected applications"
+        )
     return rows
 
 
@@ -48,13 +61,14 @@ def _read_function_rows(
     path: Path,
     function: FunctionSpec,
     app_index: dict[str, int],
+    applicant_count: int,
     row_limit: int,
 ) -> tuple[list[list[dict[str, str]]], int, int]:
     """Read the union of columns once for all components in one function."""
     required = {"SK_ID_CURR"}
     for component in function.components:
         required.update(_required_columns(component))
-    rows_by_app: list[list[dict[str, str]]] = [[] for _ in app_index]
+    rows_by_app: list[list[dict[str, str]]] = [[] for _ in range(applicant_count)]
     scanned = matched = 0
     with path.open("r", encoding="utf-8-sig", newline="") as source:
         reader = csv.DictReader(source)
@@ -408,11 +422,18 @@ def prepare_complete_function(
     """Prepare all components of one source function with a single main-table scan."""
     started = time.perf_counter()
     applications = _read_applications(application_path, application_row_limit)
-    app_index = {row["SK_ID_CURR"]: index for index, row in enumerate(applications)}
+    # A PSI sender layout is dense but intentionally leaves non-matching IDs
+    # blank. Those rows remain valid zero-history applicant slots.
+    app_index = {
+        row["SK_ID_CURR"]: index
+        for index, row in enumerate(applications)
+        if row["SK_ID_CURR"]
+    }
     rows_by_app, scanned, matched = _read_function_rows(
         data_dir / function.input_file,
         function,
         app_index,
+        len(applications),
         source_row_limit,
     )
 

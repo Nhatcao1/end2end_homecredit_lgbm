@@ -1,0 +1,22 @@
+services:
+  receiver:
+    image: ${SECRETFLOW_PSI_IMAGE:-secretflow/psi-anolis8:latest}
+    command: ["--config", "/config/receiver.config"]
+    volumes:
+      - ../../data/psi/receiver:/work/receiver
+      - ./configs/receiver.config:/config/receiver.config:ro
+    networks:
+      - psi
+
+  sender:
+    image: ${SECRETFLOW_PSI_IMAGE:-secretflow/psi-anolis8:latest}
+    command: ["--config", "/config/sender.config"]
+    volumes:
+      - ../../data/psi/sender:/work/sender
+      - ./configs/sender.config:/config/sender.config:ro
+    networks:
+      - psi
+
+networks:
+  psi:
+    driver: bridge

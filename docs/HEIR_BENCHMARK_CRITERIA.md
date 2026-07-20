@@ -9,6 +9,7 @@ business traceability without generating duplicate cryptographic code.
 ```text
 Function workload
   -> trusted preparation and plaintext reference
+  -> optional external PSI alignment when tables have different owners
   -> select reusable kernel and pack fixed-size tensors
   -> HEIR-generated CKKS/OpenFHE execution
   -> function-specific comparison and Markdown report
@@ -246,6 +247,10 @@ remaining order is:
    timing, CKKS parameters, evaluation keys, and artifact sizes.
 8. Produce a source-parity coverage report showing reproduced, client-only, and
    excluded outputs for every original function.
+
+The optional SecretFlow PSI integration is tracked separately in
+`PSI_BENCHMARK_CRITERIA.md`. PSI aligns private identifiers before CKKS; it is
+not an HEIR arithmetic kernel and does not count as HEIR-generated execution.
 
 Special experiments run independently after the active source-derived kernels:
 

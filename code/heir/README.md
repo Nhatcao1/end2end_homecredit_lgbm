@@ -87,6 +87,12 @@ leave the client. The bundle manifest is currently
 `plaintext_staging_only`: its ciphertext list remains empty until a generated
 CKKS backend returns and serializes ciphertext outputs.
 
+For multi-owner experiments, `code/bridge/psi_to_heir.py` writes a dense sender
+application layout containing matching `SK_ID_CURR` values and blank rows for
+receiver-only applicants. Passing that file through `--application` preserves
+receiver-left-join shape without exposing TARGET or unmatched identifiers to
+the sender. Blank identifiers are intentional zero-history slots.
+
 The older POS_COUNT-only command remains as a narrow K01 generated-runner test,
 not the public function-benchmark interface:
 
