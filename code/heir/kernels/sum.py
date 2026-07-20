@@ -18,8 +18,12 @@ def encrypted_sum_mlir(vector_size: int) -> str:
     # when it consumes the output of an earlier, deeper CKKS circuit.
     current = []
     for index in range(vector_size):
+        index_name = f"%index_{index}"
         name = f"%value_{index}"
-        lines.append(f"  {name} = tensor.extract %values[{index}] : {tensor}")
+        lines.append(f"  {index_name} = arith.constant {index} : index")
+        lines.append(
+            f"  {name} = tensor.extract %values[{index_name}] : {tensor}"
+        )
         current.append(name)
 
     add_index = 0

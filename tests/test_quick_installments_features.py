@@ -33,6 +33,8 @@ class QuickInstallmentsFeaturesTest(unittest.TestCase):
         self.assertIn("@encrypted_sum", sum_source)
         self.assertIn("arith.addf", sum_source)
         self.assertEqual(sum_source.count("arith.addf"), 7)
+        self.assertIn("%index_0 = arith.constant 0 : index", sum_source)
+        self.assertIn("tensor.extract %values[%index_0]", sum_source)
         self.assertNotIn("arith.constant 0.0", sum_source)
         self.assertNotIn("affine.for", sum_source)
         self.assertIn("auto encryptedResult", RUNNER)
