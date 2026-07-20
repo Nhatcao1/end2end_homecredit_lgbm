@@ -122,6 +122,9 @@ def _run(command: list[str], cwd: Path, stdout_path: Path | None = None) -> tupl
 
 
 def _generate(source: Path, entry: str, heir_opt: str, heir_translate: str, vector_size: int) -> dict[str, Any]:
+    # HEIR is invoked from the feature directory. Resolve the source before
+    # doing that so a workspace-relative path is not appended to itself.
+    source = source.resolve()
     directory = source.parent
     lowered, header, cpp = directory / "lowered_openfhe.mlir", directory / "heir_output.h", directory / "heir_output.cpp"
     lower_seconds, _ = _run(
