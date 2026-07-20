@@ -24,6 +24,7 @@ class QuickInstallmentsFeaturesTest(unittest.TestCase):
         self.assertIn("%inverse_normalized", payment)
         self.assertIn("@positive_difference_smoothstep", positive)
         self.assertIn("%raw_difference = arith.subf %l, %r", positive)
+        self.assertIn("%range = arith.constant 10.0 : f64", positive)
 
 
 if __name__ == "__main__":

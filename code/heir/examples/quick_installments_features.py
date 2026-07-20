@@ -21,6 +21,12 @@ DEMO_ROWS = (
 )
 
 
+def _mlir_float(value: float) -> str:
+    """Render a Python float as an MLIR f64 literal (including `.0`)."""
+    literal = repr(float(value))
+    return literal if "." in literal or "e" in literal.lower() else literal + ".0"
+
+
 def payment_perc_newton_mlir(vector_size: int, amount_scale: float = 1000.0) -> str:
     """Approximate payment / installment with two encrypted Newton steps.
 
@@ -39,7 +45,7 @@ def payment_perc_newton_mlir(vector_size: int, amount_scale: float = 1000.0) -> 
     %valid: {tensor} {{secret.secret}}
 ) -> {tensor} {{
   %zero = arith.constant dense<0.0> : {tensor}
-  %inv_scale = arith.constant {inverse_scale:.17g} : f64
+  %inv_scale = arith.constant {_mlir_float(inverse_scale)} : f64
   %a = arith.constant 2.8235294117647058 : f64
   %b = arith.constant 1.8823529411764706 : f64
   %two = arith.constant 2.0 : f64
@@ -86,8 +92,8 @@ def positive_difference_mlir(vector_size: int, days_range: float = 10.0) -> str:
     %valid: {tensor} {{secret.secret}}
 ) -> {tensor} {{
   %zero = arith.constant dense<0.0> : {tensor}
-  %inv_range = arith.constant {inverse_range:.17g} : f64
-  %range = arith.constant {days_range:.17g} : f64
+  %inv_range = arith.constant {_mlir_float(inverse_range)} : f64
+  %range = arith.constant {_mlir_float(days_range)} : f64
   %three = arith.constant 3.0 : f64
   %ten = arith.constant 10.0 : f64
   %fifteen = arith.constant 15.0 : f64
