@@ -67,6 +67,7 @@ RUNNER = r'''
 using namespace lbcrypto;
 using ContextT = CryptoContext<DCRTPoly>;
 using CiphertextT = Ciphertext<DCRTPoly>;
+using CiphertextBundle = std::vector<CiphertextT>;
 using PublicKeyT = PublicKey<DCRTPoly>;
 using PrivateKeyT = PrivateKey<DCRTPoly>;
 
@@ -93,10 +94,11 @@ PrivateKeyT loadPrivateKey(const std::filesystem::path& session) {
   require(Serial::DeserializeFromFile(sessionFile(session, "audit_secret.key"), key, SerType::BINARY), "cannot load audit secret key");
   return key;
 }
-CiphertextT loadCiphertext(const std::filesystem::path& path) {
-  CiphertextT ciphertext;
-  require(Serial::DeserializeFromFile(path, ciphertext, SerType::BINARY), "cannot load ciphertext artifact");
-  return ciphertext;
+CiphertextBundle loadCiphertext(const std::filesystem::path& path) {
+  CiphertextBundle ciphertexts;
+  // HEIR represents one packed tensor as a vector of ciphertext chunks.
+  require(Serial::DeserializeFromFile(path, ciphertexts, SerType::BINARY), "cannot load ciphertext artifact bundle");
+  return ciphertexts;
 }
 void loadEvaluationKeys(const std::filesystem::path& session) {
   std::ifstream input(sessionFile(session, "eval_mult.keys"), std::ios::binary);

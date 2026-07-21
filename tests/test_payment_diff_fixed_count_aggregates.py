@@ -26,6 +26,7 @@ class PaymentDiffFixedCountAggregatesTest(unittest.TestCase):
         self.assertIn('stage == "init"', RUNNER)
         self.assertIn('stage == "variance"', RUNNER)
         self.assertIn("loadEvaluationKeys", RUNNER)
+        self.assertIn("using CiphertextBundle", RUNNER)
 
 
 if __name__ == "__main__":
