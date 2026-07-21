@@ -224,6 +224,28 @@ has one narrow, explicit contract: its group has a **public fixed count of 3**.
 It is a valid arithmetic/ciphertext proof, but is not a replacement for the
 variable/private group-count finalizer above.
 
+### Standalone encrypted `PAYMENT_DIFF_MAX`
+
+`max` is executed in a dedicated OpenFHE CKKS↔FHEW session, not in the
+ordinary HEIR-generated CKKS session. HEIR produces the ordinary arithmetic
+lane, while OpenFHE supplies `EvalMaxSchemeSwitching`. The standalone runner
+encrypts the two raw parent columns, calculates `PAYMENT_DIFF` after
+encryption, and retains only encrypted max. OpenFHE also returns argmax, but
+this runner deliberately neither serializes nor decrypts it.
+
+```bash
+python3 code/heir/scripts/run_payment_diff_max_openfhe_demo.py \
+  --output-dir benchmark_runs/payment_diff_max_switch_01 \
+  --overwrite \
+  --openfhe-dir /usr/local/lib/OpenFHE
+```
+
+Read `max_comparison.csv`. The small three-row review input receives one
+synthetic low padding lane because OpenFHE's max operation requires a
+power-of-two candidate count. It is not a source-data row and cannot win.
+See `docs/PAYMENT_DIFF_CIPHERTEXT_FLOW.mmd` for the parent-column, feature,
+ciphertext-bundle, and separate-session flow.
+
 ## Timing and accuracy
 
 Every benchmark records four independent durations:

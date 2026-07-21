@@ -1,0 +1,46 @@
+flowchart TD
+  subgraph client[Client preparation: raw values and padding only]
+    due[AMT_INSTALMENT values]
+    paid[AMT_PAYMENT values]
+    pad[Power-of-two padding lane<br/>due=-1,000,000; paid=0]
+  end
+
+  subgraph arithmetic[Ordinary HEIR CKKS session]
+    dueCT[amt_installment.ct<br/>ciphertext bundle]
+    paidCT[amt_payment.ct<br/>ciphertext bundle]
+    diff[HEIR encrypted subtract<br/>PAYMENT_DIFF]
+    diffCT[payment_diff.ct<br/>ciphertext bundle]
+    sum[sum.ct]
+    mean[mean.ct]
+    variance[variance.ct]
+    due --> dueCT
+    paid --> paidCT
+    dueCT --> diff
+    paidCT --> diff
+    diff --> diffCT
+    diffCT --> sum
+    diffCT --> mean
+    diffCT --> variance
+  end
+
+  subgraph maxsession[Dedicated OpenFHE CKKS↔FHEW max session]
+    dueMax[encrypt AMT_INSTALMENT]
+    paidMax[encrypt AMT_PAYMENT]
+    diffMax[encrypted subtraction<br/>PAYMENT_DIFF]
+    switch[EvalMaxSchemeSwitching<br/>CKKS → FHEW comparisons → CKKS]
+    maxCT[payment_diff_max.ct]
+    noIndex[argmax ciphertext discarded<br/>not serialized or decrypted]
+    due --> dueMax
+    paid --> paidMax
+    pad --> dueMax
+    pad --> paidMax
+    dueMax --> diffMax
+    paidMax --> diffMax
+    diffMax --> switch
+    switch --> maxCT
+    switch --> noIndex
+  end
+
+  note[Ciphertext bundles are vectors of packed ciphertext chunks.<br/>The two sessions use different CKKS parameters and keys.]
+  diffCT -. cannot cross session .-> switch
+  maxCT --> note
