@@ -93,10 +93,14 @@ def kernel_specs(slot_count: int) -> tuple[KernelSpec, ...]:
 def markdown_report(manifest: dict[str, object]) -> str:
     """Return a concise generation-only report for the standalone benchmark."""
     kernels = manifest["kernels"]
+    generated_labels = {kernel["report_label"] for kernel in kernels}
+    def primitive_status(label: str) -> str:
+        return "MLIR ready" if label in generated_labels else "not generated in this profile"
+    extended = [kernel for kernel in kernels if str(kernel["report_label"]).startswith("CKKS-")]
     rows = "\n".join(
         f"| `{kernel['report_label']}` | `{kernel['logical_value_count']}` | {kernel['generation_status']} |"
-        for kernel in kernels
-    )
+        for kernel in extended
+    ) or "| — | — | not generated in this profile |"
     return f"""# CKKS baseline generation report
 
 This is a **generation report only**. It records real HEIR MLIR and, when
@@ -117,9 +121,9 @@ aligned real values. A value count above the slot count is streamed in
 
 | Calculation | Runtime value counts | Source status |
 |---|---|---|
-| `CT+CT` | 1k, 50k, 1m | MLIR ready |
-| `CT-CT` | 1k, 50k, 1m | MLIR ready |
-| `CT×CT` | 1k, 50k, 1m | MLIR ready |
+| `CT+CT` | 1k, 50k, 1m | {primitive_status('CT+CT')} |
+| `CT-CT` | 1k, 50k, 1m | {primitive_status('CT-CT')} |
+| `CT×CT` | 1k, 50k, 1m | {primitive_status('CT×CT')} |
 | `CT+PT` | 1k, 50k, 1m | pending public-operand compatibility probe |
 | `CT×PT` | 1k, 50k, 1m | pending public-operand compatibility probe |
 
@@ -152,14 +156,22 @@ def generate(
     lower: bool,
     heir_opt: str,
     heir_translate: str,
+    profile: str,
 ) -> dict[str, object]:
     if slot_count <= 0 or ciphertext_degree < 2 * slot_count:
         raise ValueError("ciphertext_degree must be at least twice the CKKS slot_count")
     if output_dir.exists():
         raise FileExistsError(f"refusing to overwrite: {output_dir}")
     output_dir.mkdir(parents=True)
+    all_specs = kernel_specs(slot_count)
+    if profile == "primitives":
+        specs = all_specs[:3]
+    elif profile == "extended":
+        specs = all_specs[3:]
+    else:
+        specs = all_specs
     kernels: list[dict[str, object]] = []
-    for index, spec in enumerate(kernel_specs(slot_count)):
+    for index, spec in enumerate(specs):
         directory = output_dir / f"{index:02d}_{spec.entry_function}"
         directory.mkdir()
         source = directory / "source.mlir"
@@ -219,6 +231,7 @@ def generate(
         "core_runtime_value_counts": [1_000, 50_000, 1_000_000],
         "core_note": "CT+CT and CT-CT reuse one 8192-lane kernel; value count determines streamed ciphertext chunks at runtime.",
         "extended_note": "Extended kernels use deliberately smaller one-ciphertext defaults for the weak server. Each default is recorded per kernel.",
+        "generation_profile": profile,
         "kernels": kernels,
     }
     write_json(output_dir / "generation_manifest.json", manifest)
@@ -232,6 +245,7 @@ def main() -> None:
     parser.add_argument("--slot-count", type=int, default=8192)
     parser.add_argument("--ciphertext-degree", type=int, default=16384)
     parser.add_argument("--lower", action="store_true", help="run heir-opt and heir-translate after writing MLIR")
+    parser.add_argument("--profile", choices=("primitives", "extended", "all"), default="all")
     parser.add_argument("--heir-opt", default="heir-opt")
     parser.add_argument("--heir-translate", default="heir-translate")
     parser.add_argument("--overwrite", action="store_true")
@@ -246,6 +260,7 @@ def main() -> None:
         lower=args.lower,
         heir_opt=args.heir_opt,
         heir_translate=args.heir_translate,
+        profile=args.profile,
     )
     print(json.dumps(report, indent=2))
 
