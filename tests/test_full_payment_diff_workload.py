@@ -11,6 +11,9 @@ class FullPaymentDiffWorkloadTest(unittest.TestCase):
         self.assertIn("One CKKS context", source)
         self.assertIn("fullCount", source)
         self.assertIn("he_workload_seconds", source)
+        self.assertIn("he_pipeline_seconds", source)
+        self.assertIn("payment_diff_batches", source)
+        self.assertIn("loadBundle(featurePath)", source)
         self.assertNotIn("DEMO_ROWS", source)
 
 

@@ -95,6 +95,11 @@ Bundle multiplyPublic(const ContextT& context, const Bundle& values, double scal
   for (const auto& value : values) output.push_back(context->EvalMult(value, scalar));
   return output;
 }
+Bundle loadBundle(const std::filesystem::path& path) {
+  Bundle output;
+  require(Serial::DeserializeFromFile(path.string(), output, SerType::BINARY), "cannot load ciphertext artifact " + path.string());
+  return output;
+}
 int main(int argc, char** argv) {
   if (argc != 5) return 2;
   try {
@@ -109,7 +114,9 @@ int main(int argc, char** argv) {
     const double setupSeconds = seconds(setupStarted);
     std::ifstream list(listPath); require(list.good(), "cannot open batch path list");
     std::string line; Bundle totalSum, totalSquares; uint64_t batches = 0;
-    double encryptionSeconds = 0.0, workloadSeconds = 0.0, branchSeconds = 0.0;
+    double encryptionSeconds = 0.0, featureSeconds = 0.0, reductionSeconds = 0.0, branchSeconds = 0.0;
+    const auto featureDir = artifactDir / "payment_diff_batches";
+    std::filesystem::create_directories(featureDir);
     while (std::getline(list, line)) {
       if (line.empty()) continue; const auto batch = readBatch(line);
       auto started = std::chrono::steady_clock::now();
@@ -117,11 +124,21 @@ int main(int argc, char** argv) {
       auto encryptedPaid = encrypted_subtract__encrypt__arg1(context, batch.payment, keys.publicKey);
       encryptionSeconds += seconds(started);
       started = std::chrono::steady_clock::now();
-      auto sumFeature = encrypted_subtract(context, encryptedDue, encryptedPaid);
+      auto feature = encrypted_subtract(context, encryptedDue, encryptedPaid);
+      featureSeconds += seconds(started);
+      started = std::chrono::steady_clock::now();
+      const auto featurePath = featureDir / ("payment_diff_" + std::to_string(batches) + ".ct");
+      require(Serial::SerializeToFile(featurePath.string(), feature, SerType::BINARY), "cannot save PAYMENT_DIFF feature artifact");
+      // Generated reduction code may consume a bundle in place. Reload two
+      // independent branches from the saved feature artifact rather than
+      // recomputing PAYMENT_DIFF or sharing a mutable ciphertext object.
+      auto sumFeature = loadBundle(featurePath);
+      auto squareFeature = loadBundle(featurePath);
+      branchSeconds += seconds(started);
+      started = std::chrono::steady_clock::now();
       auto sum = fixed_count_sum(context, sumFeature);
-      auto squareFeature = encrypted_subtract(context, encryptedDue, encryptedPaid);
       auto squares = fixed_count_sum_squares(context, squareFeature);
-      workloadSeconds += seconds(started);
+      reductionSeconds += seconds(started);
       started = std::chrono::steady_clock::now();
       if (batches == 0) { totalSum = sum; totalSquares = squares; }
       else { totalSum = addBundles(context, totalSum, sum); totalSquares = addBundles(context, totalSquares, squares); }
@@ -134,7 +151,9 @@ int main(int argc, char** argv) {
     auto sumTimesMean = context->EvalMult(totalSum[0], mean[0]);
     auto varianceValue = context->EvalSub(totalSquares[0], sumTimesMean);
     varianceValue = context->EvalMult(varianceValue, 1.0 / static_cast<double>(fullCount - 1));
-    Bundle variance{varianceValue}; workloadSeconds += branchSeconds + seconds(finalStarted);
+    Bundle variance{varianceValue};
+    const double finalizationSeconds = seconds(finalStarted);
+    const double workloadSeconds = featureSeconds + reductionSeconds + branchSeconds + finalizationSeconds;
     std::filesystem::create_directories(artifactDir);
     require(Serial::SerializeToFile((artifactDir / "payment_diff_sum.ct").string(), totalSum, SerType::BINARY), "cannot save sum artifact");
     require(Serial::SerializeToFile((artifactDir / "payment_diff_mean.ct").string(), mean, SerType::BINARY), "cannot save mean artifact");
@@ -146,8 +165,11 @@ int main(int argc, char** argv) {
     const double auditSeconds = seconds(auditStarted);
     std::ofstream metrics(metricsPath); metrics << std::setprecision(17)
       << "{\"batch_count\":" << batches << ",\"setup_seconds\":" << setupSeconds
-      << ",\"encryption_seconds\":" << encryptionSeconds << ",\"he_workload_seconds\":" << workloadSeconds
-      << ",\"branch_accumulation_seconds\":" << branchSeconds << ",\"audit_seconds\":" << auditSeconds
+      << ",\"encryption_seconds\":" << encryptionSeconds << ",\"feature_seconds\":" << featureSeconds
+      << ",\"reduction_seconds\":" << reductionSeconds << ",\"he_workload_seconds\":" << workloadSeconds
+      << ",\"he_pipeline_seconds\":" << encryptionSeconds + workloadSeconds
+      << ",\"branch_materialization_and_accumulation_seconds\":" << branchSeconds
+      << ",\"finalization_seconds\":" << finalizationSeconds << ",\"audit_seconds\":" << auditSeconds
       << ",\"sum\":" << sumAudit << ",\"mean\":" << meanAudit << ",\"sample_variance\":" << varianceAudit << "}\n";
     return 0;
   } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
@@ -169,10 +191,12 @@ def markdown_report(preparation: dict[str, object], execution: dict[str, float])
 ## Scope
 
 All sanitized rows from `installments_payments.csv` are processed in one
-workload: **no groupby**. Each packed batch uses the same CKKS context; parent
-columns are encrypted once per batch, then independent ciphertext branches
-produce sum and square-sum. Those encrypted moments are accumulated before one
-global encrypted mean and sample-variance finalization.
+workload: **no groupby**. Client numeric/null representation and packing happen
+before timing starts. Each packed batch uses the same CKKS context; parent
+columns are encrypted once per batch, `PAYMENT_DIFF` is calculated once and
+saved as a ciphertext artifact, then independent reloaded branches produce sum
+and square-sum. Those encrypted moments are accumulated before one global
+encrypted mean and sample-variance finalization.
 
 | Raw rows | Kept rows | Dropped rows | CKKS vector size | Batches |
 |---:|---:|---:|---:|---:|
@@ -191,12 +215,15 @@ only for this benchmark audit.
 
 | Component | Seconds |
 |---|---:|
-| Pandas feature expressions | {timings['pandas_feature_expressions']} |
-| Pandas whole-dataframe aggregation | {timings['pandas_whole_dataframe_aggregation']} |
+| Python/Pandas workload: feature + whole-dataframe aggregation | {timings['pandas_feature_expressions'] + timings['pandas_whole_dataframe_aggregation']} |
 | HE setup (one context + keys) | {execution['setup_seconds']} |
 | HE encryption (all batches) | {execution['encryption_seconds']} |
-| HE workload headline (feature branches + reductions + global finalization) | {execution['he_workload_seconds']} |
-| Ciphertext branch accumulation | {execution['branch_accumulation_seconds']} |
+| HE workload headline: feature + persisted CT branches + reductions + global finalization | {execution['he_workload_seconds']} |
+| HE full online pipeline: encryption + HE workload | {execution['he_pipeline_seconds']} |
+| `PAYMENT_DIFF` feature calculation | {execution['feature_seconds']} |
+| Ciphertext materialization + branch accumulation | {execution['branch_materialization_and_accumulation_seconds']} |
+| Encrypted reductions | {execution['reduction_seconds']} |
+| Global encrypted finalization | {execution['finalization_seconds']} |
 | Audit decryption | {execution['audit_seconds']} |
 
 `PAYMENT_PERC` full aggregation is intentionally not included: the bounded
