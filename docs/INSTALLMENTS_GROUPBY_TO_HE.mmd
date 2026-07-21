@@ -1,0 +1,31 @@
+flowchart TD
+    raw["Client has raw installments rows<br/>SK_ID_CURR, AMT_INSTALMENT, AMT_PAYMENT"]
+    sort["1. Client sorts / groups rows by SK_ID_CURR<br/>This is structure only: no PAYMENT_DIFF, no sum"]
+    choice["2. Client chooses bucket capacity B<br/>First trial: B = 128 rows per customer block"]
+    mapping["3. Client keeps private mapping<br/>SK_ID_CURR → random opaque group ID<br/>and group ID → block sequence"]
+    blocks["4. Client writes padded blocks<br/>Each block contains only aligned numeric parent columns<br/>plus padding mask: real row = 1, padding = 0"]
+
+    raw --> sort --> choice --> mapping --> blocks
+
+    subgraph example["Example: B = 4 (small only to show the idea)"]
+      a["Customer A has 3 rows"] --> ab["Opaque group 52, block 0<br/>amount columns: row A1, A2, A3, zero<br/>padding mask: 1, 1, 1, 0"]
+      c["Customer C has 11 rows"] --> cb1["Opaque group 93, block 0<br/>customer C rows 1–4"]
+      c --> cb2["Opaque group 93, block 1<br/>customer C rows 5–8"]
+      c --> cb3["Opaque group 93, block 2<br/>customer C rows 9–11, zero"]
+    end
+
+    blocks --> a
+    blocks --> c
+
+    subgraph he["Later HE calculation"]
+      diff["Encrypt parent columns<br/>and calculate PAYMENT_DIFF per row"]
+      partial["Reduce each block:<br/>masked encrypted sum"]
+      merge["Merge partial results from blocks<br/>with the same opaque group ID"]
+      result["One encrypted PAYMENT_DIFF_SUM<br/>per original customer"]
+      diff --> partial --> merge --> result
+    end
+
+    ab --> diff
+    cb1 --> diff
+    cb2 --> diff
+    cb3 --> diff
