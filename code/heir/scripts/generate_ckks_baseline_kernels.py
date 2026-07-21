@@ -72,7 +72,7 @@ def kernel_specs(slot_count: int) -> tuple[KernelSpec, ...]:
     """Return core and scaled-down extended benchmark kernel sources."""
     sum_count = slot_count
     mean_count = slot_count
-    square_count = min(slot_count, 512)
+    square_count = slot_count
     variance_count = min(slot_count, 256)
     weighted_count = min(slot_count, 512)
     dot_count = min(slot_count, 512)
@@ -83,7 +83,7 @@ def kernel_specs(slot_count: int) -> tuple[KernelSpec, ...]:
         KernelSpec("CT×CT", "encrypted_multiply", slot_count, binary_mlir(slot_count, "multiply"), "available for the basic arithmetic extension"),
         KernelSpec("CKKS-SUM-01", "encrypted_sum", sum_count, encrypted_sum_mlir(sum_count), "one full CKKS ciphertext (8192 lanes in the baseline) per encrypted reduction"),
         KernelSpec("CKKS-MEAN-01", "fixed_count_mean", mean_count, fixed_count_mean_mlir(mean_count, mean_count), "mean-capable 8192-lane CKKS context for the shared SUM/MEAN benchmark"),
-        KernelSpec("CKKS-SQSUM-01", "fixed_count_sum_squares", square_count, fixed_count_sum_squares_mlir(square_count, square_count), "scaled to 512 lanes by default"),
+        KernelSpec("CKKS-SQSUM-01", "fixed_count_sum_squares", square_count, fixed_count_sum_squares_mlir(square_count, square_count), "one full CKKS ciphertext (8192 lanes in the baseline) per encrypted square-sum reduction"),
         KernelSpec("CKKS-VAR-01", "fixed_count_variance", variance_count, fixed_count_variance_mlir(variance_count, variance_count), "scaled to 256 lanes by default"),
         KernelSpec("CKKS-WSUM-01", "linear_score_ct_pt", weighted_count, linear_score_mlir(weighted_count), "scaled to 512 encrypted values with plaintext weights"),
         KernelSpec("CKKS-DOT-01", "dot_product", dot_count, dot_product_mlir(dot_count), "scaled to 512 encrypted/encrypted pairs"),
