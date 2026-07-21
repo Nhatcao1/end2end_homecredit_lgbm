@@ -206,6 +206,7 @@ int main(int argc, char** argv) {
 def markdown_report(preparation: dict[str, object], execution: dict[str, float]) -> str:
     oracle = preparation["plaintext_pandas_oracle"]  # type: ignore[index]
     diff = oracle["payment_diff"]  # type: ignore[index]
+    perc = oracle["payment_perc"]  # type: ignore[index]
     timings = oracle["timings_seconds"]  # type: ignore[index]
     rows = []
     for name, he_key in (("sum", "sum"), ("mean", "mean"), ("var", "sample_variance")):
@@ -213,7 +214,11 @@ def markdown_report(preparation: dict[str, object], execution: dict[str, float])
         scale = float(execution["amount_scale"])
         he = float(execution[he_key]) * (scale * scale if name == "var" else scale)
         rows.append(f"| `{name}` | {plain} | {he} | {abs(plain - he)} |")
-    return f"""# Full PAYMENT_DIFF whole-dataframe HE workload
+    perc_rows = "\n".join(
+        f"| `{name}` | {perc['sample_var' if name == 'var' else name]} | NOT_RUN | full HE ratio aggregation is deferred |"
+        for name in ("max", "mean", "sum", "var")
+    )
+    return f"""# Full installment-expression HE workload
 
 ## Scope
 
@@ -233,6 +238,17 @@ are restored to original monetary units after decryption.
 |---:|---:|---:|---:|---:|
 | {preparation['client_sanitation']['raw_rows']} | {preparation['client_sanitation']['kept_rows']} | {preparation['client_sanitation']['dropped_rows']} | {preparation['packing']['vector_size']} | {execution['batch_count']} |
 
+## PAYMENT_PERC status
+
+Pandas uses the original expression `AMT_PAYMENT / AMT_INSTALMENT` on the same
+sanitized whole dataframe. Its HE feature/aggregate pipeline is not run here:
+the current bounded reciprocal kernel needs a reviewed full-data denominator
+range contract, and its aggregate chain previously exceeded CKKS depth/RAM.
+
+| Aggregate | Pandas | HE audit | Status |
+|---|---:|---|---|
+{perc_rows}
+
 ## Python versus HE accuracy
 
 Python is the streamed Pandas whole-dataframe oracle; HE values are decrypted
@@ -246,7 +262,8 @@ only for this benchmark audit.
 
 | Component | Seconds |
 |---|---:|
-| Python/Pandas workload: feature + whole-dataframe aggregation | {timings['pandas_feature_expressions'] + timings['pandas_whole_dataframe_aggregation']} |
+| Python/Pandas `PAYMENT_PERC`: feature + whole-dataframe aggregation | {timings.get('pandas_payment_perc_feature_expression', 0.0) + timings.get('pandas_payment_perc_aggregation', 0.0)} |
+| Python/Pandas `PAYMENT_DIFF`: feature + whole-dataframe aggregation | {timings.get('pandas_payment_diff_feature_expression', timings['pandas_feature_expressions']) + timings.get('pandas_payment_diff_aggregation', timings['pandas_whole_dataframe_aggregation'])} |
 | HE setup (one context + keys) | {execution['setup_seconds']} |
 | HE encryption (all batches) | {execution['encryption_seconds']} |
 | HE workload headline: feature + persisted CT branches + reductions + global finalization | {execution['he_workload_seconds']} |
@@ -257,9 +274,8 @@ only for this benchmark audit.
 | Global encrypted finalization | {execution['finalization_seconds']} |
 | Audit decryption | {execution['audit_seconds']} |
 
-`PAYMENT_PERC` full aggregation is intentionally not included: the bounded
-reciprocal feature works as a micro-proof, but its chained aggregation still
-exceeds the current server's depth/memory budget. No result is substituted.
+`PAYMENT_PERC` has a full-data plaintext reference above, but no HE result is
+substituted for its deferred encrypted route.
 """
 
 

@@ -18,6 +18,7 @@ class FullPaymentDiffWorkloadTest(unittest.TestCase):
         self.assertIn("log2(N)", source)
         self.assertIn("--amount-scale", source)
         self.assertIn("amount /", source)
+        self.assertIn("PAYMENT_PERC status", source)
         self.assertNotIn("DEMO_ROWS", source)
 
 

@@ -20,6 +20,7 @@ class FullInstallmentsPreparationTest(unittest.TestCase):
         self.assertIn("batch_manifest.json", source)
         self.assertIn("--max-rows", source)
         self.assertIn("requested_raw_row_limit", source)
+        self.assertIn("pandas_payment_perc_feature_expression", source)
 
 
 if __name__ == "__main__":

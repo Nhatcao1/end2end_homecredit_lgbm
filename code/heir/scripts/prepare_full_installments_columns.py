@@ -53,6 +53,10 @@ def prepare(
     ratio_max = -math.inf
     pandas_feature_seconds = 0.0
     pandas_aggregation_seconds = 0.0
+    pandas_diff_feature_seconds = 0.0
+    pandas_perc_feature_seconds = 0.0
+    pandas_diff_aggregation_seconds = 0.0
+    pandas_perc_aggregation_seconds = 0.0
     batch_index = 0
     buffered_payment: list[float] = []
     buffered_installment: list[float] = []
@@ -110,17 +114,23 @@ def prepare(
         # are written to HE batches.
         feature_started = time.perf_counter()
         diff = clean_installment - clean_payment
+        pandas_diff_feature_seconds += time.perf_counter() - feature_started
+        feature_started = time.perf_counter()
         ratio = clean_payment / clean_installment
-        pandas_feature_seconds += time.perf_counter() - feature_started
+        pandas_perc_feature_seconds += time.perf_counter() - feature_started
+        pandas_feature_seconds = pandas_diff_feature_seconds + pandas_perc_feature_seconds
         aggregate_started = time.perf_counter()
         diff_sum += float(diff.sum())
         diff_sum_squares += float((diff * diff).sum())
+        pandas_diff_aggregation_seconds += time.perf_counter() - aggregate_started
+        aggregate_started = time.perf_counter()
         ratio_sum += float(ratio.sum())
         ratio_sum_squares += float((ratio * ratio).sum())
         if not ratio.empty:
             ratio_min = min(ratio_min, float(ratio.min()))
             ratio_max = max(ratio_max, float(ratio.max()))
-        pandas_aggregation_seconds += time.perf_counter() - aggregate_started
+        pandas_perc_aggregation_seconds += time.perf_counter() - aggregate_started
+        pandas_aggregation_seconds = pandas_diff_aggregation_seconds + pandas_perc_aggregation_seconds
 
         buffered_payment.extend(clean_payment.tolist())
         buffered_installment.extend(clean_installment.tolist())
@@ -164,6 +174,10 @@ def prepare(
             "timings_seconds": {
                 "pandas_feature_expressions": pandas_feature_seconds,
                 "pandas_whole_dataframe_aggregation": pandas_aggregation_seconds,
+                "pandas_payment_diff_feature_expression": pandas_diff_feature_seconds,
+                "pandas_payment_diff_aggregation": pandas_diff_aggregation_seconds,
+                "pandas_payment_perc_feature_expression": pandas_perc_feature_seconds,
+                "pandas_payment_perc_aggregation": pandas_perc_aggregation_seconds,
             },
         },
         "manifest": "batch_manifest.json",
