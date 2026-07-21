@@ -95,6 +95,29 @@ Bundle multiplyPublic(const ContextT& context, const Bundle& values, double scal
   for (const auto& value : values) output.push_back(context->EvalMult(value, scalar));
   return output;
 }
+void addBalanced(const ContextT& context, std::vector<Bundle>& levels, Bundle value) {
+  // Binary-counter accumulation bounds an input's addition path by log2(N),
+  // unlike a sequential total = total + batch chain of N additions.
+  size_t level = 0;
+  while (level < levels.size() && !levels[level].empty()) {
+    value = addBundles(context, levels[level], value);
+    levels[level].clear();
+    ++level;
+  }
+  if (level == levels.size()) levels.resize(level + 1);
+  levels[level] = std::move(value);
+}
+Bundle finalizeBalanced(const ContextT& context, const std::vector<Bundle>& levels) {
+  Bundle result; bool hasResult = false;
+  // At most log2(batch_count) non-empty levels remain here.
+  for (auto it = levels.rbegin(); it != levels.rend(); ++it) {
+    if (it->empty()) continue;
+    if (!hasResult) { result = *it; hasResult = true; }
+    else result = addBundles(context, result, *it);
+  }
+  require(hasResult, "no ciphertext totals to finalize");
+  return result;
+}
 Bundle loadBundle(const std::filesystem::path& path) {
   Bundle output;
   require(Serial::DeserializeFromFile(path.string(), output, SerType::BINARY), "cannot load ciphertext artifact " + path.string());
@@ -113,7 +136,7 @@ int main(int argc, char** argv) {
     context = encrypted_subtract__configure_crypto_context(context, keys.secretKey);
     const double setupSeconds = seconds(setupStarted);
     std::ifstream list(listPath); require(list.good(), "cannot open batch path list");
-    std::string line; Bundle totalSum, totalSquares; uint64_t batches = 0;
+    std::string line; std::vector<Bundle> sumLevels, squareLevels; uint64_t batches = 0;
     double encryptionSeconds = 0.0, featureSeconds = 0.0, reductionSeconds = 0.0, branchSeconds = 0.0;
     const auto featureDir = artifactDir / "payment_diff_batches";
     std::filesystem::create_directories(featureDir);
@@ -140,12 +163,14 @@ int main(int argc, char** argv) {
       auto squares = fixed_count_sum_squares(context, squareFeature);
       reductionSeconds += seconds(started);
       started = std::chrono::steady_clock::now();
-      if (batches == 0) { totalSum = sum; totalSquares = squares; }
-      else { totalSum = addBundles(context, totalSum, sum); totalSquares = addBundles(context, totalSquares, squares); }
+      addBalanced(context, sumLevels, std::move(sum));
+      addBalanced(context, squareLevels, std::move(squares));
       branchSeconds += seconds(started); ++batches;
     }
     require(batches > 0, "no batches provided");
     auto finalStarted = std::chrono::steady_clock::now();
+    auto totalSum = finalizeBalanced(context, sumLevels);
+    auto totalSquares = finalizeBalanced(context, squareLevels);
     auto mean = multiplyPublic(context, totalSum, 1.0 / static_cast<double>(fullCount));
     require(totalSum.size() == 1 && totalSquares.size() == 1 && mean.size() == 1, "expected scalar output bundles");
     auto sumTimesMean = context->EvalMult(totalSum[0], mean[0]);
@@ -195,8 +220,8 @@ workload: **no groupby**. Client numeric/null representation and packing happen
 before timing starts. Each packed batch uses the same CKKS context; parent
 columns are encrypted once per batch, `PAYMENT_DIFF` is calculated once and
 saved as a ciphertext artifact, then independent reloaded branches produce sum
-and square-sum. Those encrypted moments are accumulated before one global
-encrypted mean and sample-variance finalization.
+and square-sum. Those encrypted moments are accumulated through a binary-tree
+reduction before one global encrypted mean and sample-variance finalization.
 
 | Raw rows | Kept rows | Dropped rows | CKKS vector size | Batches |
 |---:|---:|---:|---:|---:|
