@@ -70,7 +70,8 @@ def polynomial_vector_mlir(vector_size: int) -> str:
 
 def kernel_specs(slot_count: int) -> tuple[KernelSpec, ...]:
     """Return core and scaled-down extended benchmark kernel sources."""
-    sum_count = min(slot_count, 1024)
+    sum_count = slot_count
+    mean_count = min(slot_count, 1024)
     square_count = min(slot_count, 512)
     variance_count = min(slot_count, 256)
     weighted_count = min(slot_count, 512)
@@ -80,8 +81,8 @@ def kernel_specs(slot_count: int) -> tuple[KernelSpec, ...]:
         KernelSpec("CT+CT", "encrypted_add", slot_count, binary_mlir(slot_count, "add"), "stream 1k/50k/1m aligned values in slot-sized chunks"),
         KernelSpec("CT-CT", "encrypted_subtract", slot_count, binary_mlir(slot_count, "subtract"), "stream 1k/50k/1m aligned values in slot-sized chunks"),
         KernelSpec("CT×CT", "encrypted_multiply", slot_count, binary_mlir(slot_count, "multiply"), "available for the basic arithmetic extension"),
-        KernelSpec("CKKS-SUM-01", "encrypted_sum", sum_count, encrypted_sum_mlir(sum_count), "scaled to 1024 lanes by default"),
-        KernelSpec("CKKS-MEAN-01", "fixed_count_mean", sum_count, fixed_count_mean_mlir(sum_count, sum_count), "scaled to 1024 lanes by default"),
+        KernelSpec("CKKS-SUM-01", "encrypted_sum", sum_count, encrypted_sum_mlir(sum_count), "one full CKKS ciphertext (8192 lanes in the baseline) per encrypted reduction"),
+        KernelSpec("CKKS-MEAN-01", "fixed_count_mean", mean_count, fixed_count_mean_mlir(mean_count, mean_count), "scaled to 1024 lanes by default"),
         KernelSpec("CKKS-SQSUM-01", "fixed_count_sum_squares", square_count, fixed_count_sum_squares_mlir(square_count, square_count), "scaled to 512 lanes by default"),
         KernelSpec("CKKS-VAR-01", "fixed_count_variance", variance_count, fixed_count_variance_mlir(variance_count, variance_count), "scaled to 256 lanes by default"),
         KernelSpec("CKKS-WSUM-01", "linear_score_ct_pt", weighted_count, linear_score_mlir(weighted_count), "scaled to 512 encrypted values with plaintext weights"),
