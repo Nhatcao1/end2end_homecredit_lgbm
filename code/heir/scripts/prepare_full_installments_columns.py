@@ -23,7 +23,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from code.heir.common import write_json
 
 
-def prepare(input_csv: Path, output_dir: Path, *, vector_size: int, chunk_rows: int) -> dict[str, object]:
+def prepare(
+    input_csv: Path,
+    output_dir: Path,
+    *,
+    vector_size: int,
+    chunk_rows: int,
+    max_rows: int,
+) -> dict[str, object]:
     """Read the full CSV in chunks and write raw numeric HE batches plus manifest."""
     try:
         import pandas as pd
@@ -81,6 +88,10 @@ def prepare(input_csv: Path, output_dir: Path, *, vector_size: int, chunk_rows: 
         usecols=["AMT_PAYMENT", "AMT_INSTALMENT"],
         chunksize=chunk_rows,
     ):
+        if max_rows and raw_rows >= max_rows:
+            break
+        if max_rows and raw_rows + len(chunk) > max_rows:
+            chunk = chunk.iloc[: max_rows - raw_rows]
         raw_rows += len(chunk)
         payment = pd.to_numeric(chunk["AMT_PAYMENT"], errors="coerce")
         installment = pd.to_numeric(chunk["AMT_INSTALMENT"], errors="coerce")
@@ -131,6 +142,7 @@ def prepare(input_csv: Path, output_dir: Path, *, vector_size: int, chunk_rows: 
         "source_csv": str(input_csv.resolve()),
         "client_sanitation": {
             "raw_rows": raw_rows,
+            "requested_raw_row_limit": max_rows or "all source rows",
             "kept_rows": kept_rows,
             "dropped_rows": dropped_rows,
             "rule": "drop only missing/non-finite AMT_PAYMENT or AMT_INSTALMENT, and AMT_INSTALMENT <= 0",
@@ -167,6 +179,7 @@ def main() -> None:
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--vector-size", type=int, default=8192)
     parser.add_argument("--chunk-rows", type=int, default=100_000)
+    parser.add_argument("--max-rows", type=int, default=0, help="raw source-row cap; 0 means all rows")
     parser.add_argument("--overwrite", action="store_true")
     args = parser.parse_args()
     root = args.output_dir.resolve()
@@ -175,7 +188,9 @@ def main() -> None:
             raise FileExistsError(f"refusing to overwrite: {root}; pass --overwrite")
         shutil.rmtree(root)
     root.mkdir(parents=True)
-    print(json.dumps(prepare(args.input_csv.resolve(), root, vector_size=args.vector_size, chunk_rows=args.chunk_rows), indent=2))
+    if args.max_rows < 0:
+        raise ValueError("max_rows must be zero (all rows) or positive")
+    print(json.dumps(prepare(args.input_csv.resolve(), root, vector_size=args.vector_size, chunk_rows=args.chunk_rows, max_rows=args.max_rows), indent=2))
 
 
 if __name__ == "__main__":

@@ -18,6 +18,8 @@ class FullInstallmentsPreparationTest(unittest.TestCase):
         self.assertIn("AMT_INSTALMENT", source)
         self.assertIn("Raw parent columns, not these derived values", source)
         self.assertIn("batch_manifest.json", source)
+        self.assertIn("--max-rows", source)
+        self.assertIn("requested_raw_row_limit", source)
 
 
 if __name__ == "__main__":
