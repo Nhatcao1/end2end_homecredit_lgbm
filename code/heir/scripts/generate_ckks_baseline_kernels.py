@@ -157,6 +157,7 @@ def generate(
     heir_opt: str,
     heir_translate: str,
     profile: str,
+    entries: tuple[str, ...],
 ) -> dict[str, object]:
     if slot_count <= 0 or ciphertext_degree < 2 * slot_count:
         raise ValueError("ciphertext_degree must be at least twice the CKKS slot_count")
@@ -170,6 +171,12 @@ def generate(
         specs = all_specs[3:]
     else:
         specs = all_specs
+    if entries:
+        requested = set(entries)
+        specs = tuple(spec for spec in specs if spec.entry_function in requested)
+        missing = requested - {spec.entry_function for spec in specs}
+        if missing:
+            raise ValueError(f"requested entries are unavailable for profile {profile!r}: {sorted(missing)}")
     kernels: list[dict[str, object]] = []
     for index, spec in enumerate(specs):
         directory = output_dir / f"{index:02d}_{spec.entry_function}"
@@ -246,6 +253,7 @@ def main() -> None:
     parser.add_argument("--ciphertext-degree", type=int, default=16384)
     parser.add_argument("--lower", action="store_true", help="run heir-opt and heir-translate after writing MLIR")
     parser.add_argument("--profile", choices=("primitives", "extended", "all"), default="all")
+    parser.add_argument("--entries", nargs="*", default=[], help="optional entry functions to generate, e.g. encrypted_sum")
     parser.add_argument("--heir-opt", default="heir-opt")
     parser.add_argument("--heir-translate", default="heir-translate")
     parser.add_argument("--overwrite", action="store_true")
@@ -261,6 +269,7 @@ def main() -> None:
         heir_opt=args.heir_opt,
         heir_translate=args.heir_translate,
         profile=args.profile,
+        entries=tuple(args.entries),
     )
     print(json.dumps(report, indent=2))
 

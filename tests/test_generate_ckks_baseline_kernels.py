@@ -39,6 +39,7 @@ class GenerateCkksBaselineKernelsTest(unittest.TestCase):
                 heir_opt="unused",
                 heir_translate="unused",
                 profile="all",
+                entries=(),
             )
             self.assertEqual(manifest["requested_ring_dimension"], 16)
             self.assertEqual(manifest["requested_slot_count"], 8)
