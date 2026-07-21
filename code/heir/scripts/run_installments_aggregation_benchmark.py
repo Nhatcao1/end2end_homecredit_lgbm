@@ -53,6 +53,21 @@ def python_baseline() -> dict[str, Any]:
     }
 
 
+def input_shape(vector_size: int) -> dict[str, int]:
+    """Describe the review input, including CKKS packing rather than hiding it."""
+    real_rows = len(DEMO_ROWS)
+    if vector_size < real_rows:
+        raise ValueError(f"vector size {vector_size} cannot hold {real_rows} review rows")
+    return {
+        "parent_amt_payment_rows": real_rows,
+        "parent_amt_installment_rows": real_rows,
+        "aligned_parent_rows": real_rows,
+        "valid_feature_lanes": real_rows,
+        "ckks_vector_size": vector_size,
+        "zero_padding_lanes": vector_size - real_rows,
+    }
+
+
 def run_lane(label: str, command: list[str], output: Path) -> dict[str, Any]:
     """Run one child benchmark and retain its complete stdout/stderr artifact."""
     started = time.perf_counter()
@@ -71,7 +86,7 @@ def run_lane(label: str, command: list[str], output: Path) -> dict[str, Any]:
     }
 
 
-def markdown_report(output: Path, baseline: dict[str, Any], ratio: dict[str, Any], diff: dict[str, Any]) -> str:
+def markdown_report(input_rows: dict[str, int], baseline: dict[str, Any], ratio: dict[str, Any], diff: dict[str, Any]) -> str:
     ratio_execution = (ratio.get("result") or {}).get("execution", {})
     diff_stage_seconds = (diff.get("result") or {}).get("stage_seconds", {})
     diff_stats = (diff.get("result") or {}).get("aggregation_comparison", [])
@@ -91,6 +106,17 @@ is feasible. It does not claim that a plaintext aggregate is an HE result.
 ins['PAYMENT_PERC'] = ins['AMT_PAYMENT'] / ins['AMT_INSTALMENT']
 ins['PAYMENT_DIFF'] = ins['AMT_INSTALMENT'] - ins['AMT_PAYMENT']
 ```
+
+## Input shape and packing
+
+| Input | Real aligned rows | Valid encrypted lanes | CKKS vector size | Zero-padding lanes |
+|---|---:|---:|---:|---:|
+| `AMT_PAYMENT` parent column | {input_rows['parent_amt_payment_rows']} | {input_rows['valid_feature_lanes']} | {input_rows['ckks_vector_size']} | {input_rows['zero_padding_lanes']} |
+| `AMT_INSTALMENT` parent column | {input_rows['parent_amt_installment_rows']} | {input_rows['valid_feature_lanes']} | {input_rows['ckks_vector_size']} | {input_rows['zero_padding_lanes']} |
+
+The parent columns are position-aligned review inputs. This benchmark has no
+dataframe join or groupby: each pair of aligned lanes produces one encrypted
+feature value. Padding is zero and is excluded from the fixed public count.
 
 ## Result matrix
 
@@ -142,6 +168,7 @@ def main() -> None:
             raise FileExistsError(f"refusing to overwrite: {root}; pass --overwrite")
         shutil.rmtree(root)
     root.mkdir(parents=True)
+    input_rows = input_shape(args.vector_size)
     baseline = python_baseline()
     plans = {
         "column_subtract": encrypted_column("subtract", args.vector_size).__dict__,
@@ -157,9 +184,9 @@ def main() -> None:
     diff_command = [sys.executable, "code/heir/scripts/run_payment_diff_fixed_count_aggregates.py", "--output-dir", str(root / "payment_diff"), "--vector-size", str(args.vector_size), "--ckks-mul-depth", "4", "--heir-opt", args.heir_opt, "--heir-translate", args.heir_translate, "--openfhe-dir", args.openfhe_dir]
     ratio = run_lane("payment_perc", ratio_command, root)
     diff = run_lane("payment_diff", diff_command, root)
-    report = markdown_report(root, baseline, ratio, diff)
+    report = markdown_report(input_rows, baseline, ratio, diff)
     (root / "REPORT.md").write_text(report, encoding="utf-8")
-    result = {"status": "complete" if ratio["status"] == diff["status"] == "executed" else "partial", "baseline": baseline, "lanes": {"payment_perc": ratio, "payment_diff": diff}, "max": {"status": "deferred_safe_scheme_switch_session", "reason": "requires duplicate-candidate padding and public range contract; tracked separately"}, "report": "REPORT.md"}
+    result = {"status": "complete" if ratio["status"] == diff["status"] == "executed" else "partial", "input_shape": input_rows, "baseline": baseline, "lanes": {"payment_perc": ratio, "payment_diff": diff}, "max": {"status": "deferred_safe_scheme_switch_session", "reason": "requires duplicate-candidate padding and public range contract; tracked separately"}, "report": "REPORT.md"}
     write_json(root / "result.json", result)
     print(json.dumps({"status": result["status"], "report": str(root / "REPORT.md"), "lanes": {name: lane["status"] for name, lane in result["lanes"].items()}}, indent=2))
     if result["status"] != "complete" and not args.allow_partial:
