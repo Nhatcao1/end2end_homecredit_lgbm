@@ -9,5 +9,7 @@ class RunCkksSumBenchmarkTest(unittest.TestCase):
         self.assertIn("pandas_sum",source)
         self.assertIn("OMP_NUM_THREADS=1",source)
         self.assertIn("CKKS-SUM-01",source)
+        self.assertIn("CKKS-MEAN-01",source)
+        self.assertIn("EvalMult(value,inverse)",source)
 
 if __name__=="__main__": unittest.main()
