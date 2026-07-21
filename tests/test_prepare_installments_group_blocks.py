@@ -54,6 +54,7 @@ class PrepareInstallmentsGroupBlocksTest(unittest.TestCase):
                 source,
                 output,
                 bucket_size=4,
+                vector_size=8,
                 partition_count=3,
                 blocks_per_shard=2,
                 max_rows=0,
@@ -64,12 +65,15 @@ class PrepareInstallmentsGroupBlocksTest(unittest.TestCase):
             self.assertEqual(report["source_rows"]["missing_id_rows"], 1)
             self.assertEqual(report["group_layout"]["groups"], 3)
             self.assertEqual(report["group_layout"]["blocks"], 4)
+            self.assertEqual(report["group_layout"]["blocks_per_ciphertext"], 2)
+            self.assertEqual(report["group_layout"]["planned_packed_ciphertext_batches"], 2)
             self.assertEqual(report["group_layout"]["implicit_zero_padding_rows"], 7)
             self.assertFalse((output / "client_private" / "staging").exists())
 
             layout_text = (output / "layout" / "block_layout.csv").read_text(encoding="utf-8")
             self.assertNotIn("SK_ID_CURR", layout_text)
             self.assertNotIn("PAYMENT_DIFF", layout_text)
+            self.assertIn("packed_ciphertext_batch", layout_text)
             mapping = (output / "client_private" / "group_mapping.csv").read_text(encoding="utf-8")
             self.assertIn("SK_ID_CURR", mapping)
             self.assertIn("A", mapping)

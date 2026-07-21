@@ -148,6 +148,7 @@ def prepare(
     output_dir: Path,
     *,
     bucket_size: int,
+    vector_size: int,
     partition_count: int,
     blocks_per_shard: int,
     max_rows: int,
@@ -160,6 +161,8 @@ def prepare(
         raise FileNotFoundError(f"installments CSV is missing: {input_csv}")
     if bucket_size < 1:
         raise ValueError("bucket_size must be positive")
+    if vector_size < bucket_size or vector_size % bucket_size:
+        raise ValueError("vector_size must be an exact positive multiple of bucket_size")
     if partition_count < 1:
         raise ValueError("partition_count must be positive")
     if blocks_per_shard < 1:
@@ -186,6 +189,7 @@ def prepare(
 
     group_mapping_path = client_private / "group_mapping.csv"
     block_layout_path = public_layout / "block_layout.csv"
+    blocks_per_ciphertext = vector_size // bucket_size
     group_count = block_count = padding_rows = largest_group_rows = 0
     parent_writer = _ParentRowShards(parent_rows, blocks_per_shard)
     try:
@@ -196,7 +200,14 @@ def prepare(
             mapping_writer.writerow(["opaque_group_id", "SK_ID_CURR", "source_rows"])
             layout_writer = csv.writer(layout_handle)
             layout_writer.writerow(
-                ["opaque_group_id", "group_block_index", "real_rows", "padding_rows"]
+                [
+                    "packed_ciphertext_batch",
+                    "segment_index",
+                    "opaque_group_id",
+                    "group_block_index",
+                    "real_rows",
+                    "padding_rows",
+                ]
             )
             for partition_path in sorted(staging.glob("partition_*.csv")):
                 with partition_path.open("r", encoding="utf-8", newline="") as handle:
@@ -214,7 +225,19 @@ def prepare(
                         block_padding = bucket_size - real_rows
                         parent_writer.begin_block()
                         parent_writer.write_rows(group_id, group_block_index, block_rows)
-                        layout_writer.writerow([group_id, group_block_index, real_rows, block_padding])
+                        # One packed CKKS vector later holds several independent
+                        # customer blocks.  The scheduled segment is metadata,
+                        # not a feature calculation or an encrypted operation.
+                        layout_writer.writerow(
+                            [
+                                block_count // blocks_per_ciphertext,
+                                block_count % blocks_per_ciphertext,
+                                group_id,
+                                group_block_index,
+                                real_rows,
+                                block_padding,
+                            ]
+                        )
                         block_count += 1
                         padding_rows += block_padding
     finally:
@@ -241,6 +264,10 @@ def prepare(
             "largest_group_rows": largest_group_rows,
             "bucket_size": bucket_size,
             "blocks": block_count,
+            "ckks_vector_size": vector_size,
+            "blocks_per_ciphertext": blocks_per_ciphertext,
+            "planned_packed_ciphertext_batches": (block_count + blocks_per_ciphertext - 1)
+            // blocks_per_ciphertext,
             "implicit_zero_padding_rows": padding_rows,
             "padding_mask_rule": "for each block: [1] * real_rows + [0] * padding_rows; materialize only during later encryption",
         },
@@ -261,6 +288,7 @@ def main() -> None:
     parser.add_argument("--input-csv", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--bucket-size", type=int, default=128)
+    parser.add_argument("--vector-size", type=int, default=8192)
     parser.add_argument("--partitions", type=int, default=128)
     parser.add_argument("--blocks-per-shard", type=int, default=10_000)
     parser.add_argument("--max-rows", type=int, default=0, help="raw source-row cap; 0 means all rows")
@@ -281,6 +309,7 @@ def main() -> None:
         args.input_csv.resolve(),
         root,
         bucket_size=args.bucket_size,
+        vector_size=args.vector_size,
         partition_count=args.partitions,
         blocks_per_shard=args.blocks_per_shard,
         max_rows=args.max_rows,
