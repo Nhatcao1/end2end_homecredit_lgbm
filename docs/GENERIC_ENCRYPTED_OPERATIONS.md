@@ -192,10 +192,11 @@ configured.
 For the three fixed review rows, use the bounded non-bootstrap runner below.
 It encrypts `AMT_INSTALMENT` and `AMT_PAYMENT`, derives
 `PAYMENT_DIFF = AMT_INSTALMENT - AMT_PAYMENT` after encryption, serializes that
-source ciphertext, then reloads independent ciphertext branches for encrypted
-`sum`, `mean`, and sample `var`. This is intentional: the installed generated
-HEIR code may mutate an input/output buffer in place, so multi-output results
-must not share a mutable ciphertext object. It writes a familiar audit table:
+source ciphertext. It then runs separately isolated `sum`, `mean`, and sample
+`var` processes. Each process reloads the same one-time CKKS session and only
+its input artifact. This is intentional: the installed generated HEIR code may
+mutate an input/output buffer in place, so multi-output results must not share
+a mutable ciphertext object. It writes a familiar audit table:
 
 ```bash
 python3 code/heir/scripts/run_payment_diff_fixed_count_aggregates.py \
@@ -205,6 +206,13 @@ python3 code/heir/scripts/run_payment_diff_fixed_count_aggregates.py \
   --ckks-mul-depth 4 \
   --openfhe-dir /usr/local/lib/OpenFHE
 ```
+
+The command internally executes `init → feature → sum / mean / variance →
+audit`. `init` is the only stage that creates a CKKS context. It persists
+`session/context.bin`, the public key, and the evaluation-key bundle; later
+stages load those exact files and do not create another context. The local
+benchmark audit also persists a secret key under `session/audit_secret.key`;
+that file must stay with the key owner in a real deployment.
 
 Review `feature_comparison.csv` and `aggregation_comparison.csv`; all four
 ciphertext artifacts are under `ciphertexts/`:

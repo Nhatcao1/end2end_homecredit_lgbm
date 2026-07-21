@@ -23,8 +23,9 @@ class PaymentDiffFixedCountAggregatesTest(unittest.TestCase):
         self.assertIn("return %sample_variance", sources[2])
 
     def test_runner_does_not_claim_max_is_ckks(self) -> None:
-        self.assertIn("loadCiphertext(argv[3])", RUNNER)
-        self.assertIn("source of truth", RUNNER)
+        self.assertIn('stage == "init"', RUNNER)
+        self.assertIn('stage == "variance"', RUNNER)
+        self.assertIn("loadEvaluationKeys", RUNNER)
 
 
 if __name__ == "__main__":

@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Run encrypted PAYMENT_DIFF -> sum/mean/variance for one fixed-size group.
+"""Execute a process-isolated encrypted PAYMENT_DIFF aggregation DAG.
 
-``max`` is deliberately reported as pending: it requires the separate
-CKKS-to-FHEW comparison lane and is not fabricated by this CKKS runner.
+One CKKS session is created exactly once. Every later process reloads that
+session and one saved ciphertext artifact. This makes mutable HEIR/OpenFHE
+ciphertext ownership explicit and observable.
 """
 
 from __future__ import annotations
@@ -32,17 +33,17 @@ from code.heir.scripts.run_payment_features_ciphertext_demo import (
 
 
 CMAKE = r'''cmake_minimum_required(VERSION 3.16)
-project(payment_diff_fixed_count_aggregates LANGUAGES CXX)
+project(payment_diff_process_dag LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 find_package(OpenFHE CONFIG REQUIRED)
 set(HEIR_FLAGS "${OpenFHE_CXX_FLAGS}")
 string(REPLACE "-Werror" "" HEIR_FLAGS "${HEIR_FLAGS}")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${HEIR_FLAGS}")
-add_executable(aggregate_runner feature_output.cpp sum_output.cpp mean_output.cpp variance_output.cpp aggregate_runner.cpp)
-target_include_directories(aggregate_runner PRIVATE "${OpenFHE_INCLUDE}" "${OpenFHE_INCLUDE}/third-party/include" "${OpenFHE_INCLUDE}/core" "${OpenFHE_INCLUDE}/pke" "${OpenFHE_INCLUDE}/binfhe")
-target_link_directories(aggregate_runner PRIVATE "${OpenFHE_LIBDIR}")
-target_link_libraries(aggregate_runner PRIVATE ${OpenFHE_SHARED_LIBRARIES})
-set_target_properties(aggregate_runner PROPERTIES BUILD_RPATH "${OpenFHE_LIBDIR}")
+add_executable(process_dag_runner feature_output.cpp sum_output.cpp mean_output.cpp variance_output.cpp process_dag_runner.cpp)
+target_include_directories(process_dag_runner PRIVATE "${OpenFHE_INCLUDE}" "${OpenFHE_INCLUDE}/third-party/include" "${OpenFHE_INCLUDE}/core" "${OpenFHE_INCLUDE}/pke" "${OpenFHE_INCLUDE}/binfhe")
+target_link_directories(process_dag_runner PRIVATE "${OpenFHE_LIBDIR}")
+target_link_libraries(process_dag_runner PRIVATE ${OpenFHE_SHARED_LIBRARIES})
+set_target_properties(process_dag_runner PROPERTIES BUILD_RPATH "${OpenFHE_LIBDIR}")
 '''
 
 
@@ -61,64 +62,123 @@ RUNNER = r'''
 #include "variance_output.h"
 #include "ciphertext-ser.h"
 #include "cryptocontext-ser.h"
+#include "key/evalkey-ser.h"
 #include "key/key-ser.h"
 #include "scheme/ckksrns/ckksrns-ser.h"
 using namespace lbcrypto;
+using ContextT = CryptoContext<DCRTPoly>;
+using CiphertextT = Ciphertext<DCRTPoly>;
+using PublicKeyT = PublicKey<DCRTPoly>;
+using PrivateKeyT = PrivateKey<DCRTPoly>;
+
+void require(bool value, const char* message) { if (!value) throw std::runtime_error(message); }
+std::filesystem::path sessionFile(const std::filesystem::path& session, const char* name) { return session / name; }
 std::vector<double> readVector(const std::filesystem::path& path) {
   std::ifstream input(path); if (!input) throw std::runtime_error("cannot open input");
   std::string line; std::getline(input, line); std::vector<double> values;
   while (std::getline(input, line)) if (!line.empty()) values.push_back(std::stod(line));
   return values;
 }
-void require(bool value, const char* message) { if (!value) throw std::runtime_error(message); }
-Ciphertext<DCRTPoly> loadCiphertext(const char* path) {
-  Ciphertext<DCRTPoly> ciphertext;
-  require(Serial::DeserializeFromFile(path, ciphertext, SerType::BINARY), "cannot load source ciphertext branch");
+ContextT loadContext(const std::filesystem::path& session) {
+  ContextT context;
+  require(Serial::DeserializeFromFile(sessionFile(session, "context.bin"), context, SerType::BINARY), "cannot load CKKS context");
+  return context;
+}
+PublicKeyT loadPublicKey(const std::filesystem::path& session) {
+  PublicKeyT key;
+  require(Serial::DeserializeFromFile(sessionFile(session, "public.key"), key, SerType::BINARY), "cannot load public key");
+  return key;
+}
+PrivateKeyT loadPrivateKey(const std::filesystem::path& session) {
+  PrivateKeyT key;
+  require(Serial::DeserializeFromFile(sessionFile(session, "audit_secret.key"), key, SerType::BINARY), "cannot load audit secret key");
+  return key;
+}
+CiphertextT loadCiphertext(const std::filesystem::path& path) {
+  CiphertextT ciphertext;
+  require(Serial::DeserializeFromFile(path, ciphertext, SerType::BINARY), "cannot load ciphertext artifact");
   return ciphertext;
 }
+void loadEvaluationKeys(const std::filesystem::path& session) {
+  std::ifstream input(sessionFile(session, "eval_mult.keys"), std::ios::binary);
+  require(input.good(), "cannot open evaluation-key bundle");
+  require(CryptoContextImpl<DCRTPoly>::DeserializeEvalMultKey(input, SerType::BINARY), "cannot load multiplication evaluation keys");
+}
+void saveSession(const std::filesystem::path& session, const ContextT& context, const PublicKeyT& publicKey, const PrivateKeyT& secretKey) {
+  std::filesystem::create_directories(session);
+  require(Serial::SerializeToFile(sessionFile(session, "context.bin"), context, SerType::BINARY), "cannot save CKKS context");
+  require(Serial::SerializeToFile(sessionFile(session, "public.key"), publicKey, SerType::BINARY), "cannot save public key");
+  // Benchmark-only audit material. A real evaluator receives no secret key.
+  require(Serial::SerializeToFile(sessionFile(session, "audit_secret.key"), secretKey, SerType::BINARY), "cannot save audit secret key");
+  std::ofstream output(sessionFile(session, "eval_mult.keys"), std::ios::binary);
+  require(output.good(), "cannot create evaluation-key bundle");
+  require(CryptoContextImpl<DCRTPoly>::SerializeEvalMultKey(output, SerType::BINARY, context), "cannot save multiplication evaluation keys");
+}
+void initialize(const std::filesystem::path& session) {
+  auto context = fixed_count_variance__generate_crypto_context(); auto keys = context->KeyGen();
+  require(keys.good(), "key generation failed");
+  // Configure all stages once. Later processes only load these artifacts.
+  context = fixed_count_variance__configure_crypto_context(context, keys.secretKey);
+  context = fixed_count_mean__configure_crypto_context(context, keys.secretKey);
+  context = fixed_count_sum__configure_crypto_context(context, keys.secretKey);
+  context = encrypted_subtract__configure_crypto_context(context, keys.secretKey);
+  saveSession(session, context, keys.publicKey, keys.secretKey);
+}
+void feature(const std::filesystem::path& session, const char* duePath, const char* paidPath, const char* outputPath) {
+  auto context = loadContext(session); auto publicKey = loadPublicKey(session);
+  auto due = readVector(duePath); auto paid = readVector(paidPath);
+  require(due.size() == @SIZE@ && paid.size() == @SIZE@, "bad vector size");
+  auto encryptedDue = encrypted_subtract__encrypt__arg0(context, due, publicKey);
+  auto encryptedPaid = encrypted_subtract__encrypt__arg1(context, paid, publicKey);
+  auto encryptedFeature = encrypted_subtract(context, encryptedDue, encryptedPaid);
+  require(Serial::SerializeToFile(outputPath, encryptedFeature, SerType::BINARY), "cannot save payment_diff ciphertext");
+}
+void sumStage(const std::filesystem::path& session, const char* inputPath, const char* outputPath) {
+  auto context = loadContext(session); loadEvaluationKeys(session);
+  auto result = fixed_count_sum(context, loadCiphertext(inputPath));
+  require(Serial::SerializeToFile(outputPath, result, SerType::BINARY), "cannot save sum ciphertext");
+}
+void meanStage(const std::filesystem::path& session, const char* inputPath, const char* outputPath) {
+  auto context = loadContext(session); loadEvaluationKeys(session);
+  auto result = fixed_count_mean(context, loadCiphertext(inputPath));
+  require(Serial::SerializeToFile(outputPath, result, SerType::BINARY), "cannot save mean ciphertext");
+}
+void varianceStage(const std::filesystem::path& session, const char* inputPath, const char* outputPath) {
+  auto context = loadContext(session); loadEvaluationKeys(session);
+  auto result = fixed_count_variance(context, loadCiphertext(inputPath));
+  require(Serial::SerializeToFile(outputPath, result, SerType::BINARY), "cannot save variance ciphertext");
+}
+void audit(const std::filesystem::path& session, const char* featurePath, const char* sumPath, const char* meanPath, const char* variancePath, const char* featureAuditPath, const char* metricsPath) {
+  auto context = loadContext(session); auto secretKey = loadPrivateKey(session);
+  auto feature = encrypted_subtract__decrypt__result0(context, loadCiphertext(featurePath), secretKey);
+  auto sum = fixed_count_sum__decrypt__result0(context, loadCiphertext(sumPath), secretKey);
+  auto mean = fixed_count_mean__decrypt__result0(context, loadCiphertext(meanPath), secretKey);
+  auto variance = fixed_count_variance__decrypt__result0(context, loadCiphertext(variancePath), secretKey);
+  std::ofstream auditOutput(featureAuditPath); auditOutput << "value\n" << std::setprecision(17);
+  for (auto value : feature) auditOutput << value << '\n';
+  std::ofstream metrics(metricsPath); metrics << std::setprecision(17)
+      << "{\"sum\":" << sum << ",\"mean\":" << mean << ",\"sample_variance\":" << variance << "}\n";
+}
 int main(int argc, char** argv) {
-  if (argc != 9) return 2;
   try {
-    auto due = readVector(argv[1]); auto paid = readVector(argv[2]);
-    require(due.size() == @SIZE@ && paid.size() == @SIZE@, "bad vector size");
-    // Variance owns the shared context: it is the deepest ordinary CKKS branch.
-    auto context = fixed_count_variance__generate_crypto_context(); auto keys = context->KeyGen();
-    require(keys.good(), "key generation failed");
-    context = fixed_count_variance__configure_crypto_context(context, keys.secretKey);
-    context = fixed_count_mean__configure_crypto_context(context, keys.secretKey);
-    context = fixed_count_sum__configure_crypto_context(context, keys.secretKey);
-    context = encrypted_subtract__configure_crypto_context(context, keys.secretKey);
-    auto started = std::chrono::steady_clock::now();
-    auto encryptedDue = encrypted_subtract__encrypt__arg0(context, due, keys.publicKey);
-    auto encryptedPaid = encrypted_subtract__encrypt__arg1(context, paid, keys.publicKey);
-    auto afterEncryption = std::chrono::steady_clock::now();
-    auto encryptedFeature = encrypted_subtract(context, encryptedDue, encryptedPaid);
-    // This artifact is the source of truth. Each consumer gets an independent
-    // deserialized branch because generated HEIR code may mutate its input.
-    require(Serial::SerializeToFile(argv[3], encryptedFeature, SerType::BINARY), "cannot save feature");
-    auto featureAudit = encrypted_subtract__decrypt__result0(context, encryptedFeature, keys.secretKey);
-    auto afterFeature = std::chrono::steady_clock::now();
-    auto encryptedSum = fixed_count_sum(context, loadCiphertext(argv[3]));
-    auto encryptedMean = fixed_count_mean(context, loadCiphertext(argv[3]));
-    auto encryptedVariance = fixed_count_variance(context, loadCiphertext(argv[3]));
-    require(Serial::SerializeToFile(argv[4], encryptedSum, SerType::BINARY), "cannot save sum");
-    require(Serial::SerializeToFile(argv[5], encryptedMean, SerType::BINARY), "cannot save mean");
-    require(Serial::SerializeToFile(argv[6], encryptedVariance, SerType::BINARY), "cannot save variance");
-    auto sum = fixed_count_sum__decrypt__result0(context, encryptedSum, keys.secretKey);
-    auto mean = fixed_count_mean__decrypt__result0(context, encryptedMean, keys.secretKey);
-    auto variance = fixed_count_variance__decrypt__result0(context, encryptedVariance, keys.secretKey);
-    auto done = std::chrono::steady_clock::now();
-    std::ofstream audit(argv[7]); audit << "value\n" << std::setprecision(17);
-    for (auto value : featureAudit) audit << value << '\n';
-    std::ofstream metrics(argv[8]); metrics << std::setprecision(17)
-      << "{\"sum\":" << sum << ",\"mean\":" << mean << ",\"sample_variance\":" << variance
-      << ",\"encryption_seconds\":" << std::chrono::duration<double>(afterEncryption-started).count()
-      << ",\"feature_seconds\":" << std::chrono::duration<double>(afterFeature-afterEncryption).count()
-      << ",\"statistics_seconds\":" << std::chrono::duration<double>(done-afterFeature).count() << "}\n";
+    if (argc < 3) return 2;
+    const std::string stage(argv[1]); const std::filesystem::path session(argv[2]);
+    if (stage == "init" && argc == 3) initialize(session);
+    else if (stage == "feature" && argc == 6) feature(session, argv[3], argv[4], argv[5]);
+    else if (stage == "sum" && argc == 5) sumStage(session, argv[3], argv[4]);
+    else if (stage == "mean" && argc == 5) meanStage(session, argv[3], argv[4]);
+    else if (stage == "variance" && argc == 5) varianceStage(session, argv[3], argv[4]);
+    else if (stage == "audit" && argc == 9) audit(session, argv[3], argv[4], argv[5], argv[6], argv[7], argv[8]);
+    else return 2;
     return 0;
   } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }
 '''
+
+
+def execute_stage(runner: Path, stage: str, *paths: Path) -> tuple[float, str]:
+    """Run one process-isolated stage; it receives only artifact paths."""
+    return run([str(runner), stage, *(str(path.resolve()) for path in paths)], runner.parent)
 
 
 def main() -> None:
@@ -156,18 +216,28 @@ def main() -> None:
     work = root / "runner"; work.mkdir()
     for directory, prefix in ((feature_dir, "feature"), (sum_dir, "sum"), (mean_dir, "mean"), (variance_dir, "variance")):
         copy_generated_sources(directory, work, prefix)
-    (work / "aggregate_runner.cpp").write_text(RUNNER.replace("@SIZE@", str(args.vector_size)), encoding="utf-8")
+    (work / "process_dag_runner.cpp").write_text(RUNNER.replace("@SIZE@", str(args.vector_size)), encoding="utf-8")
     (work / "CMakeLists.txt").write_text(CMAKE, encoding="utf-8")
     build = work / "build"
-    run(["cmake", "-S", str(work.resolve()), "-B", str(build.resolve()), f"-DOpenFHE_DIR={args.openfhe_dir}"], work)
-    run(["cmake", "--build", str(build.resolve()), "--target", "aggregate_runner"], work)
-    ciphertexts = root / "ciphertexts"; ciphertexts.mkdir()
-    audit, metrics = root / "feature_audit.csv", root / "metrics.json"
-    run([str((build / "aggregate_runner").resolve()), str(due_path.resolve()), str(paid_path.resolve()), str((ciphertexts / "payment_diff.ct").resolve()), str((ciphertexts / "sum.ct").resolve()), str((ciphertexts / "mean.ct").resolve()), str((ciphertexts / "variance.ct").resolve()), str(audit.resolve()), str(metrics.resolve())], work)
-    feature = [float(row["value"]) for row in read_csv(audit)][:valid_count]
+    configure_seconds, _ = run(["cmake", "-S", str(work.resolve()), "-B", str(build.resolve()), f"-DOpenFHE_DIR={args.openfhe_dir}"], work)
+    build_seconds, _ = run(["cmake", "--build", str(build.resolve()), "--target", "process_dag_runner"], work)
+    runner = build / "process_dag_runner"
+    session = root / "session"; ciphertexts = root / "ciphertexts"; ciphertexts.mkdir()
+    audit_path, metrics_path = root / "feature_audit.csv", root / "metrics.json"
+    stage_seconds = {}
+    for stage, stage_paths in (
+        ("init", (session,)),
+        ("feature", (session, due_path, paid_path, ciphertexts / "payment_diff.ct")),
+        ("sum", (session, ciphertexts / "payment_diff.ct", ciphertexts / "sum.ct")),
+        ("mean", (session, ciphertexts / "payment_diff.ct", ciphertexts / "mean.ct")),
+        ("variance", (session, ciphertexts / "payment_diff.ct", ciphertexts / "variance.ct")),
+        ("audit", (session, ciphertexts / "payment_diff.ct", ciphertexts / "sum.ct", ciphertexts / "mean.ct", ciphertexts / "variance.ct", audit_path, metrics_path)),
+    ):
+        stage_seconds[stage], _ = execute_stage(runner, stage, *stage_paths)
+    feature = [float(row["value"]) for row in read_csv(audit_path)][:valid_count]
     expected_feature = [left - right for left, right in zip(due, paid)]
     expected_sum, expected_mean, expected_variance = fixed_count_statistics_reference(expected_feature)
-    he = json.loads(metrics.read_text(encoding="utf-8"))
+    he = json.loads(metrics_path.read_text(encoding="utf-8"))
     feature_rows = [{"row": index, "python": expected, "he": feature[index], "absolute_error": abs(expected - feature[index])} for index, expected in enumerate(expected_feature)]
     aggregation_rows = [
         {"aggregation": "max", "python": max(expected_feature), "he": "NOT_RUN", "status": "pending CKKS-to-FHEW comparison/switching benchmark", "absolute_error": ""},
@@ -177,9 +247,9 @@ def main() -> None:
     ]
     write_csv(root / "feature_comparison.csv", list(feature_rows[0]), feature_rows)
     write_csv(root / "aggregation_comparison.csv", list(aggregation_rows[0]), aggregation_rows)
-    result = {"status": "heir_generated_ckks_executed", "scope": "PAYMENT_DIFF then sum/mean/sample variance from independently loaded branches of the same encrypted source feature; count fixed publicly at 3", "important_limit": "max is intentionally not executed; variable/private group counts require the separate encrypted-count finalizer, currently an OOM bootstrap experiment on the small server", "generated": generated, "feature_comparison": feature_rows, "aggregation_comparison": aggregation_rows, "execution": he, "ciphertext_artifacts": [str(item) for item in sorted(ciphertexts.glob("*.ct"))]}
+    result = {"status": "heir_generated_ckks_executed", "scope": "one CKKS session; process-isolated feature, sum, mean, variance and audit stages", "important_limit": "max is intentionally not executed; variable/private group counts require the separate encrypted-count finalizer", "generated": generated, "build_seconds": {"configure": configure_seconds, "build": build_seconds}, "stage_seconds": stage_seconds, "feature_comparison": feature_rows, "aggregation_comparison": aggregation_rows, "execution": he, "ciphertext_artifacts": [str(item) for item in sorted(ciphertexts.glob("*.ct"))], "session_artifacts": ["context.bin", "public.key", "eval_mult.keys", "audit_secret.key (benchmark audit only)"]}
     write_json(root / "result.json", result)
-    print(json.dumps({"status": result["status"], "aggregation_comparison": aggregation_rows, "output_dir": str(root)}, indent=2))
+    print(json.dumps({"status": result["status"], "stage_seconds": stage_seconds, "aggregation_comparison": aggregation_rows, "output_dir": str(root)}, indent=2))
 
 
 if __name__ == "__main__":
