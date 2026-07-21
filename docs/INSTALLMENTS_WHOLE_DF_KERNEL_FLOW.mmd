@@ -1,0 +1,70 @@
+flowchart TD
+  subgraph scope[Scope: one whole dataframe / packed vector — no groupby]
+    rows[Review dataframe rows<br/>AMT_PAYMENT, AMT_INSTALMENT]
+    pandas[Pandas reference only<br/>feature columns then whole-dataframe .agg()]
+  end
+
+  subgraph client[Client-side input representation only]
+    aligned[Position-align parent columns]
+    validity[Replace invalid denominator with public safe value<br/>create validity mask]
+    pack[Pack real rows + zero padding<br/>record public vector size and valid count]
+    rows --> aligned --> validity --> pack
+  end
+
+  subgraph he[HEIR-generated CKKS arithmetic]
+    encPaid[Encrypt AMT_PAYMENT<br/>payment.ct]
+    encDue[Encrypt AMT_INSTALMENT<br/>installment.ct]
+    encValid[Encrypt validity mask<br/>validity.ct]
+    ratioKernel[K-RATIO: generic bounded ratio<br/>Newton reciprocal + mask]
+    diffKernel[K-SUBTRACT: generic subtraction]
+    percCT[PAYMENT_PERC ciphertext<br/>payment_perc.ct]
+    diffCT[PAYMENT_DIFF ciphertext<br/>payment_diff.ct]
+    pack --> encPaid
+    pack --> encDue
+    pack --> encValid
+    encPaid --> ratioKernel
+    encDue --> ratioKernel
+    encValid --> ratioKernel
+    encPaid --> diffKernel
+    encDue --> diffKernel
+    ratioKernel --> percCT
+    diffKernel --> diffCT
+  end
+
+  subgraph branches[Whole-vector encrypted aggregation branches]
+    percStop[PAYMENT_PERC aggregation<br/>NOT RUN: deep ratio + aggregate<br/>exceeded current depth/RAM budget]
+    sumKernel[K-SUM: generic packed reduction]
+    meanKernel[K-MEAN: fixed public count]
+    varKernel[K-VAR: fixed public count<br/>sample variance]
+    sumCT[sum.ct]
+    meanCT[mean.ct]
+    varCT[variance.ct]
+    percCT --> percStop
+    diffCT --> sumKernel --> sumCT
+    diffCT --> meanKernel --> meanCT
+    diffCT --> varKernel --> varCT
+  end
+
+  subgraph maxLane[Deferred comparison lane]
+    maxKernel[MIN / MAX<br/>OpenFHE CKKS↔FHEW switching]
+    range[Public numeric range contract<br/>duplicate candidate padding]
+    maxState[Deferred from this benchmark]
+    diffCT -. ordinary HEIR ciphertext cannot cross sessions .-> maxKernel
+    range --> maxKernel --> maxState
+  end
+
+  subgraph audit[Benchmark report / client audit]
+    decrypt[Decrypt only audit outputs<br/>PAYMENT_DIFF sum / mean / var]
+    report[REPORT.md<br/>Pandas whole-dataframe value ↔ HE value<br/>timings, errors, status, input shape]
+    pandas --> report
+    sumCT --> decrypt
+    meanCT --> decrypt
+    varCT --> decrypt
+    decrypt --> report
+    percCT --> report
+    percStop --> report
+    maxState --> report
+  end
+
+  note[No plaintext feature is calculated before encryption.<br/>No dataframe groupby is implemented in HE in this benchmark.]
+  report --> note
