@@ -64,16 +64,40 @@ def main()->None:
     lines=[
         "# CKKS-SUM-01 and CKKS-MEAN-01",
         "",
-        "Pandas reads the same generated input column and computes `Series.sum()`; CSV-read time is excluded. "
-        "The HE route packs 8,192 values per ciphertext, reduces each ciphertext with the HEIR-generated sum kernel, "
-        "then adds encrypted partial sums across chunks. Mean reuses that encrypted global sum and applies one public `1/N` scalar multiplication; "
-        "it does not re-encrypt, recompute SUM, or decrypt between the two results. Context/key setup is recorded separately in `execution.json`.",
+        "This runner evaluates **two distinct outputs** during every repetition. `CKKS-SUM-01` returns the encrypted global sum. "
+        "`CKKS-MEAN-01` starts from that same encrypted SUM ciphertext and applies the public `1/N` factor. "
+        "The shared ciphertext preparation and SUM reduction are counted once, never twice.",
         "",
-        "| Values | Decimals | Pandas sum (s) | Pandas mean (s) | HE sum reduction (s) | HE mean scale (s) | HE encrypt (s) | HE merge (s) | HE online both (s) | Sum max error | Mean max error |",
-        "|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "Pandas CSV-read/setup time is excluded. HE context/key setup is separately recorded in `execution.json`. "
+        "Audit decryption exists only to compare encrypted results with plaintext; it is included in each workload's end-to-end benchmark value.",
+        "",
+        "## CKKS-SUM-01 — encrypted sum",
+        "",
+        "The HEIR-generated SUM kernel reduces each 8,192-value ciphertext. `HE merge` adds those encrypted partial sums when the logical input has more than 8,192 values.",
+        "",
+        "| Values | Decimals | Pandas sum (s) | HE encrypt (s) | HE SUM reduction (s) | HE merge (s) | Audit decrypt (s) | SUM end-to-end online (s) | Sum max error |",
+        "|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for count in counts:
         for d in ("1","2","3","6"):
-            hr=[r for r in rows if r["value_count"]==str(count) and r["decimals"]==d];pr=[r for r in prow if r["value_count"]==str(count) and r["decimals"]==d];lines.append(f"| {count} | {d} | {statistics.median(float(r['pandas_sum_seconds']) for r in pr):.9f} | {statistics.median(float(r['pandas_mean_seconds']) for r in pr):.9f} | {statistics.median(float(r['sum_evaluate_seconds']) for r in hr):.9f} | {statistics.median(float(r['mean_scale_seconds']) for r in hr):.9f} | {statistics.median(float(r['encrypt_seconds']) for r in hr):.9f} | {statistics.median(float(r['merge_seconds']) for r in hr):.9f} | {statistics.median(float(r['online_seconds']) for r in hr):.9f} | {max(float(r['sum_abs_error']) for r in hr):.12g} | {max(float(r['mean_abs_error']) for r in hr):.12g} |")
+            hr=[r for r in rows if r["value_count"]==str(count) and r["decimals"]==d];pr=[r for r in prow if r["value_count"]==str(count) and r["decimals"]==d]
+            sum_online=(float(r["encrypt_seconds"])+float(r["sum_evaluate_seconds"])+float(r["merge_seconds"])+float(r["sum_decrypt_seconds"]) for r in hr)
+            lines.append(f"| {count} | {d} | {statistics.median(float(r['pandas_sum_seconds']) for r in pr):.9f} | {statistics.median(float(r['encrypt_seconds']) for r in hr):.9f} | {statistics.median(float(r['sum_evaluate_seconds']) for r in hr):.9f} | {statistics.median(float(r['merge_seconds']) for r in hr):.9f} | {statistics.median(float(r['sum_decrypt_seconds']) for r in hr):.9f} | {statistics.median(sum_online):.9f} | {max(float(r['sum_abs_error']) for r in hr):.12g} |")
+    lines.extend([
+        "",
+        "## CKKS-MEAN-01 — encrypted mean derived from SUM",
+        "",
+        "This is not a second SUM benchmark. Its inherited encrypted path is the SUM route above; `HE mean scale` is the **additional** ciphertext × public `1/N` operation. "
+        "`MEAN end-to-end online` includes the inherited SUM path once, then that scale and Mean audit decryption.",
+        "",
+        "| Values | Decimals | Pandas mean (s) | Inherited SUM path (s) | HE mean scale only (s) | Audit decrypt (s) | MEAN end-to-end online (s) | Mean max error |",
+        "|---:|---:|---:|---:|---:|---:|---:|---:|",
+    ])
+    for count in counts:
+        for d in ("1","2","3","6"):
+            hr=[r for r in rows if r["value_count"]==str(count) and r["decimals"]==d];pr=[r for r in prow if r["value_count"]==str(count) and r["decimals"]==d]
+            inherited=(float(r["encrypt_seconds"])+float(r["sum_evaluate_seconds"])+float(r["merge_seconds"]) for r in hr)
+            mean_online=(float(r["encrypt_seconds"])+float(r["sum_evaluate_seconds"])+float(r["merge_seconds"])+float(r["mean_scale_seconds"])+float(r["mean_decrypt_seconds"]) for r in hr)
+            lines.append(f"| {count} | {d} | {statistics.median(float(r['pandas_mean_seconds']) for r in pr):.9f} | {statistics.median(inherited):.9f} | {statistics.median(float(r['mean_scale_seconds']) for r in hr):.9f} | {statistics.median(float(r['mean_decrypt_seconds']) for r in hr):.9f} | {statistics.median(mean_online):.9f} | {max(float(r['mean_abs_error']) for r in hr):.12g} |")
     (root/"REPORT.md").write_text("\n".join(lines)+"\n",encoding="utf-8");result={"status":"ckks_sum_mean_benchmark_executed","report":"REPORT.md","runner_wall_seconds":wall};write_json(root/"result.json",result);print(json.dumps(result,indent=2))
 if __name__=="__main__":main()
