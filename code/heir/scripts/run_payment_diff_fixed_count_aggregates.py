@@ -105,6 +105,11 @@ void loadEvaluationKeys(const std::filesystem::path& session) {
   require(input.good(), "cannot open evaluation-key bundle");
   require(CryptoContextImpl<DCRTPoly>::DeserializeEvalMultKey(input, SerType::BINARY), "cannot load multiplication evaluation keys");
 }
+void loadRotationKeys(const std::filesystem::path& session) {
+  std::ifstream input(sessionFile(session, "eval_rotation.keys"), std::ios::binary);
+  require(input.good(), "cannot open rotation-key bundle");
+  require(CryptoContextImpl<DCRTPoly>::DeserializeEvalSumKey(input, SerType::BINARY), "cannot load rotation evaluation keys");
+}
 void saveSession(const std::filesystem::path& session, const ContextT& context, const PublicKeyT& publicKey, const PrivateKeyT& secretKey) {
   std::filesystem::create_directories(session);
   require(Serial::SerializeToFile(sessionFile(session, "context.bin"), context, SerType::BINARY), "cannot save CKKS context");
@@ -114,6 +119,9 @@ void saveSession(const std::filesystem::path& session, const ContextT& context, 
   std::ofstream output(sessionFile(session, "eval_mult.keys"), std::ios::binary);
   require(output.good(), "cannot create evaluation-key bundle");
   require(CryptoContextImpl<DCRTPoly>::SerializeEvalMultKey(output, SerType::BINARY, context), "cannot save multiplication evaluation keys");
+  std::ofstream rotations(sessionFile(session, "eval_rotation.keys"), std::ios::binary);
+  require(rotations.good(), "cannot create rotation-key bundle");
+  require(CryptoContextImpl<DCRTPoly>::SerializeEvalSumKey(rotations, SerType::BINARY, context), "cannot save rotation evaluation keys");
 }
 void initialize(const std::filesystem::path& session) {
   auto context = fixed_count_variance__generate_crypto_context(); auto keys = context->KeyGen();
@@ -135,27 +143,28 @@ void feature(const std::filesystem::path& session, const char* duePath, const ch
   require(Serial::SerializeToFile(outputPath, encryptedFeature, SerType::BINARY), "cannot save payment_diff ciphertext");
 }
 void sumStage(const std::filesystem::path& session, const char* inputPath, const char* outputPath) {
-  std::cerr << "stage=sum: loading CKKS context\n";
+  std::cerr << "stage=sum: loading CKKS context and rotation keys\n";
   auto context = loadContext(session);
-  // Sum uses additions only. Do not deserialize multiplication keys here:
-  // OpenFHE key deserialization can replace context cache entries unnecessarily.
+  // Packed reduction rotates slots before it adds them; only rotation keys are needed.
+  loadRotationKeys(session);
   std::cerr << "stage=sum: loading payment_diff ciphertext bundle\n";
   auto result = fixed_count_sum(context, loadCiphertext(inputPath));
   std::cerr << "stage=sum: saving output\n";
   require(Serial::SerializeToFile(outputPath, result, SerType::BINARY), "cannot save sum ciphertext");
 }
 void meanStage(const std::filesystem::path& session, const char* inputPath, const char* outputPath) {
-  std::cerr << "stage=mean: loading CKKS context\n";
+  std::cerr << "stage=mean: loading CKKS context and rotation keys\n";
   auto context = loadContext(session);
-  // Mean multiplies only by a public scalar, so it does not need an EvalMult key.
+  // Mean's packed reduction needs rotation keys; public-scalar multiplication needs no EvalMult key.
+  loadRotationKeys(session);
   std::cerr << "stage=mean: loading payment_diff ciphertext bundle\n";
   auto result = fixed_count_mean(context, loadCiphertext(inputPath));
   std::cerr << "stage=mean: saving output\n";
   require(Serial::SerializeToFile(outputPath, result, SerType::BINARY), "cannot save mean ciphertext");
 }
 void varianceStage(const std::filesystem::path& session, const char* inputPath, const char* outputPath) {
-  std::cerr << "stage=variance: loading CKKS context and multiplication keys\n";
-  auto context = loadContext(session); loadEvaluationKeys(session);
+  std::cerr << "stage=variance: loading CKKS context, rotation keys, and multiplication keys\n";
+  auto context = loadContext(session); loadRotationKeys(session); loadEvaluationKeys(session);
   std::cerr << "stage=variance: loading payment_diff ciphertext bundle\n";
   auto result = fixed_count_variance(context, loadCiphertext(inputPath));
   std::cerr << "stage=variance: saving output\n";
@@ -261,7 +270,7 @@ def main() -> None:
     ]
     write_csv(root / "feature_comparison.csv", list(feature_rows[0]), feature_rows)
     write_csv(root / "aggregation_comparison.csv", list(aggregation_rows[0]), aggregation_rows)
-    result = {"status": "heir_generated_ckks_executed", "scope": "one CKKS session; process-isolated feature, sum, mean, variance and audit stages", "important_limit": "max is intentionally not executed; variable/private group counts require the separate encrypted-count finalizer", "generated": generated, "build_seconds": {"configure": configure_seconds, "build": build_seconds}, "stage_seconds": stage_seconds, "feature_comparison": feature_rows, "aggregation_comparison": aggregation_rows, "execution": he, "ciphertext_artifacts": [str(item) for item in sorted(ciphertexts.glob("*.ct"))], "session_artifacts": ["context.bin", "public.key", "eval_mult.keys", "audit_secret.key (benchmark audit only)"]}
+    result = {"status": "heir_generated_ckks_executed", "scope": "one CKKS session; process-isolated feature, sum, mean, variance and audit stages", "important_limit": "max is intentionally not executed; variable/private group counts require the separate encrypted-count finalizer", "generated": generated, "build_seconds": {"configure": configure_seconds, "build": build_seconds}, "stage_seconds": stage_seconds, "feature_comparison": feature_rows, "aggregation_comparison": aggregation_rows, "execution": he, "ciphertext_artifacts": [str(item) for item in sorted(ciphertexts.glob("*.ct"))], "session_artifacts": ["context.bin", "public.key", "eval_rotation.keys", "eval_mult.keys", "audit_secret.key (benchmark audit only)"]}
     write_json(root / "result.json", result)
     print(json.dumps({"status": result["status"], "stage_seconds": stage_seconds, "aggregation_comparison": aggregation_rows, "output_dir": str(root)}, indent=2))
 

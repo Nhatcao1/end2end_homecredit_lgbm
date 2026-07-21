@@ -209,7 +209,8 @@ python3 code/heir/scripts/run_payment_diff_fixed_count_aggregates.py \
 
 The command internally executes `init → feature → sum / mean / variance →
 audit`. `init` is the only stage that creates a CKKS context. It persists
-`session/context.bin`, the public key, and the evaluation-key bundle; later
+`session/context.bin`, the public key, and the rotation/multiplication
+evaluation-key bundles; later
 stages load those exact files and do not create another context. The local
 benchmark audit also persists a secret key under `session/audit_secret.key`;
 that file must stay with the key owner in a real deployment.
