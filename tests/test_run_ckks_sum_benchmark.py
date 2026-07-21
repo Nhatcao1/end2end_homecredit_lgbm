@@ -15,5 +15,6 @@ class RunCkksSumBenchmarkTest(unittest.TestCase):
         self.assertIn("EvalMult(value,inverse)",source)
         self.assertIn("--input-scale",source)
         self.assertIn("inputScale",source)
+        self.assertIn("encoded=values/input_scale",source)
 
 if __name__=="__main__": unittest.main()
