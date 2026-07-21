@@ -192,8 +192,10 @@ configured.
 For the three fixed review rows, use the bounded non-bootstrap runner below.
 It encrypts `AMT_INSTALMENT` and `AMT_PAYMENT`, derives
 `PAYMENT_DIFF = AMT_INSTALMENT - AMT_PAYMENT` after encryption, serializes that
-source ciphertext, then derives encrypted `sum`, `mean`, and sample `var`
-from the same in-memory ciphertext edge. It writes a familiar audit table:
+source ciphertext, then reloads independent ciphertext branches for encrypted
+`sum`, `mean`, and sample `var`. This is intentional: the installed generated
+HEIR code may mutate an input/output buffer in place, so multi-output results
+must not share a mutable ciphertext object. It writes a familiar audit table:
 
 ```bash
 python3 code/heir/scripts/run_payment_diff_fixed_count_aggregates.py \

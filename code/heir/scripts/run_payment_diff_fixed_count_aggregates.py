@@ -18,8 +18,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from code.heir.common import read_csv, write_csv, write_json, write_values
 from code.heir.examples.quick_installments_features import DEMO_ROWS
 from code.heir.kernels.fixed_count_statistics import (
-    fixed_count_statistics_mlir,
+    fixed_count_mean_mlir,
     fixed_count_statistics_reference,
+    fixed_count_sum_mlir,
+    fixed_count_variance_mlir,
 )
 from code.heir.operations.columns import binary_mlir
 from code.heir.scripts.run_payment_features_ciphertext_demo import (
@@ -36,7 +38,7 @@ find_package(OpenFHE CONFIG REQUIRED)
 set(HEIR_FLAGS "${OpenFHE_CXX_FLAGS}")
 string(REPLACE "-Werror" "" HEIR_FLAGS "${HEIR_FLAGS}")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${HEIR_FLAGS}")
-add_executable(aggregate_runner feature_output.cpp statistics_output.cpp aggregate_runner.cpp)
+add_executable(aggregate_runner feature_output.cpp sum_output.cpp mean_output.cpp variance_output.cpp aggregate_runner.cpp)
 target_include_directories(aggregate_runner PRIVATE "${OpenFHE_INCLUDE}" "${OpenFHE_INCLUDE}/third-party/include" "${OpenFHE_INCLUDE}/core" "${OpenFHE_INCLUDE}/pke" "${OpenFHE_INCLUDE}/binfhe")
 target_link_directories(aggregate_runner PRIVATE "${OpenFHE_LIBDIR}")
 target_link_libraries(aggregate_runner PRIVATE ${OpenFHE_SHARED_LIBRARIES})
@@ -54,7 +56,9 @@ RUNNER = r'''
 #include <string>
 #include <vector>
 #include "feature_output.h"
-#include "statistics_output.h"
+#include "sum_output.h"
+#include "mean_output.h"
+#include "variance_output.h"
 #include "ciphertext-ser.h"
 #include "cryptocontext-ser.h"
 #include "key/key-ser.h"
@@ -67,34 +71,42 @@ std::vector<double> readVector(const std::filesystem::path& path) {
   return values;
 }
 void require(bool value, const char* message) { if (!value) throw std::runtime_error(message); }
+Ciphertext<DCRTPoly> loadCiphertext(const char* path) {
+  Ciphertext<DCRTPoly> ciphertext;
+  require(Serial::DeserializeFromFile(path, ciphertext, SerType::BINARY), "cannot load source ciphertext branch");
+  return ciphertext;
+}
 int main(int argc, char** argv) {
   if (argc != 9) return 2;
   try {
     auto due = readVector(argv[1]); auto paid = readVector(argv[2]);
     require(due.size() == @SIZE@ && paid.size() == @SIZE@, "bad vector size");
-    // Statistics owns the context: it is the deepest ordinary CKKS stage.
-    auto context = fixed_count_statistics__generate_crypto_context(); auto keys = context->KeyGen();
+    // Variance owns the shared context: it is the deepest ordinary CKKS branch.
+    auto context = fixed_count_variance__generate_crypto_context(); auto keys = context->KeyGen();
     require(keys.good(), "key generation failed");
-    context = fixed_count_statistics__configure_crypto_context(context, keys.secretKey);
+    context = fixed_count_variance__configure_crypto_context(context, keys.secretKey);
+    context = fixed_count_mean__configure_crypto_context(context, keys.secretKey);
+    context = fixed_count_sum__configure_crypto_context(context, keys.secretKey);
     context = encrypted_subtract__configure_crypto_context(context, keys.secretKey);
     auto started = std::chrono::steady_clock::now();
     auto encryptedDue = encrypted_subtract__encrypt__arg0(context, due, keys.publicKey);
     auto encryptedPaid = encrypted_subtract__encrypt__arg1(context, paid, keys.publicKey);
     auto afterEncryption = std::chrono::steady_clock::now();
     auto encryptedFeature = encrypted_subtract(context, encryptedDue, encryptedPaid);
-    // Save/audit the source branch before a generated consumer may reuse it.
+    // This artifact is the source of truth. Each consumer gets an independent
+    // deserialized branch because generated HEIR code may mutate its input.
     require(Serial::SerializeToFile(argv[3], encryptedFeature, SerType::BINARY), "cannot save feature");
     auto featureAudit = encrypted_subtract__decrypt__result0(context, encryptedFeature, keys.secretKey);
     auto afterFeature = std::chrono::steady_clock::now();
-    auto encryptedStats = fixed_count_statistics(context, encryptedFeature);
-    auto encryptedSum = encryptedStats.arg0; auto encryptedMean = encryptedStats.arg1;
-    auto encryptedVariance = encryptedStats.arg2;
+    auto encryptedSum = fixed_count_sum(context, loadCiphertext(argv[3]));
+    auto encryptedMean = fixed_count_mean(context, loadCiphertext(argv[3]));
+    auto encryptedVariance = fixed_count_variance(context, loadCiphertext(argv[3]));
     require(Serial::SerializeToFile(argv[4], encryptedSum, SerType::BINARY), "cannot save sum");
     require(Serial::SerializeToFile(argv[5], encryptedMean, SerType::BINARY), "cannot save mean");
     require(Serial::SerializeToFile(argv[6], encryptedVariance, SerType::BINARY), "cannot save variance");
-    auto sum = fixed_count_statistics__decrypt__result0(context, encryptedSum, keys.secretKey);
-    auto mean = fixed_count_statistics__decrypt__result1(context, encryptedMean, keys.secretKey);
-    auto variance = fixed_count_statistics__decrypt__result2(context, encryptedVariance, keys.secretKey);
+    auto sum = fixed_count_sum__decrypt__result0(context, encryptedSum, keys.secretKey);
+    auto mean = fixed_count_mean__decrypt__result0(context, encryptedMean, keys.secretKey);
+    auto variance = fixed_count_variance__decrypt__result0(context, encryptedVariance, keys.secretKey);
     auto done = std::chrono::steady_clock::now();
     std::ofstream audit(argv[7]); audit << "value\n" << std::setprecision(17);
     for (auto value : featureAudit) audit << value << '\n';
@@ -134,14 +146,16 @@ def main() -> None:
     padding = [0.0] * (args.vector_size - valid_count)
     due_path, paid_path = inputs / "amt_installment.csv", inputs / "amt_payment.csv"
     write_values(due_path, due + padding); write_values(paid_path, paid + padding)
-    feature_dir, statistics_dir = root / "feature", root / "statistics"
+    feature_dir, sum_dir, mean_dir, variance_dir = root / "feature", root / "sum", root / "mean", root / "variance"
     generated = {
         "payment_diff": generate(feature_dir, "encrypted_subtract", binary_mlir(args.vector_size, "subtract"), args.vector_size, args.heir_opt, args.heir_translate, 2, args.ckks_mul_depth),
-        "fixed_count_statistics": generate(statistics_dir, "fixed_count_statistics", fixed_count_statistics_mlir(args.vector_size, valid_count), args.vector_size, args.heir_opt, args.heir_translate, 1, args.ckks_mul_depth),
+        "sum": generate(sum_dir, "fixed_count_sum", fixed_count_sum_mlir(args.vector_size, valid_count), args.vector_size, args.heir_opt, args.heir_translate, 1, args.ckks_mul_depth),
+        "mean": generate(mean_dir, "fixed_count_mean", fixed_count_mean_mlir(args.vector_size, valid_count), args.vector_size, args.heir_opt, args.heir_translate, 1, args.ckks_mul_depth),
+        "variance": generate(variance_dir, "fixed_count_variance", fixed_count_variance_mlir(args.vector_size, valid_count), args.vector_size, args.heir_opt, args.heir_translate, 1, args.ckks_mul_depth),
     }
     work = root / "runner"; work.mkdir()
-    copy_generated_sources(feature_dir, work, "feature")
-    copy_generated_sources(statistics_dir, work, "statistics")
+    for directory, prefix in ((feature_dir, "feature"), (sum_dir, "sum"), (mean_dir, "mean"), (variance_dir, "variance")):
+        copy_generated_sources(directory, work, prefix)
     (work / "aggregate_runner.cpp").write_text(RUNNER.replace("@SIZE@", str(args.vector_size)), encoding="utf-8")
     (work / "CMakeLists.txt").write_text(CMAKE, encoding="utf-8")
     build = work / "build"
@@ -163,7 +177,7 @@ def main() -> None:
     ]
     write_csv(root / "feature_comparison.csv", list(feature_rows[0]), feature_rows)
     write_csv(root / "aggregation_comparison.csv", list(aggregation_rows[0]), aggregation_rows)
-    result = {"status": "heir_generated_ckks_executed", "scope": "PAYMENT_DIFF then sum/mean/sample variance from the same encrypted source feature; count fixed publicly at 3", "important_limit": "max is intentionally not executed; variable/private group counts require the separate encrypted-count finalizer, currently an OOM bootstrap experiment on the small server", "generated": generated, "feature_comparison": feature_rows, "aggregation_comparison": aggregation_rows, "execution": he, "ciphertext_artifacts": [str(item) for item in sorted(ciphertexts.glob("*.ct"))]}
+    result = {"status": "heir_generated_ckks_executed", "scope": "PAYMENT_DIFF then sum/mean/sample variance from independently loaded branches of the same encrypted source feature; count fixed publicly at 3", "important_limit": "max is intentionally not executed; variable/private group counts require the separate encrypted-count finalizer, currently an OOM bootstrap experiment on the small server", "generated": generated, "feature_comparison": feature_rows, "aggregation_comparison": aggregation_rows, "execution": he, "ciphertext_artifacts": [str(item) for item in sorted(ciphertexts.glob("*.ct"))]}
     write_json(root / "result.json", result)
     print(json.dumps({"status": result["status"], "aggregation_comparison": aggregation_rows, "output_dir": str(root)}, indent=2))
 
