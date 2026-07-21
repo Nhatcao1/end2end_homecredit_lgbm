@@ -27,7 +27,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 def python_baseline() -> dict[str, Any]:
-    """Run the original Pandas feature/groupby path over the review rows."""
+    """Run Pandas feature expressions and whole-dataframe aggregates."""
     try:
         import pandas as pd
     except ImportError as error:
@@ -37,11 +37,10 @@ def python_baseline() -> dict[str, Any]:
             "`python3 -m pip install pandas`"
         ) from error
 
-    # One public review group keeps Pandas' groupby semantics aligned with the
-    # encrypted fixed-public-count circuit. The ID itself never enters HE.
+    # This benchmark deliberately has no groupby yet. It compares one whole
+    # review dataframe reduction with one whole packed encrypted vector.
     ins = pd.DataFrame(
         {
-            "SK_ID_CURR": [101] * len(DEMO_ROWS),
             "AMT_PAYMENT": [row["AMT_PAYMENT"] for row in DEMO_ROWS],
             "AMT_INSTALMENT": [row["AMT_INSTALMENT"] for row in DEMO_ROWS],
         }
@@ -53,28 +52,22 @@ def python_baseline() -> dict[str, Any]:
     ins["PAYMENT_DIFF"] = ins["AMT_INSTALMENT"] - ins["AMT_PAYMENT"]
     diff_seconds = time.perf_counter() - started
     started = time.perf_counter()
-    aggregates = ins.groupby("SK_ID_CURR").agg(
-        {
-            "PAYMENT_PERC": ["max", "mean", "sum", "var"],
-            "PAYMENT_DIFF": ["max", "mean", "sum", "var"],
-        }
-    )
-    groupby_seconds = time.perf_counter() - started
+    aggregates = ins[["PAYMENT_PERC", "PAYMENT_DIFF"]].agg(["max", "mean", "sum", "var"])
+    aggregate_seconds = time.perf_counter() - started
 
     def stats(column: str) -> dict[str, float]:
         return {
-            name: float(aggregates.loc[101, (column, name)])
+            name: float(aggregates.loc[name, column])
             for name in ("max", "mean", "sum", "var")
         }
 
     return {
         "engine": "pandas",
-        "source": "notebooks/lightgbm_with_simple_features.py:203-224",
-        "group_key": "SK_ID_CURR",
-        "group_count": int(aggregates.shape[0]),
+        "source": "notebooks/lightgbm_with_simple_features.py:203-204 (feature expressions); deliberately no groupby in this benchmark",
+        "aggregation_scope": "whole review dataframe, no groupby",
         "payment_perc": {"values": [float(value) for value in ins["PAYMENT_PERC"]], "stats": stats("PAYMENT_PERC"), "feature_seconds": ratio_seconds},
         "payment_diff": {"values": [float(value) for value in ins["PAYMENT_DIFF"]], "stats": stats("PAYMENT_DIFF"), "feature_seconds": diff_seconds},
-        "pandas_groupby_aggregation_seconds": groupby_seconds,
+        "pandas_aggregation_seconds": aggregate_seconds,
     }
 
 
@@ -123,7 +116,12 @@ def markdown_report(input_rows: dict[str, int], baseline: dict[str, Any], ratio:
     def comparison_row(feature: str, aggregation: str, he_row: dict[str, Any] | None) -> str:
         python_value = baseline[feature.lower()]["stats"][aggregation]
         if he_row is None:
-            return f"| `{feature.upper()}` | `{aggregation}` | {python_value} | NOT_RUN |  | not run: ratio feature depth/memory limit |"
+            reason = (
+                "not run: ratio feature depth/memory limit"
+                if feature == "payment_perc"
+                else "no HE audit result available for this lane"
+            )
+            return f"| `{feature.upper()}` | `{aggregation}` | {python_value} | NOT_RUN |  | {reason} |"
         return (
             f"| `{feature.upper()}` | `{aggregation}` | {python_value} | "
             f"{value(he_row)} | {value(he_row, 'absolute_error')} | "
@@ -160,24 +158,22 @@ The parent columns are position-aligned review inputs. This benchmark has no
 dataframe join or groupby: each pair of aligned lanes produces one encrypted
 feature value. Padding is zero and is excluded from the fixed public count.
 
-## Plaintext reference: original Pandas route
+## Plaintext reference: Pandas whole-dataframe route
 
-The Python comparison is executed with `pandas`, following
-`notebooks/lightgbm_with_simple_features.py:203-224`. The three review rows
-are assigned one public review `SK_ID_CURR`, so the original groupby produces
-one group of three values—matching this fixed-count encrypted proof.
+The feature expressions exactly follow
+`notebooks/lightgbm_with_simple_features.py:203-204`. Deliberately, this
+benchmark performs **no** `SK_ID_CURR` groupby: Pandas and HE both aggregate all
+three review rows as one whole dataframe/vector. General grouped HE reduction
+is a later task.
 
 ```python
 ins['PAYMENT_PERC'] = ins['AMT_PAYMENT'] / ins['AMT_INSTALMENT']
 ins['PAYMENT_DIFF'] = ins['AMT_INSTALMENT'] - ins['AMT_PAYMENT']
-ins_agg = ins.groupby('SK_ID_CURR').agg({{
-    'PAYMENT_PERC': ['max', 'mean', 'sum', 'var'],
-    'PAYMENT_DIFF': ['max', 'mean', 'sum', 'var'],
-}})
+ins[['PAYMENT_PERC', 'PAYMENT_DIFF']].agg(['max', 'mean', 'sum', 'var'])
 ```
 
-Pandas groups evaluated: `{baseline['group_count']}`. Its `var` is sample
-variance (`ddof=1`), the same definition used by the HE `PAYMENT_DIFF` kernel.
+Pandas `var` is sample variance (`ddof=1`), the same definition used by the HE
+`PAYMENT_DIFF` kernel.
 
 ## Result matrix
 
@@ -188,7 +184,7 @@ variance (`ddof=1`), the same definition used by the HE `PAYMENT_DIFF` kernel.
 
 ## Pandas versus HE aggregate values
 
-| Feature | Aggregate | Pandas `groupby().agg()` | HE decrypted audit | Absolute error | HE status |
+| Feature | Aggregate | Pandas whole-dataframe `.agg()` | HE decrypted audit | Absolute error | HE status |
 |---|---|---:|---|---:|---|
 {aggregation_comparison}
 
@@ -198,10 +194,10 @@ route remains unavailable on the constrained server.
 
 ## Timing
 
-| Item | Pandas feature seconds | Pandas `groupby().agg()` seconds | HE evaluation/session timing |
+| Item | Pandas feature seconds | Pandas whole-dataframe `.agg()` seconds | HE evaluation/session timing |
 |---|---:|---:|---|
-| `PAYMENT_PERC` | {baseline['payment_perc']['feature_seconds']:.9f} | {baseline['pandas_groupby_aggregation_seconds']:.9f} | encrypted feature: {ratio_execution.get('encrypted_payment_perc_seconds', 'NOT_RUN')}; full child wall time: {ratio.get('wall_seconds', 0):.6f} |
-| `PAYMENT_DIFF` | {baseline['payment_diff']['feature_seconds']:.9f} | {baseline['pandas_groupby_aggregation_seconds']:.9f} | stage timings: `{json.dumps(diff_stage_seconds, sort_keys=True)}`; full child wall time: {diff.get('wall_seconds', 0):.6f} |
+| `PAYMENT_PERC` | {baseline['payment_perc']['feature_seconds']:.9f} | {baseline['pandas_aggregation_seconds']:.9f} | encrypted feature: {ratio_execution.get('encrypted_payment_perc_seconds', 'NOT_RUN')}; full child wall time: {ratio.get('wall_seconds', 0):.6f} |
+| `PAYMENT_DIFF` | {baseline['payment_diff']['feature_seconds']:.9f} | {baseline['pandas_aggregation_seconds']:.9f} | stage timings: `{json.dumps(diff_stage_seconds, sort_keys=True)}`; full child wall time: {diff.get('wall_seconds', 0):.6f} |
 
 Encryption/decryption audit time is recorded by the child lanes but excluded from
 the feature-calculation comparison. Child logs are under `logs/`.
