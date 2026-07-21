@@ -12,6 +12,9 @@ class RunCkksPrimitiveBenchmarkTest(unittest.TestCase):
         self.assertIn("encrypted_multiply(context", source)
         self.assertIn("python_baseline", source)
         self.assertIn("max absolute error ≤ 1e-6", source)
+        self.assertIn("online_seconds", source)
+        self.assertIn("OMP_NUM_THREADS=1", source)
+        self.assertIn("setup_seconds", source)
         self.assertIn("1000000", source)
 
 

@@ -71,14 +71,17 @@ void audit(const std::vector<double>& decoded, const Pair& pair, size_t start, F
   for (size_t i=0; i<take; ++i) { double error = std::abs(decoded[i] - expected(pair.left[start+i], pair.right[start+i])); total += error; maximum = std::max(maximum,error); ++count; }
 }
 int main(int argc, char** argv) {
-  if (argc != 4) return 2;
+  if (argc != 5) return 2;
   try {
-    const std::string dataDir(argv[1]), resultPath(argv[2]); const int repetitions = std::stoi(argv[3]); const size_t slots = @SLOTS@;
+    const std::string dataDir(argv[1]), resultPath(argv[2]), executionPath(argv[4]); const int repetitions = std::stoi(argv[3]); const size_t slots = @SLOTS@;
+    auto setupStarted=std::chrono::steady_clock::now();
     auto context = encrypted_multiply__generate_crypto_context(); auto keys = context->KeyGen(); need(keys.good(), "key generation failed");
     context = encrypted_multiply__configure_crypto_context(context, keys.secretKey);
     context = encrypted_add__configure_crypto_context(context, keys.secretKey);
     context = encrypted_subtract__configure_crypto_context(context, keys.secretKey);
-    std::ofstream out(resultPath); out << "calculation,value_count,decimals,repetition,ciphertext_chunks,encrypt_seconds,evaluate_seconds,decrypt_seconds,mae,max_abs_error\n" << std::setprecision(17);
+    const double setupSeconds=sec(setupStarted);
+    std::ofstream execution(executionPath); execution << std::setprecision(17) << "{\"setup_seconds\":" << setupSeconds << ",\"ring_dimension\":" << context->GetRingDimension() << ",\"requested_slot_count\":" << slots << ",\"omp_num_threads\":1}\n";
+    std::ofstream out(resultPath); out << "calculation,value_count,decimals,repetition,ciphertext_chunks,encrypt_seconds,evaluate_seconds,decrypt_seconds,online_seconds,mae,max_abs_error\n" << std::setprecision(17);
     for (const auto& op : {std::string("CT+CT"), std::string("CT-CT"), std::string("CTxCT")}) {
       const std::string dataset = op == "CTxCT" ? "multiply" : "add_sub";
       for (size_t count : {size_t(1000), size_t(50000), size_t(1000000)}) for (int decimals : {1,2,3,6}) {
@@ -91,7 +94,7 @@ int main(int argc, char** argv) {
             else if (op == "CT-CT") { auto a=encrypted_subtract__encrypt__arg0(context,left,keys.publicKey); auto b=encrypted_subtract__encrypt__arg1(context,right,keys.publicKey); encrypt += sec(began); began=std::chrono::steady_clock::now(); auto r=encrypted_subtract(context,a,b); evaluate += sec(began); began=std::chrono::steady_clock::now(); auto d=encrypted_subtract__decrypt__result0(context,r,keys.secretKey); decrypt += sec(began); audit(d,pair,start,[](double x,double y){return x-y;},total,maximum,audited); }
             else { auto a=encrypted_multiply__encrypt__arg0(context,left,keys.publicKey); auto b=encrypted_multiply__encrypt__arg1(context,right,keys.publicKey); encrypt += sec(began); began=std::chrono::steady_clock::now(); auto r=encrypted_multiply(context,a,b); evaluate += sec(began); began=std::chrono::steady_clock::now(); auto d=encrypted_multiply__decrypt__result0(context,r,keys.secretKey); decrypt += sec(began); audit(d,pair,start,[](double x,double y){return x*y;},total,maximum,audited); }
           }
-          out << op << ',' << count << ',' << decimals << ',' << repeat+1 << ',' << chunks << ',' << encrypt << ',' << evaluate << ',' << decrypt << ',' << total/audited << ',' << maximum << '\n';
+          out << op << ',' << count << ',' << decimals << ',' << repeat+1 << ',' << chunks << ',' << encrypt << ',' << evaluate << ',' << decrypt << ',' << encrypt+evaluate+decrypt << ',' << total/audited << ',' << maximum << '\n';
         }
       }
     }
@@ -114,20 +117,22 @@ def python_baseline(data_dir: Path, output: Path, repetitions: int) -> None:
                         writer.writerow([calculation, count, decimals, repeat, time.perf_counter() - started])
 
 
-def report(he_csv: Path, python_csv: Path, output: Path) -> None:
+def report(he_csv: Path, python_csv: Path, execution_json: Path, output: Path) -> None:
     def grouped(path: Path, field: str) -> dict[tuple[str,str,str], list[float]]:
         result: dict[tuple[str,str,str], list[float]] = {}
         with path.open(newline="", encoding="utf-8") as handle:
             for row in csv.DictReader(handle): result.setdefault((row["calculation"],row["value_count"],row["decimals"]), []).append(float(row[field]))
         return result
     he = grouped(he_csv, "evaluate_seconds"); py = grouped(python_csv, "python_seconds")
-    lines = ["# CKKS primitive benchmark", "", "| Calculation | Values | Decimals | Python latency (median s) | HE evaluation latency (median s) |", "|---|---:|---:|---:|---:|"]
+    encryption = grouped(he_csv, "encrypt_seconds"); decrypt = grouped(he_csv, "decrypt_seconds"); online = grouped(he_csv, "online_seconds")
+    execution = json.loads(execution_json.read_text(encoding="utf-8"))
+    lines = ["# CKKS primitive benchmark", "", f"One CKKS context/key set setup: `{execution['setup_seconds']:.9f}` s. Runtime ring dimension: `{execution['ring_dimension']}`. Requested slots: `{execution['requested_slot_count']}`. `OMP_NUM_THREADS=1`.", "", "| Calculation | Values | Decimals | Python calculation (median s) | HE evaluation (median s) | HE encryption (median s) | HE decryption (median s) | HE online: encrypt + evaluate + decrypt (median s) |", "|---|---:|---:|---:|---:|---:|---:|---:|"]
     for key in sorted(he):
         label = "CT×CT" if key[0] == "CTxCT" else key[0]
-        lines.append(f"| {label} | {key[1]} | {key[2]} | {statistics.median(py[key]):.9f} | {statistics.median(he[key]):.9f} |")
+        lines.append(f"| {label} | {key[1]} | {key[2]} | {statistics.median(py[key]):.9f} | {statistics.median(he[key]):.9f} | {statistics.median(encryption[key]):.9f} | {statistics.median(decrypt[key]):.9f} | {statistics.median(online[key]):.9f} |")
     with he_csv.open(newline="", encoding="utf-8") as handle:
         errors = [float(row["max_abs_error"]) for row in csv.DictReader(handle)]
-    lines += ["", f"Acceptance: max absolute error ≤ 1e-6. Observed maximum: `{max(errors):.12g}`.", "", "Raw timing and accuracy rows: `heir_results.csv`, `python_results.csv`."]
+    lines += ["", "Python calculation is compared only with HE evaluation. HE setup, encryption, and decryption are reported separately and are included in HE online latency; they are not treated as Python-calculation slowdown.", "", f"Acceptance: max absolute error ≤ 1e-6. Observed maximum: `{max(errors):.12g}`.", "", "Raw timing and accuracy rows: `heir_results.csv`, `python_results.csv`."]
     output.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -149,8 +154,8 @@ def main() -> None:
     (work/"primitive_runner.cpp").write_text(RUNNER.replace("@SLOTS@", "8192"),encoding="utf-8"); (work/"CMakeLists.txt").write_text(CMAKE,encoding="utf-8")
     build=work/"build"; configure,_=run(["cmake","-S",str(work.resolve()),"-B",str(build.resolve()),f"-DOpenFHE_DIR={args.openfhe_dir}"],work); build_seconds,_=run(["cmake","--build",str(build.resolve()),"--target","primitive_runner"],work)
     py=root/"python_results.csv"; python_baseline(args.data_dir.resolve(),py,args.repetitions)
-    he=root/"heir_results.csv"; wall,log=run([str((build/"primitive_runner").resolve()),str(args.data_dir.resolve()),str(he.resolve()),str(args.repetitions)],work); (work/"runner.log").write_text(log,encoding="utf-8")
-    report(he,py,root/"REPORT.md"); result={"status":"ckks_primitive_benchmark_executed","report":"REPORT.md","build_seconds":{"configure":configure,"build":build_seconds},"runner_wall_seconds":wall}; write_json(root/"result.json",result); print(json.dumps(result,indent=2))
+    he=root/"heir_results.csv"; execution=root/"execution.json"; wall,log=run(["env","OMP_NUM_THREADS=1",str((build/"primitive_runner").resolve()),str(args.data_dir.resolve()),str(he.resolve()),str(args.repetitions),str(execution.resolve())],work); (work/"runner.log").write_text(log,encoding="utf-8")
+    report(he,py,execution,root/"REPORT.md"); result={"status":"ckks_primitive_benchmark_executed","report":"REPORT.md","execution":"execution.json","build_seconds":{"configure":configure,"build":build_seconds},"runner_wall_seconds":wall}; write_json(root/"result.json",result); print(json.dumps(result,indent=2))
 
 
 if __name__ == "__main__": main()
