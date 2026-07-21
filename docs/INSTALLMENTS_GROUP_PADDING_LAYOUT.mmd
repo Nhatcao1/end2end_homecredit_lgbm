@@ -1,0 +1,31 @@
+flowchart TD
+    raw["Client-only installments_payments.csv<br/>SK_ID_CURR + raw amount columns"]
+    groups["Pandas: group rows by SK_ID_CURR<br/>(no feature calculation, no aggregation)"]
+    raw --> groups
+
+    groups --> a["Customer A: 3 rows"]
+    groups --> b["Customer B: 8 rows"]
+    groups --> c["Customer C: 11 rows"]
+
+    subgraph layout["Client prepares fixed-size blocks: bucket size = 8"]
+      a --> ablock["Opaque group 52, block 0<br/>rows: A1, A2, A3, pad, pad, pad, pad, pad<br/>padding mask: 1, 1, 1, 0, 0, 0, 0, 0"]
+      b --> bblock["Opaque group 17, block 0<br/>rows: B1, B2, B3, B4, B5, B6, B7, B8<br/>padding mask: 1, 1, 1, 1, 1, 1, 1, 1"]
+      c --> cblock0["Opaque group 93, block 0<br/>rows: C1 ... C8<br/>padding mask: 1, 1, 1, 1, 1, 1, 1, 1"]
+      c --> cblock1["Opaque group 93, block 1<br/>rows: C9, C10, C11, pad, pad, pad, pad, pad<br/>padding mask: 1, 1, 1, 0, 0, 0, 0, 0"]
+    end
+
+    subgraph encrypted["Later HE stage — not part of the grouping preparation"]
+      inputs["Encrypt aligned columns in every block<br/>AMT_INSTALMENT, AMT_PAYMENT, padding mask"]
+      diff["Per lane: encrypted PAYMENT_DIFF<br/>AMT_INSTALMENT − AMT_PAYMENT"]
+      partial["Later: masked aggregate per block"]
+      merge["Later: merge partials with the same opaque group ID<br/>C block 0 + C block 1 → customer C result"]
+      inputs --> diff --> partial --> merge
+    end
+
+    ablock --> inputs
+    bblock --> inputs
+    cblock0 --> inputs
+    cblock1 --> inputs
+
+    note["The private client keeps:<br/>SK_ID_CURR ↔ opaque group ID mapping.<br/>The HE evaluator receives no raw SK_ID_CURR."]
+    groups -. private .-> note
