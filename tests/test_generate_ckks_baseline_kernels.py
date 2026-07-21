@@ -49,6 +49,10 @@ class GenerateCkksBaselineKernelsTest(unittest.TestCase):
             add_source = (root / "00_encrypted_add" / "source.mlir").read_text(encoding="utf-8")
             self.assertIn("tensor<8xf64>", add_source)
             self.assertIn("encrypted_add", add_source)
+            report = (root / "REPORT.md").read_text(encoding="utf-8")
+            self.assertIn("generation report only", report)
+            self.assertIn("CT×CT", report)
+            self.assertIn("1k, 50k, 1m", report)
 
 
 if __name__ == "__main__":

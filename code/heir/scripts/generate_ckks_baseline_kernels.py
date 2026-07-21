@@ -90,6 +90,51 @@ def kernel_specs(slot_count: int) -> tuple[KernelSpec, ...]:
     )
 
 
+def markdown_report(manifest: dict[str, object]) -> str:
+    """Return a concise generation-only report for the standalone benchmark."""
+    kernels = manifest["kernels"]
+    rows = "\n".join(
+        f"| `{kernel['report_label']}` | `{kernel['logical_value_count']}` | {kernel['generation_status']} |"
+        for kernel in kernels
+    )
+    return f"""# CKKS baseline generation report
+
+This is a **generation report only**. It records real HEIR MLIR and, when
+`--lower` is used, real translated OpenFHE source. It contains no fabricated
+latency, accuracy, encryption, or decryption result. Those fields are written
+by the later execution runner.
+
+| Setting | Value |
+|---|---:|
+| Requested ring dimension | {manifest['requested_ring_dimension']} |
+| Requested CKKS slots | {manifest['requested_slot_count']} |
+
+## Primitive runtime matrix
+
+Each primitive calculation will later run over 1,000, 50,000, and 1,000,000
+aligned real values. A value count above the slot count is streamed in
+8192-lane ciphertext chunks; it does not create a larger HEIR kernel.
+
+| Calculation | Runtime value counts | Source status |
+|---|---|---|
+| `CT+CT` | 1k, 50k, 1m | MLIR ready |
+| `CT-CT` | 1k, 50k, 1m | MLIR ready |
+| `CT×CT` | 1k, 50k, 1m | MLIR ready |
+| `CT+PT` | 1k, 50k, 1m | pending public-operand compatibility probe |
+| `CT×PT` | 1k, 50k, 1m | pending public-operand compatibility probe |
+
+## Scaled extended kernels
+
+| Calculation | Logical values per run | Generation status |
+|---|---:|---|
+{rows}
+
+The smaller defaults are intentional for the current weak server. Runtime
+execution will compare Python/NumPy calculation latency with HEIR/OpenFHE
+latency and apply the requested `1e-6` maximum-absolute-error acceptance rule.
+"""
+
+
 def run(command: list[str], output: Path) -> float:
     started = time.perf_counter()
     with output.open("w", encoding="utf-8") as handle:
@@ -177,6 +222,7 @@ def generate(
         "kernels": kernels,
     }
     write_json(output_dir / "generation_manifest.json", manifest)
+    (output_dir / "REPORT.md").write_text(markdown_report(manifest), encoding="utf-8")
     return manifest
 
 
