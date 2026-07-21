@@ -13,5 +13,7 @@ class RunCkksSumBenchmarkTest(unittest.TestCase):
         self.assertIn("## CKKS-SUM-01",source)
         self.assertIn("## CKKS-MEAN-01",source)
         self.assertIn("EvalMult(value,inverse)",source)
+        self.assertIn("--input-scale",source)
+        self.assertIn("inputScale",source)
 
 if __name__=="__main__": unittest.main()
