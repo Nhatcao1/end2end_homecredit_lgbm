@@ -135,18 +135,30 @@ void feature(const std::filesystem::path& session, const char* duePath, const ch
   require(Serial::SerializeToFile(outputPath, encryptedFeature, SerType::BINARY), "cannot save payment_diff ciphertext");
 }
 void sumStage(const std::filesystem::path& session, const char* inputPath, const char* outputPath) {
-  auto context = loadContext(session); loadEvaluationKeys(session);
+  std::cerr << "stage=sum: loading CKKS context\n";
+  auto context = loadContext(session);
+  // Sum uses additions only. Do not deserialize multiplication keys here:
+  // OpenFHE key deserialization can replace context cache entries unnecessarily.
+  std::cerr << "stage=sum: loading payment_diff ciphertext bundle\n";
   auto result = fixed_count_sum(context, loadCiphertext(inputPath));
+  std::cerr << "stage=sum: saving output\n";
   require(Serial::SerializeToFile(outputPath, result, SerType::BINARY), "cannot save sum ciphertext");
 }
 void meanStage(const std::filesystem::path& session, const char* inputPath, const char* outputPath) {
-  auto context = loadContext(session); loadEvaluationKeys(session);
+  std::cerr << "stage=mean: loading CKKS context\n";
+  auto context = loadContext(session);
+  // Mean multiplies only by a public scalar, so it does not need an EvalMult key.
+  std::cerr << "stage=mean: loading payment_diff ciphertext bundle\n";
   auto result = fixed_count_mean(context, loadCiphertext(inputPath));
+  std::cerr << "stage=mean: saving output\n";
   require(Serial::SerializeToFile(outputPath, result, SerType::BINARY), "cannot save mean ciphertext");
 }
 void varianceStage(const std::filesystem::path& session, const char* inputPath, const char* outputPath) {
+  std::cerr << "stage=variance: loading CKKS context and multiplication keys\n";
   auto context = loadContext(session); loadEvaluationKeys(session);
+  std::cerr << "stage=variance: loading payment_diff ciphertext bundle\n";
   auto result = fixed_count_variance(context, loadCiphertext(inputPath));
+  std::cerr << "stage=variance: saving output\n";
   require(Serial::SerializeToFile(outputPath, result, SerType::BINARY), "cannot save variance ciphertext");
 }
 void audit(const std::filesystem::path& session, const char* featurePath, const char* sumPath, const char* meanPath, const char* variancePath, const char* featureAuditPath, const char* metricsPath) {
@@ -172,7 +184,8 @@ int main(int argc, char** argv) {
     else if (stage == "audit" && argc == 9) audit(session, argv[3], argv[4], argv[5], argv[6], argv[7], argv[8]);
     else return 2;
     return 0;
-  } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
+  } catch (const OpenFHEException& error) { std::cerr << "OpenFHE error: " << error.what() << '\n'; return 1; }
+    catch (const std::exception& error) { std::cerr << "runner error: " << error.what() << '\n'; return 1; }
 }
 '''
 
