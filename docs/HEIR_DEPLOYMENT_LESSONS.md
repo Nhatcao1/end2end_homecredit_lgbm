@@ -88,6 +88,12 @@ acceptable. It should have its own benchmark and deployment configuration.
 ## Current status
 
 - Exact `PAYMENT_DIFF → sum` has been exercised as a ciphertext chain.
+- `run_payment_diff_fixed_count_aggregates.py` is the next small, executable
+  arithmetic proof: `PAYMENT_DIFF → sum / mean / sample variance` from one
+  encrypted source artifact. It deliberately uses a public fixed count of
+  three review lanes, so it does **not** represent variable-size grouped
+  aggregation. Its `max` row is intentionally `NOT_RUN` until the separate
+  CKKS-to-FHEW comparison benchmark exists.
 - `PAYMENT_PERC` requires its own depth/range accuracy proof before use in a
   larger DAG.
 - `PAYMENT_DIFF → moments → mean/sample variance` is an explicit bootstrap

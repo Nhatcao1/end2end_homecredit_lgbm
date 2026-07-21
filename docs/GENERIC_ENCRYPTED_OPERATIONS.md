@@ -162,12 +162,14 @@ requested values for each generated kernel in `result.json`.
 
 ### First encrypted mean and variance chain
 
-The next focused chain uses exact `PAYMENT_DIFF` so statistics infrastructure
+The general grouped path uses exact `PAYMENT_DIFF` so statistics infrastructure
 can be checked independently of reciprocal-feature noise. One encrypted feature
 vector is consumed once to produce encrypted `count`, `sum`, and `sum_squares`.
-The finalizer consumes those encrypted scalars to produce encrypted mean and
-sample variance. For the tiny review data its public valid-count range is
-`[2, 4]`, and it uses a depth-24 CKKS context; no bootstrap is used.
+The finalizer then consumes those encrypted scalars to produce encrypted mean
+and sample variance. It is a bootstrap experiment on the current HEIR build;
+the small server was OOM-killed during bootstrap setup/key generation. It is
+kept for a larger-machine experiment, not presented as a passed ordinary CKKS
+benchmark.
 
 ```bash
 python3 code/heir/scripts/run_payment_diff_moments_demo.py \
@@ -178,13 +180,38 @@ python3 code/heir/scripts/run_payment_diff_moments_demo.py \
   --openfhe-dir /usr/local/lib/OpenFHE
 ```
 
-Review `feature_comparison.csv` and `statistics_comparison.csv`. Ciphertexts
-for the source feature, count, sum, squared sum, mean, and variance remain in
-`ciphertexts/`.
-Because HEIR inserts a bootstrap for this depth-24 finalizer, the finalizer
-creates the shared context and bootstrap keys before the shallower feature and
-moments stages are configured. This is a controlled bootstrap experiment, not
-the default path for ordinary sum.
+If it completes on a sufficiently large server, review `feature_comparison.csv`
+and `statistics_comparison.csv`. Ciphertexts for the source feature, count,
+sum, squared sum, mean, and variance remain in `ciphertexts/`. Because HEIR
+inserts a bootstrap for this finalizer, the finalizer creates the shared context
+and bootstrap keys before the shallower feature and moments stages are
+configured.
+
+### Small executable `PAYMENT_DIFF` aggregation proof
+
+For the three fixed review rows, use the bounded non-bootstrap runner below.
+It encrypts `AMT_INSTALMENT` and `AMT_PAYMENT`, derives
+`PAYMENT_DIFF = AMT_INSTALMENT - AMT_PAYMENT` after encryption, serializes that
+source ciphertext, then derives encrypted `sum`, `mean`, and sample `var`
+from the same in-memory ciphertext edge. It writes a familiar audit table:
+
+```bash
+python3 code/heir/scripts/run_payment_diff_fixed_count_aggregates.py \
+  --output-dir benchmark_runs/payment_diff_fixed_count_aggregates \
+  --overwrite \
+  --vector-size 8 \
+  --ckks-mul-depth 4 \
+  --openfhe-dir /usr/local/lib/OpenFHE
+```
+
+Review `feature_comparison.csv` and `aggregation_comparison.csv`; all four
+ciphertext artifacts are under `ciphertexts/`:
+`payment_diff.ct`, `sum.ct`, `mean.ct`, and `variance.ct`. The output also has
+a `max` row, but its HE value is deliberately `NOT_RUN`: exact encrypted max
+needs the separate CKKS-to-FHEW comparison/scheme-switching lane. This runner
+has one narrow, explicit contract: its group has a **public fixed count of 3**.
+It is a valid arithmetic/ciphertext proof, but is not a replacement for the
+variable/private group-count finalizer above.
 
 ## Timing and accuracy
 
