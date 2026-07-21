@@ -122,7 +122,9 @@ def report(he_csv: Path, python_csv: Path, output: Path) -> None:
         return result
     he = grouped(he_csv, "evaluate_seconds"); py = grouped(python_csv, "python_seconds")
     lines = ["# CKKS primitive benchmark", "", "| Calculation | Values | Decimals | Python latency (median s) | HE evaluation latency (median s) |", "|---|---:|---:|---:|---:|"]
-    for key in sorted(he): lines.append(f"| {key[0]} | {key[1]} | {key[2]} | {statistics.median(py[key]):.9f} | {statistics.median(he[key]):.9f} |")
+    for key in sorted(he):
+        label = "CT×CT" if key[0] == "CTxCT" else key[0]
+        lines.append(f"| {label} | {key[1]} | {key[2]} | {statistics.median(py[key]):.9f} | {statistics.median(he[key]):.9f} |")
     with he_csv.open(newline="", encoding="utf-8") as handle:
         errors = [float(row["max_abs_error"]) for row in csv.DictReader(handle)]
     lines += ["", f"Acceptance: max absolute error ≤ 1e-6. Observed maximum: `{max(errors):.12g}`.", "", "Raw timing and accuracy rows: `heir_results.csv`, `python_results.csv`."]
