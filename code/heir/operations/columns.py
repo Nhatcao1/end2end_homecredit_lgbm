@@ -61,3 +61,54 @@ def binary_mlir(vector_size: int, operation: str) -> str:
   return %result : {tensor}
 }}
 """
+
+
+def ratio_newton_mlir(
+    vector_size: int,
+    *,
+    entry_function: str = "encrypted_ratio_newton",
+    denominator_scale: float = 1000.0,
+) -> str:
+    """Emit generic encrypted ``numerator / denominator`` CKKS MLIR.
+
+    The client supplies raw numerator/denominator columns and a validity mask;
+    it does not calculate the ratio. ``denominator_scale`` and the normalized
+    denominator interval are public representation/range contracts.
+    """
+    if vector_size <= 0 or denominator_scale <= 0:
+        raise ValueError("vector size and denominator scale must be positive")
+    tensor = f"tensor<{vector_size}xf64>"
+    inverse_scale = 1.0 / denominator_scale
+    return f'''func.func @{entry_function}(
+    %numerator: {tensor} {{secret.secret}},
+    %denominator: {tensor} {{secret.secret}},
+    %valid: {tensor} {{secret.secret}}
+) -> {tensor} {{
+  %zero = arith.constant dense<0.0> : {tensor}
+  %inv_scale = arith.constant {inverse_scale:.17g} : f64
+  %a = arith.constant 2.8235294117647058 : f64
+  %b = arith.constant 1.8823529411764706 : f64
+  %two = arith.constant 2.0 : f64
+  %result = affine.for %i = 0 to {vector_size} iter_args(%out = %zero) -> ({tensor}) {{
+    %n = tensor.extract %numerator[%i] : {tensor}
+    %d_raw = tensor.extract %denominator[%i] : {tensor}
+    %m = tensor.extract %valid[%i] : {tensor}
+    %d = arith.mulf %d_raw, %inv_scale : f64
+    // Newton reciprocal is calibrated for normalized d in [0.5, 1.0].
+    %seed_product = arith.mulf %b, %d : f64
+    %x0 = arith.subf %a, %seed_product : f64
+    %step0_product = arith.mulf %d, %x0 : f64
+    %step0_error = arith.subf %two, %step0_product : f64
+    %x1 = arith.mulf %x0, %step0_error : f64
+    %step1_product = arith.mulf %d, %x1 : f64
+    %step1_error = arith.subf %two, %step1_product : f64
+    %inverse_normalized = arith.mulf %x1, %step1_error : f64
+    %unscaled = arith.mulf %n, %inverse_normalized : f64
+    %ratio = arith.mulf %unscaled, %inv_scale : f64
+    %masked_ratio = arith.mulf %ratio, %m : f64
+    %next = tensor.insert %masked_ratio into %out[%i] : {tensor}
+    affine.yield %next : {tensor}
+  }}
+  return %result : {tensor}
+}}
+'''

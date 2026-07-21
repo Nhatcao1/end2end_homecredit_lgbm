@@ -128,13 +128,15 @@ def main() -> None:
             raise FileExistsError(f"refusing to overwrite: {root}; pass --overwrite")
         shutil.rmtree(root)
     root.mkdir(parents=True)
-    # Max needs a power-of-two candidate count. This synthetic lane is within
-    # the FHEW comparison range, below the public review-feature lower bound
-    # (-100), and therefore cannot win. Do not use an extreme sentinel here:
-    # FHEW comparisons operate modulo a bounded plaintext space.
-    padding_floor = -128.0
-    due = [row["AMT_INSTALMENT"] for row in DEMO_ROWS] + [padding_floor]
-    paid = [row["AMT_PAYMENT"] for row in DEMO_ROWS] + [0.0]
+    # Max needs a power-of-two candidate count. Rather than inject a synthetic
+    # low value, repeat one genuine candidate. Duplicating a candidate cannot
+    # change the max and avoids needing a data-dependent "small enough" pad.
+    # FHEW still needs a public numeric range for every real candidate.
+    due = [row["AMT_INSTALMENT"] for row in DEMO_ROWS]
+    paid = [row["AMT_PAYMENT"] for row in DEMO_ROWS]
+    duplicate_source_row = 0
+    due.append(due[duplicate_source_row])
+    paid.append(paid[duplicate_source_row])
     expected_feature = [left - right for left, right in zip(due, paid)]
     inputs = root / "plaintext_inputs"; inputs.mkdir()
     due_path, paid_path = inputs / "amt_installment.csv", inputs / "amt_payment.csv"
@@ -155,7 +157,7 @@ def main() -> None:
     max_row = {"aggregation": "max", "python": expected_max, "he": metrics["max"], "absolute_error": abs(expected_max - metrics["max"]), "argmax_artifact": "not retained"}
     write_csv(root / "feature_comparison.csv", list(rows[0]), rows)
     write_csv(root / "max_comparison.csv", list(max_row), [max_row])
-    result = {"status": "openfhe_ckks_fhew_max_executed", "scope": "standalone CKKS-to-FHEW max session; parent columns encrypted then PAYMENT_DIFF calculated after encryption", "important_limit": "separate OpenFHE scheme-switching context; it cannot consume a ciphertext from the ordinary HEIR CKKS session", "comparison_range_contract": {"review_payment_diff_range": "[-100, 160]", "padding_floor": padding_floor, "rule": "all real candidates and padding must have absolute value less than execution.max_safe_absolute_input; choose range/padding from public schema bounds, never an extreme sentinel"}, "padding": {"synthetic_lane": 3, "payment_diff_value": padding_floor, "reason": "power-of-two candidate count required for max"}, "argmax": "OpenFHE returns it internally but this runner neither serializes nor decrypts it", "build_seconds": {"configure": configure_seconds, "build": build_seconds}, "feature_comparison": rows, "max_comparison": max_row, "execution": metrics, "ciphertext_artifacts": [str(item) for item in sorted(ciphertexts.glob("*.ct"))]}
+    result = {"status": "openfhe_ckks_fhew_max_executed", "scope": "standalone CKKS-to-FHEW max session; parent columns encrypted then PAYMENT_DIFF calculated after encryption", "important_limit": "separate OpenFHE scheme-switching context; it cannot consume a ciphertext from the ordinary HEIR CKKS session", "comparison_range_contract": {"review_payment_diff_range": "[-100, 160]", "rule": "all real candidates must have absolute value less than execution.max_safe_absolute_input; choose and enforce this public range from schema/business bounds before the switch"}, "padding": {"duplicate_lane": 3, "duplicate_source_row": duplicate_source_row, "reason": "power-of-two candidate count required for max; duplicating a real candidate cannot change max"}, "argmax": "OpenFHE returns it internally but this runner neither serializes nor decrypts it", "build_seconds": {"configure": configure_seconds, "build": build_seconds}, "feature_comparison": rows, "max_comparison": max_row, "execution": metrics, "ciphertext_artifacts": [str(item) for item in sorted(ciphertexts.glob("*.ct"))]}
     write_json(root / "result.json", result)
     print(json.dumps({"status": result["status"], "max_comparison": max_row, "output_dir": str(root)}, indent=2))
 

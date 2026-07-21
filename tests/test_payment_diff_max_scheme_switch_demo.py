@@ -13,6 +13,13 @@ class PaymentDiffMaxSchemeSwitchTest(unittest.TestCase):
         self.assertIn("not saved or decrypted", RUNNER)
         self.assertIn("maxSafeAbs", RUNNER)
 
+    def test_max_padding_duplicates_a_real_candidate_not_a_sentinel(self) -> None:
+        source = Path(__file__).resolve().parents[1] / "code" / "heir" / "scripts" / "run_payment_diff_max_openfhe_demo.py"
+        script = source.read_text(encoding="utf-8")
+        self.assertIn("duplicate_source_row", script)
+        self.assertIn("duplicating a real candidate cannot change max", script)
+        self.assertNotIn("padding_floor", script)
+
     def test_mermaid_diagram_records_the_two_session_boundary(self) -> None:
         diagram = (Path(__file__).resolve().parents[1] / "docs" / "PAYMENT_DIFF_CIPHERTEXT_FLOW.mmd").read_text()
         self.assertIn("Ordinary HEIR CKKS session", diagram)

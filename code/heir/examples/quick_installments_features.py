@@ -13,6 +13,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from code.heir.operations.columns import ratio_newton_mlir
+
 
 DEMO_ROWS = (
     {"AMT_INSTALMENT": 800.0, "AMT_PAYMENT": 640.0, "DAYS_ENTRY_PAYMENT": -10.0, "DAYS_INSTALMENT": -20.0},
@@ -35,44 +37,11 @@ def payment_perc_newton_mlir(vector_size: int, amount_scale: float = 1000.0) -> 
     ``x <- x * (2 - d*x)``. This is approximate and requires valid positive
     installments to lie in the documented normalized range.
     """
-    if vector_size <= 0 or amount_scale <= 0:
-        raise ValueError("vector size and amount scale must be positive")
-    tensor = f"tensor<{vector_size}xf64>"
-    inverse_scale = 1.0 / amount_scale
-    return f'''func.func @payment_perc_newton(
-    %payment: {tensor} {{secret.secret}},
-    %installment: {tensor} {{secret.secret}},
-    %valid: {tensor} {{secret.secret}}
-) -> {tensor} {{
-  %zero = arith.constant dense<0.0> : {tensor}
-  %inv_scale = arith.constant {_mlir_float(inverse_scale)} : f64
-  %a = arith.constant 2.8235294117647058 : f64
-  %b = arith.constant 1.8823529411764706 : f64
-  %two = arith.constant 2.0 : f64
-  %result = affine.for %i = 0 to {vector_size} iter_args(%out = %zero) -> ({tensor}) {{
-    %p = tensor.extract %payment[%i] : {tensor}
-    %d_raw = tensor.extract %installment[%i] : {tensor}
-    %m = tensor.extract %valid[%i] : {tensor}
-    %d = arith.mulf %d_raw, %inv_scale : f64
-    // Linear seed is fitted for normalized installment d in [0.5, 1.0].
-    %seed_product = arith.mulf %b, %d : f64
-    %x0 = arith.subf %a, %seed_product : f64
-    %step0_product = arith.mulf %d, %x0 : f64
-    %step0_error = arith.subf %two, %step0_product : f64
-    %x1 = arith.mulf %x0, %step0_error : f64
-    %step1_product = arith.mulf %d, %x1 : f64
-    %step1_error = arith.subf %two, %step1_product : f64
-    %inverse_normalized = arith.mulf %x1, %step1_error : f64
-    %unscaled = arith.mulf %p, %inverse_normalized : f64
-    %ratio = arith.mulf %unscaled, %inv_scale : f64
-    // Missing/invalid lanes are zeroed only after encrypted calculation.
-    %masked_ratio = arith.mulf %ratio, %m : f64
-    %next = tensor.insert %masked_ratio into %out[%i] : {tensor}
-    affine.yield %next : {tensor}
-  }}
-  return %result : {tensor}
-}}
-'''
+    return ratio_newton_mlir(
+        vector_size,
+        entry_function="payment_perc_newton",
+        denominator_scale=amount_scale,
+    )
 
 
 def positive_difference_mlir(vector_size: int, days_range: float = 10.0) -> str:

@@ -1,8 +1,8 @@
 flowchart TD
-  subgraph client[Client preparation: raw values and padding only]
+  subgraph client[Client preparation: raw values and alignment only]
     due[AMT_INSTALMENT values]
     paid[AMT_PAYMENT values]
-    pad[Power-of-two padding lane<br/>due=-128; paid=0]
+    duplicate[Power-of-two lane<br/>duplicate one genuine candidate]
   end
 
   subgraph arithmetic[Ordinary HEIR CKKS session]
@@ -32,8 +32,8 @@ flowchart TD
     noIndex[argmax ciphertext discarded<br/>not serialized or decrypted]
     due --> dueMax
     paid --> paidMax
-    pad --> dueMax
-    pad --> paidMax
+    duplicate --> dueMax
+    duplicate --> paidMax
     dueMax --> diffMax
     paidMax --> diffMax
     diffMax --> switch
@@ -41,6 +41,6 @@ flowchart TD
     switch --> noIndex
   end
 
-  note[Ciphertext bundles are vectors of packed ciphertext chunks.<br/>The two sessions use different CKKS parameters and keys.]
+  note[Ciphertext bundles are vectors of packed ciphertext chunks.<br/>The two sessions use different CKKS parameters and keys.<br/>FHEW max also requires a public bounded numeric range.]
   diffCT -. cannot cross session .-> switch
   maxCT --> note

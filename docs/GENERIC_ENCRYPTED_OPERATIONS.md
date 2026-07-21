@@ -26,11 +26,11 @@ does not derive ratios, differences, means, or other business features.
 | Python expression | Route | Status |
 |---|---|---|
 | `a + b`, `a - b`, `a * b` | native CKKS | Implemented generic API |
-| `count`, `sum`, `sum(x * x)` | native CKKS | Existing K01/K02 contracts |
-| `a / b` | reciprocal polynomial + multiply | Planned |
-| `sum / count`, variance | reciprocal polynomial | Planned |
+| `sum` | native CKKS packed reduction | Implemented generic fixed-public-count kernel |
+| `mean`, sample variance | native CKKS packed reduction | Implemented when group count is public and fixed |
+| `a / b` | reciprocal polynomial + multiply | Implemented with a bounded positive-denominator contract |
 | `x > threshold` | CKKS sign polynomial | Planned |
-| `min` / `max` | OpenFHE CKKS-to-FHEW switching | Planned, separate from HEIR-generated CKKS |
+| `min` / `max` | OpenFHE CKKS-to-FHEW switching | Separate session required; not emitted by HEIR |
 
 ## Representative source benchmarks
 
@@ -119,46 +119,18 @@ It never computes the ratio client-side. The current public contract is
 `AMT_INSTALMENT / 1000` in `[0.5, 1.0]`; change and validate that contract for
 real data before using this kernel.
 
-Only after `comparison.csv` shows acceptable relative error should the result
-ciphertext be passed into encrypted sum. Do not introduce bootstrapping before
-this isolated depth-12 probe has failed and its generated parameters have been
-reviewed.
+This ratio path is intentionally evaluated as a feature-only proof first. In
+the current small-server environment, taking its output into `sum`, `mean`, or
+`var` exhausted the available CKKS depth/memory. Those aggregate results must
+therefore remain **not run**, rather than borrowing the plaintext answer. The
+feature evaluation time and accuracy remain useful evidence for the generic
+bounded-ratio kernel.
 
-Use this focused command to encrypt only `AMT_PAYMENT` and
-`AMT_INSTALMENT`, calculate both requested features, and pass each encrypted
-feature vector to a separate HEIR-generated `sum` kernel. Decryption happens
-only after both encrypted calculations for the audit comparison:
-
-```bash
-python3 code/heir/scripts/run_payment_features_ciphertext_demo.py \
-  --output-dir benchmark_runs/payment_features_ciphertext \
-  --overwrite \
-  --vector-size 8 \
-  --ckks-mul-depth 12 \
-  --openfhe-dir /usr/local/lib/OpenFHE
-```
-
-Review `comparison.csv` for row-level feature accuracy and
-`sum_comparison.csv` for the two sums. Each feature directory keeps both
-`ciphertexts/result.ct` (the encrypted feature vector) and
-`ciphertexts/sum.ct` (the encrypted scalar sum), along with encrypted inputs.
-The generated sum MLIR remains in `sum_kernel/source.mlir`.
-The sum uses a balanced ciphertext-only addition tree. It deliberately avoids a
-plaintext-zero loop accumulator, so it can preserve the CKKS level of a feature
-ciphertext produced by the preceding kernel.
-
-The generated HEIR/OpenFHE sum may consume its ciphertext input in place. The
-runner therefore writes `result.ct` and performs the optional feature audit
-before passing that in-memory edge to sum. In a branching encrypted DAG, a
-feature needed by more than one downstream consumer must be materialized as a
-separate ciphertext artifact before any in-place consumer runs.
-
-This step implements only ungrouped sum. It does not attempt groupby, count,
-mean, variance, categorical means, or max. Padding contributes zero to the sum;
-the validity mask remains part of `PAYMENT_PERC` so padded rows cannot affect
-that feature. The generated feature and sum contexts both use the explicit
-depth requested by `--ckks-mul-depth`; the script records the inferred and
-requested values for each generated kernel in `result.json`.
+The older combined `run_payment_features_ciphertext_demo.py` experiment is
+retained as a troubleshooting artifact only. Do not use it as the benchmark
+result: it attempted to continue the deep ratio ciphertext into aggregation and
+therefore mixed a valid feature proof with an unstable chained path. Use the
+single report-producing benchmark below instead.
 
 ### First encrypted mean and variance chain
 
@@ -240,14 +212,44 @@ python3 code/heir/scripts/run_payment_diff_max_openfhe_demo.py \
   --openfhe-dir /usr/local/lib/OpenFHE
 ```
 
-Read `max_comparison.csv`. The small three-row review input receives one
-synthetic low padding lane because OpenFHE's max operation requires a
-power-of-two candidate count. It is not a source-data row and cannot win. The
-padding and all real candidates must stay inside the public FHEW comparison
-range recorded as `execution.max_safe_absolute_input` in `result.json`; an
-extreme sentinel can wrap modulo the FHEW plaintext space and make max wrong.
+Read `max_comparison.csv`. The small three-row review input repeats one genuine
+candidate to reach the power-of-two candidate count OpenFHE requires. A
+duplicate cannot alter the maximum, unlike a synthetic low sentinel. All real
+candidates must still stay inside the public FHEW comparison range recorded as
+`execution.max_safe_absolute_input` in `result.json`; an out-of-range value can
+wrap modulo the FHEW plaintext space and make max wrong.
 See `docs/PAYMENT_DIFF_CIPHERTEXT_FLOW.mmd` for the parent-column, feature,
 ciphertext-bundle, and separate-session flow.
+
+### One report-producing installments benchmark
+
+This is the single review command for both source aggregation declarations:
+
+```python
+'PAYMENT_PERC': ['max', 'mean', 'sum', 'var']
+'PAYMENT_DIFF': ['max', 'mean', 'sum', 'var']
+```
+
+```bash
+python3 code/heir/scripts/run_installments_aggregation_benchmark.py \
+  --output-dir benchmark_runs/installments_aggregation_01 \
+  --overwrite \
+  --vector-size 8 \
+  --ckks-mul-depth 12 \
+  --openfhe-dir /usr/local/lib/OpenFHE \
+  --allow-partial
+```
+
+It writes `REPORT.md`, `result.json`, `kernel_api.json`, and one full log per
+lane. `PAYMENT_PERC` measures the encrypted post-encryption ratio alone; its
+aggregate cells deliberately say `NOT_RUN` because the chained depth/memory
+limit has already been observed. `PAYMENT_DIFF` runs an exact encrypted
+subtraction, then saves `payment_diff.ct` and evaluates `sum`, `mean`, and
+sample `var` as separately timed process branches which reload the same saved
+CKKS session and keys. `max` is documented as deferred because it belongs to
+the dedicated CKKS↔FHEW session. `--allow-partial` keeps the report available
+even if the constrained server rejects one branch; omit it when a nonzero exit
+on any failed lane is preferred.
 
 ## Timing and accuracy
 
