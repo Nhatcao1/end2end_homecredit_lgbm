@@ -69,13 +69,63 @@ def _reduction(vector_size: int, valid_count: int, *, include_squares: bool) -> 
   }}"""
 
 
+def _balanced_reduction(vector_size: int, valid_count: int, *, include_squares: bool) -> str:
+    """Emit a pairwise tree, avoiding a long running encrypted accumulator."""
+    tensor = f"tensor<{vector_size}xf64>"
+    lines: list[str] = []
+    if include_squares:
+        current: list[tuple[str, str]] = []
+        for index in range(valid_count):
+            lines.append(f"  %index_{index} = arith.constant {index} : index")
+            value, square = f"%value_{index}", f"%square_{index}"
+            lines.append(f"  {value} = tensor.extract %values[%index_{index}] : {tensor}")
+            lines.append(f"  {square} = arith.mulf {value}, {value} : f64")
+            current.append((value, square))
+        operation = 0
+        while len(current) > 1:
+            next_level: list[tuple[str, str]] = []
+            for index in range(0, len(current), 2):
+                if index + 1 == len(current):
+                    next_level.append(current[index])
+                    continue
+                last_pair = len(current) == 2
+                sum_name = "%sum_result" if last_pair else f"%sum_tree_{operation}"
+                square_name = "%squares_result" if last_pair else f"%squares_tree_{operation}"
+                left, right = current[index], current[index + 1]
+                lines.append(f"  {sum_name} = arith.addf {left[0]}, {right[0]} : f64")
+                lines.append(f"  {square_name} = arith.addf {left[1]}, {right[1]} : f64")
+                next_level.append((sum_name, square_name))
+                operation += 1
+            current = next_level
+        return "\n".join(lines)
+    current_values: list[str] = []
+    for index in range(valid_count):
+        lines.append(f"  %index_{index} = arith.constant {index} : index")
+        value = f"%value_{index}"
+        lines.append(f"  {value} = tensor.extract %values[%index_{index}] : {tensor}")
+        current_values.append(value)
+    operation = 0
+    while len(current_values) > 1:
+        next_level: list[str] = []
+        for index in range(0, len(current_values), 2):
+            if index + 1 == len(current_values):
+                next_level.append(current_values[index])
+                continue
+            name = "%sum_result" if len(current_values) == 2 else f"%sum_tree_{operation}"
+            lines.append(f"  {name} = arith.addf {current_values[index]}, {current_values[index + 1]} : f64")
+            next_level.append(name)
+            operation += 1
+        current_values = next_level
+    return "\n".join(lines)
+
+
 def fixed_count_sum_mlir(vector_size: int, valid_count: int) -> str:
     """Return an encrypted sum for the first public ``valid_count`` lanes."""
     _validate(vector_size, valid_count)
     return f"""func.func @fixed_count_sum(
     %values: tensor<{vector_size}xf64> {{secret.secret}}
 ) -> f64 {{
-{_reduction(vector_size, valid_count, include_squares=False)}
+{_balanced_reduction(vector_size, valid_count, include_squares=False)}
   return %sum_result : f64
 }}
 """
@@ -92,7 +142,7 @@ def fixed_count_sum_squares_mlir(vector_size: int, valid_count: int) -> str:
     return f"""func.func @fixed_count_sum_squares(
     %values: tensor<{vector_size}xf64> {{secret.secret}}
 ) -> f64 {{
-{_reduction(vector_size, valid_count, include_squares=True)}
+{_balanced_reduction(vector_size, valid_count, include_squares=True)}
   return %squares_result : f64
 }}
 """

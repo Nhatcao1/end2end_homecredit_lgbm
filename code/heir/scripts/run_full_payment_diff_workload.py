@@ -73,14 +73,14 @@ double seconds(std::chrono::steady_clock::time_point start) {
   return std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
 }
 struct Batch { std::vector<double> payment, installment; };
-Batch readBatch(const std::filesystem::path& path) {
+Batch readBatch(const std::filesystem::path& path, double amountScale) {
   std::ifstream input(path); require(input.good(), "cannot open batch " + path.string());
   std::string line; std::getline(input, line); Batch result;
   while (std::getline(input, line)) {
     if (line.empty()) continue;
     std::stringstream fields(line); std::string payment, installment, valid;
     std::getline(fields, payment, ','); std::getline(fields, installment, ','); std::getline(fields, valid, ',');
-    result.payment.push_back(std::stod(payment)); result.installment.push_back(std::stod(installment));
+    result.payment.push_back(std::stod(payment) / amountScale); result.installment.push_back(std::stod(installment) / amountScale);
   }
   require(result.payment.size() == @SIZE@ && result.installment.size() == @SIZE@, "batch does not match vector size");
   return result;
@@ -124,10 +124,11 @@ Bundle loadBundle(const std::filesystem::path& path) {
   return output;
 }
 int main(int argc, char** argv) {
-  if (argc != 5) return 2;
+  if (argc != 6) return 2;
   try {
     const std::filesystem::path listPath(argv[1]), artifactDir(argv[3]), metricsPath(argv[4]);
     const uint64_t fullCount = std::stoull(argv[2]); require(fullCount > 1, "full count must exceed one");
+    const double amountScale = std::stod(argv[5]); require(amountScale > 0.0, "amount scale must be positive");
     const auto setupStarted = std::chrono::steady_clock::now();
     auto context = fixed_count_sum_squares__generate_crypto_context(); auto keys = context->KeyGen();
     require(keys.good(), "key generation failed");
@@ -141,7 +142,7 @@ int main(int argc, char** argv) {
     const auto featureDir = artifactDir / "payment_diff_batches";
     std::filesystem::create_directories(featureDir);
     while (std::getline(list, line)) {
-      if (line.empty()) continue; const auto batch = readBatch(line);
+      if (line.empty()) continue; const auto batch = readBatch(line, amountScale);
       auto started = std::chrono::steady_clock::now();
       auto encryptedDue = encrypted_subtract__encrypt__arg0(context, batch.installment, keys.publicKey);
       auto encryptedPaid = encrypted_subtract__encrypt__arg1(context, batch.payment, keys.publicKey);
@@ -209,7 +210,8 @@ def markdown_report(preparation: dict[str, object], execution: dict[str, float])
     rows = []
     for name, he_key in (("sum", "sum"), ("mean", "mean"), ("var", "sample_variance")):
         plain = float(diff["sample_var" if name == "var" else name])  # type: ignore[index]
-        he = float(execution[he_key])
+        scale = float(execution["amount_scale"])
+        he = float(execution[he_key]) * (scale * scale if name == "var" else scale)
         rows.append(f"| `{name}` | {plain} | {he} | {abs(plain - he)} |")
     return f"""# Full PAYMENT_DIFF whole-dataframe HE workload
 
@@ -222,6 +224,10 @@ columns are encrypted once per batch, `PAYMENT_DIFF` is calculated once and
 saved as a ciphertext artifact, then independent reloaded branches produce sum
 and square-sum. Those encrypted moments are accumulated through a binary-tree
 reduction before one global encrypted mean and sample-variance finalization.
+
+Parent monetary values are encoded as `amount / {execution['amount_scale']}`
+before encryption using this public representation scale. Audit values below
+are restored to original monetary units after decryption.
 
 | Raw rows | Kept rows | Dropped rows | CKKS vector size | Batches |
 |---:|---:|---:|---:|---:|
@@ -266,6 +272,7 @@ def main() -> None:
     parser.add_argument("--heir-translate", default="heir-translate")
     parser.add_argument("--openfhe-dir", default="/usr/local/lib/OpenFHE")
     parser.add_argument("--ckks-mul-depth", type=int, default=6)
+    parser.add_argument("--amount-scale", type=float, default=1_000_000.0)
     args = parser.parse_args()
     prepared = args.prepared_dir.resolve()
     preparation = json.loads((prepared / "preparation_report.json").read_text(encoding="utf-8"))
@@ -295,9 +302,11 @@ def main() -> None:
     configure_seconds, _ = run(["cmake", "-S", str(work.resolve()), "-B", str(build.resolve()), f"-DOpenFHE_DIR={args.openfhe_dir}"], work)
     build_seconds, _ = run(["cmake", "--build", str(build.resolve()), "--target", "full_workload_runner"], work)
     artifacts = root / "ciphertexts"; metrics = root / "metrics.json"
-    wall_seconds, log = run([str((build / "full_workload_runner").resolve()), str(paths.resolve()), str(full_count), str(artifacts.resolve()), str(metrics.resolve())], work)
+    if args.amount_scale <= 0:
+        raise ValueError("amount_scale must be positive")
+    wall_seconds, log = run([str((build / "full_workload_runner").resolve()), str(paths.resolve()), str(full_count), str(artifacts.resolve()), str(metrics.resolve()), str(args.amount_scale)], work)
     (work / "runner.log").write_text(log, encoding="utf-8")
-    execution = json.loads(metrics.read_text(encoding="utf-8")); execution.update({"build_seconds": {"configure": configure_seconds, "build": build_seconds}, "runner_wall_seconds": wall_seconds})
+    execution = json.loads(metrics.read_text(encoding="utf-8")); execution.update({"amount_scale": args.amount_scale, "build_seconds": {"configure": configure_seconds, "build": build_seconds}, "runner_wall_seconds": wall_seconds})
     report = markdown_report(preparation, execution)
     (root / "REPORT.md").write_text(report, encoding="utf-8")
     result = {"status": "full_payment_diff_he_workload_executed", "prepared_input": str(prepared), "generated": generated, "execution": execution, "report": "REPORT.md"}

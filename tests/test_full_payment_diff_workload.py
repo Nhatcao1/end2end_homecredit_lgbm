@@ -16,6 +16,8 @@ class FullPaymentDiffWorkloadTest(unittest.TestCase):
         self.assertIn("loadBundle(featurePath)", source)
         self.assertIn("addBalanced", source)
         self.assertIn("log2(N)", source)
+        self.assertIn("--amount-scale", source)
+        self.assertIn("amount /", source)
         self.assertNotIn("DEMO_ROWS", source)
 
 
