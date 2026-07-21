@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Run the shared CKKS-SUM-01 and CKKS-MEAN-01 benchmark."""
 from __future__ import annotations
-import argparse, csv, json, shutil, statistics, sys, time
+import argparse, csv, json, re, shutil, statistics, sys, time
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from code.heir.common import write_json
@@ -56,13 +56,34 @@ def pandas_sum(data:Path, counts:tuple[int,...], input_scale:float, output:Path)
                     t=time.perf_counter(); encoded_mean=encoded.mean(); mean_seconds=time.perf_counter()-t
                     w.writerow([count,d,r,sum_seconds,mean_seconds,encoded_sum*input_scale,encoded_mean*input_scale])
 
+def raise_mean_context_budget(source: str, requested_depth: int) -> tuple[str, int]:
+    """Raise the generated Mean context's modulus-chain budget.
+
+    The installed HEIR version emits the OpenFHE `SetMultiplicativeDepth`
+    call in translated C++.  SUM and Mean deliberately share this Mean-capable
+    context, so changing it here gives the public Mean scaling operation
+    several unused CKKS levels after its rescale.
+    """
+    if requested_depth < 2:
+        raise ValueError("--ckks-mul-depth must be at least 2")
+    pattern=r"(SetMultiplicativeDepth\()\d+(\s*\);)"
+    match=re.search(pattern,source)
+    if match is None:
+        raise ValueError("generated Mean source has no SetMultiplicativeDepth call")
+    original=int(re.search(r"\d+",match.group(0)).group(0))
+    patched,count=re.subn(pattern,rf"\g<1>{requested_depth}\g<2>",source)
+    if count != 1:
+        raise ValueError(f"expected one Mean depth setting; found {count}")
+    return patched,original
+
 def main()->None:
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument("--generated-dir",type=Path,required=True);p.add_argument("--data-dir",type=Path,required=True);p.add_argument("--output-dir",type=Path,required=True);p.add_argument("--value-counts",nargs="+",type=int,default=[1000,50000,1000000]);p.add_argument("--input-scale",type=float,default=40_000.0,help="public input normalization divisor before encryption");p.add_argument("--openfhe-dir",default="/usr/local/lib/OpenFHE");p.add_argument("--overwrite",action="store_true");a=p.parse_args();root=a.output_dir.resolve()
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument("--generated-dir",type=Path,required=True);p.add_argument("--data-dir",type=Path,required=True);p.add_argument("--output-dir",type=Path,required=True);p.add_argument("--value-counts",nargs="+",type=int,default=[1000,50000,1000000]);p.add_argument("--input-scale",type=float,default=40_000.0,help="public input normalization divisor before encryption");p.add_argument("--ckks-mul-depth",type=int,default=8,help="Mean-capable shared CKKS context budget (default: 8)");p.add_argument("--openfhe-dir",default="/usr/local/lib/OpenFHE");p.add_argument("--overwrite",action="store_true");a=p.parse_args();root=a.output_dir.resolve()
     if a.input_scale<=0: raise ValueError("--input-scale must be positive")
+    if a.ckks_mul_depth<2: raise ValueError("--ckks-mul-depth must be at least 2")
     if root.exists():
         if not a.overwrite: raise FileExistsError(f"refusing to overwrite: {root}")
         shutil.rmtree(root)
-    root.mkdir(parents=True);manifest=json.loads((a.generated_dir/"generation_manifest.json").read_text());sum_kernel=next(k for k in manifest["kernels"] if k["entry_function"]=="encrypted_sum");mean_kernel=next(k for k in manifest["kernels"] if k["entry_function"]=="fixed_count_mean");size=int(sum_kernel["logical_value_count"]);assert int(mean_kernel["logical_value_count"])==size, "SUM and MEAN must use the same lane count";work=root/"runner";work.mkdir();copy_generated_sources((a.generated_dir/sum_kernel["source"]).parent,work,"sum");copy_generated_sources((a.generated_dir/mean_kernel["source"]).parent,work,"mean");(work/"sum_runner.cpp").write_text(RUNNER.replace("@SIZE@",str(size)),encoding="utf-8");(work/"CMakeLists.txt").write_text(CMAKE,encoding="utf-8");build=work/"build";run(["cmake","-S",str(work.resolve()),"-B",str(build.resolve()),f"-DOpenFHE_DIR={a.openfhe_dir}"],work);run(["cmake","--build",str(build.resolve()),"--target","sum_runner"],work);counts=tuple(a.value_counts);py=root/"pandas_results.csv";pandas_sum(a.data_dir.resolve(),counts,a.input_scale,py);he=root/"heir_results.csv";meta=root/"execution.json";wall,log=run(["env","OMP_NUM_THREADS=1",str((build/"sum_runner").resolve()),str(a.data_dir.resolve()),",".join(map(str,counts)),str(a.input_scale),str(he.resolve()),str(meta.resolve())],work);(work/"runner.log").write_text(log,encoding="utf-8")
+    root.mkdir(parents=True);manifest=json.loads((a.generated_dir/"generation_manifest.json").read_text());sum_kernel=next(k for k in manifest["kernels"] if k["entry_function"]=="encrypted_sum");mean_kernel=next(k for k in manifest["kernels"] if k["entry_function"]=="fixed_count_mean");size=int(sum_kernel["logical_value_count"]);assert int(mean_kernel["logical_value_count"])==size, "SUM and MEAN must use the same lane count";work=root/"runner";work.mkdir();copy_generated_sources((a.generated_dir/sum_kernel["source"]).parent,work,"sum");copy_generated_sources((a.generated_dir/mean_kernel["source"]).parent,work,"mean");mean_cpp=work/"mean_output.cpp";patched_depth,original_depth=raise_mean_context_budget(mean_cpp.read_text(encoding="utf-8"),a.ckks_mul_depth);mean_cpp.write_text(patched_depth,encoding="utf-8");(work/"sum_runner.cpp").write_text(RUNNER.replace("@SIZE@",str(size)),encoding="utf-8");(work/"CMakeLists.txt").write_text(CMAKE,encoding="utf-8");build=work/"build";run(["cmake","-S",str(work.resolve()),"-B",str(build.resolve()),f"-DOpenFHE_DIR={a.openfhe_dir}"],work);run(["cmake","--build",str(build.resolve()),"--target","sum_runner"],work);counts=tuple(a.value_counts);py=root/"pandas_results.csv";pandas_sum(a.data_dir.resolve(),counts,a.input_scale,py);he=root/"heir_results.csv";meta=root/"execution.json";wall,log=run(["env","OMP_NUM_THREADS=1",str((build/"sum_runner").resolve()),str(a.data_dir.resolve()),",".join(map(str,counts)),str(a.input_scale),str(he.resolve()),str(meta.resolve())],work);(work/"runner.log").write_text(log,encoding="utf-8");execution=json.loads(meta.read_text(encoding="utf-8"));execution["mean_context_budget"]={"translated_depth_before_patch":original_depth,"requested_multiplicative_depth":a.ckks_mul_depth,"method":"patched translated HEIR Mean context"};write_json(meta,execution)
     with he.open(newline="",encoding="utf-8") as h: rows=list(csv.DictReader(h))
     with py.open(newline="",encoding="utf-8") as h: prow=list(csv.DictReader(h))
     lines=[
@@ -79,6 +100,9 @@ def main()->None:
         f"**CKKS representation:** the client encodes every generated input as `x / {a.input_scale:g}` before encryption. "
         "All encrypted outputs retain that public scale contract; audit values are multiplied by the same factor only after decryption for comparison with the original-value Pandas result. "
         "This prevents the large raw SUM magnitude from exhausting CKKS precision.",
+        "",
+        f"**CKKS context budget:** the shared Mean-capable HEIR/OpenFHE context uses multiplicative depth `{a.ckks_mul_depth}` "
+        f"(the translated HEIR default was `{original_depth}`). This adds modulus levels for the final encrypted Mean scaling; setup cost is recorded separately.",
         "",
         "## CKKS-SUM-01 — encrypted sum",
         "",
