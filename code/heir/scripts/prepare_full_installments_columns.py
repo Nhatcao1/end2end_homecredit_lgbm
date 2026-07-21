@@ -15,6 +15,7 @@ import json
 import math
 import shutil
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
@@ -43,6 +44,8 @@ def prepare(input_csv: Path, output_dir: Path, *, vector_size: int, chunk_rows: 
     ratio_sum = ratio_sum_squares = 0.0
     ratio_min = math.inf
     ratio_max = -math.inf
+    pandas_feature_seconds = 0.0
+    pandas_aggregation_seconds = 0.0
     batch_index = 0
     buffered_payment: list[float] = []
     buffered_installment: list[float] = []
@@ -94,8 +97,11 @@ def prepare(input_csv: Path, output_dir: Path, *, vector_size: int, chunk_rows: 
 
         # Plaintext oracle only. Raw parent columns, not these derived values,
         # are written to HE batches.
+        feature_started = time.perf_counter()
         diff = clean_installment - clean_payment
         ratio = clean_payment / clean_installment
+        pandas_feature_seconds += time.perf_counter() - feature_started
+        aggregate_started = time.perf_counter()
         diff_sum += float(diff.sum())
         diff_sum_squares += float((diff * diff).sum())
         ratio_sum += float(ratio.sum())
@@ -103,6 +109,7 @@ def prepare(input_csv: Path, output_dir: Path, *, vector_size: int, chunk_rows: 
         if not ratio.empty:
             ratio_min = min(ratio_min, float(ratio.min()))
             ratio_max = max(ratio_max, float(ratio.max()))
+        pandas_aggregation_seconds += time.perf_counter() - aggregate_started
 
         buffered_payment.extend(clean_payment.tolist())
         buffered_installment.extend(clean_installment.tolist())
@@ -142,6 +149,10 @@ def prepare(input_csv: Path, output_dir: Path, *, vector_size: int, chunk_rows: 
             ],
             "payment_diff": moments(diff_sum, diff_sum_squares),
             "payment_perc": {**moments(ratio_sum, ratio_sum_squares), "min": ratio_min, "max": ratio_max},
+            "timings_seconds": {
+                "pandas_feature_expressions": pandas_feature_seconds,
+                "pandas_whole_dataframe_aggregation": pandas_aggregation_seconds,
+            },
         },
         "manifest": "batch_manifest.json",
     }

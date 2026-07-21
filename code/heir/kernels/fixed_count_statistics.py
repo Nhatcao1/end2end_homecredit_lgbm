@@ -81,6 +81,23 @@ def fixed_count_sum_mlir(vector_size: int, valid_count: int) -> str:
 """
 
 
+def fixed_count_sum_squares_mlir(vector_size: int, valid_count: int) -> str:
+    """Return encrypted ``sum(values ** 2)`` for a public lane count.
+
+    This single-output moment is the batch-safe building block for global
+    variance: batches can add encrypted sums and encrypted square-sums before
+    the one full-data finalization. It avoids averaging per-batch variances.
+    """
+    _validate(vector_size, valid_count)
+    return f"""func.func @fixed_count_sum_squares(
+    %values: tensor<{vector_size}xf64> {{secret.secret}}
+) -> f64 {{
+{_reduction(vector_size, valid_count, include_squares=True)}
+  return %squares_result : f64
+}}
+"""
+
+
 def fixed_count_mean_mlir(vector_size: int, valid_count: int) -> str:
     """Return encrypted mean for a public fixed count without reciprocal FHE."""
     _validate(vector_size, valid_count)
