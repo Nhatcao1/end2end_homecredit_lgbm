@@ -88,6 +88,7 @@ int main(int argc, char** argv) {
     context->EvalSchemeSwitchingKeyGen(keys, lweSecretKey);
     const uint32_t modulusLWE = 1U << logQCtxtFHEW;
     const uint32_t pLWE = modulusLWE / (2U * lweContext->GetBeta().ConvertToInt());
+    const double maxSafeAbs = (static_cast<double>(pLWE) / 2.0 - 1.0) / scaleSign;
     context->EvalCompareSwitchPrecompute(pLWE, scaleSign);
     auto encryptedDue = context->Encrypt(keys.publicKey, context->MakeCKKSPackedPlaintext(due));
     auto encryptedPaid = context->Encrypt(keys.publicKey, context->MakeCKKSPackedPlaintext(paid));
@@ -106,6 +107,7 @@ int main(int argc, char** argv) {
     std::ofstream metrics(argv[8]); metrics << std::setprecision(17)
       << "{\"max\":" << maxPlain->GetRealPackedValue()[0]
       << ",\"p_lwe\":" << pLWE << ",\"scale_sign\":" << scaleSign
+      << ",\"max_safe_absolute_input\":" << maxSafeAbs
       << ",\"argmax_returned_by_openfhe_but_discarded\":true}\n";
     return 0;
   } catch (const OpenFHEException& error) { std::cerr << "OpenFHE max-session error: " << error.what() << '\n'; return 1; }
@@ -126,8 +128,11 @@ def main() -> None:
             raise FileExistsError(f"refusing to overwrite: {root}; pass --overwrite")
         shutil.rmtree(root)
     root.mkdir(parents=True)
-    # Max needs a power-of-two candidate count. This synthetic lane cannot win.
-    padding_floor = -1_000_000.0
+    # Max needs a power-of-two candidate count. This synthetic lane is within
+    # the FHEW comparison range, below the public review-feature lower bound
+    # (-100), and therefore cannot win. Do not use an extreme sentinel here:
+    # FHEW comparisons operate modulo a bounded plaintext space.
+    padding_floor = -128.0
     due = [row["AMT_INSTALMENT"] for row in DEMO_ROWS] + [padding_floor]
     paid = [row["AMT_PAYMENT"] for row in DEMO_ROWS] + [0.0]
     expected_feature = [left - right for left, right in zip(due, paid)]
@@ -150,7 +155,7 @@ def main() -> None:
     max_row = {"aggregation": "max", "python": expected_max, "he": metrics["max"], "absolute_error": abs(expected_max - metrics["max"]), "argmax_artifact": "not retained"}
     write_csv(root / "feature_comparison.csv", list(rows[0]), rows)
     write_csv(root / "max_comparison.csv", list(max_row), [max_row])
-    result = {"status": "openfhe_ckks_fhew_max_executed", "scope": "standalone CKKS-to-FHEW max session; parent columns encrypted then PAYMENT_DIFF calculated after encryption", "important_limit": "separate OpenFHE scheme-switching context; it cannot consume a ciphertext from the ordinary HEIR CKKS session", "padding": {"synthetic_lane": 3, "payment_diff_value": padding_floor, "reason": "power-of-two candidate count required for max"}, "argmax": "OpenFHE returns it internally but this runner neither serializes nor decrypts it", "build_seconds": {"configure": configure_seconds, "build": build_seconds}, "feature_comparison": rows, "max_comparison": max_row, "execution": metrics, "ciphertext_artifacts": [str(item) for item in sorted(ciphertexts.glob("*.ct"))]}
+    result = {"status": "openfhe_ckks_fhew_max_executed", "scope": "standalone CKKS-to-FHEW max session; parent columns encrypted then PAYMENT_DIFF calculated after encryption", "important_limit": "separate OpenFHE scheme-switching context; it cannot consume a ciphertext from the ordinary HEIR CKKS session", "comparison_range_contract": {"review_payment_diff_range": "[-100, 160]", "padding_floor": padding_floor, "rule": "all real candidates and padding must have absolute value less than execution.max_safe_absolute_input; choose range/padding from public schema bounds, never an extreme sentinel"}, "padding": {"synthetic_lane": 3, "payment_diff_value": padding_floor, "reason": "power-of-two candidate count required for max"}, "argmax": "OpenFHE returns it internally but this runner neither serializes nor decrypts it", "build_seconds": {"configure": configure_seconds, "build": build_seconds}, "feature_comparison": rows, "max_comparison": max_row, "execution": metrics, "ciphertext_artifacts": [str(item) for item in sorted(ciphertexts.glob("*.ct"))]}
     write_json(root / "result.json", result)
     print(json.dumps({"status": result["status"], "max_comparison": max_row, "output_dir": str(root)}, indent=2))
 

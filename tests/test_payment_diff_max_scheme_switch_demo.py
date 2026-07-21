@@ -11,6 +11,7 @@ class PaymentDiffMaxSchemeSwitchTest(unittest.TestCase):
         self.assertIn("EvalMaxSchemeSwitching", RUNNER)
         self.assertIn("maxAndArgmax[0]", RUNNER)
         self.assertIn("not saved or decrypted", RUNNER)
+        self.assertIn("maxSafeAbs", RUNNER)
 
     def test_mermaid_diagram_records_the_two_session_boundary(self) -> None:
         diagram = (Path(__file__).resolve().parents[1] / "docs" / "PAYMENT_DIFF_CIPHERTEXT_FLOW.mmd").read_text()

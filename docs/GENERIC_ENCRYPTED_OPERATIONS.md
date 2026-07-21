@@ -242,7 +242,10 @@ python3 code/heir/scripts/run_payment_diff_max_openfhe_demo.py \
 
 Read `max_comparison.csv`. The small three-row review input receives one
 synthetic low padding lane because OpenFHE's max operation requires a
-power-of-two candidate count. It is not a source-data row and cannot win.
+power-of-two candidate count. It is not a source-data row and cannot win. The
+padding and all real candidates must stay inside the public FHEW comparison
+range recorded as `execution.max_safe_absolute_input` in `result.json`; an
+extreme sentinel can wrap modulo the FHEW plaintext space and make max wrong.
 See `docs/PAYMENT_DIFF_CIPHERTEXT_FLOW.mmd` for the parent-column, feature,
 ciphertext-bundle, and separate-session flow.
 
