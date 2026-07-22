@@ -40,3 +40,22 @@ The initial fixture deliberately selects only groups that fit one block. A
 later scalable layout can split an oversized applicant across blocks, but then
 its encrypted partial aggregates must be merged before comparison with the
 one-row Pandas groupby result.
+
+## First encrypted step
+
+`run_grouped_payment_diff_sum_benchmark.py` is the first HE consumer of this
+fixture. It creates one shared CKKS context, then processes each prepared
+block independently:
+
+```text
+encrypt AMT_INSTALMENT + AMT_PAYMENT + validity mask
+  -> HEIR encrypted_subtract(PAYMENT_DIFF)
+  -> HEIR encrypted_sum(PAYMENT_DIFF)  = one encrypted group sum
+  -> HEIR encrypted_sum(validity mask) = one encrypted group count
+  -> decrypt only for the audit table
+```
+
+This proves the group layout, the after-encryption feature calculation, and
+one aggregate per group. It is intentionally not yet an efficient many-group
+packing implementation: every 128-lane applicant block occupies one 8192-lane
+CKKS ciphertext. The report makes this explicit.
