@@ -2,7 +2,7 @@
 """Run all CKKS primitives over real prepared installment parent columns."""
 from __future__ import annotations
 
-import argparse, csv, json, shutil, statistics, sys, time
+import argparse, csv, json, shutil, statistics, subprocess, sys, time
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from code.heir.common import write_json
@@ -43,7 +43,23 @@ int main(int c,char**v){if(c!=6)return 2;try{const size_t slots=@SLOTS@;const do
 '''
 
 def main():
- p=argparse.ArgumentParser(description=__doc__);p.add_argument('--generated-dir',type=Path,required=True);p.add_argument('--prepared-dir',type=Path,default=Path('data/prepared/installments_columns'));p.add_argument('--value-count',type=int,default=1000);p.add_argument('--input-scale',type=float,default=0);p.add_argument('--repetitions',type=int,default=5);p.add_argument('--output-dir',type=Path,required=True);p.add_argument('--openfhe-dir',default='/usr/local/lib/OpenFHE');p.add_argument('--overwrite',action='store_true');a=p.parse_args();root=a.output_dir.resolve()
+ p=argparse.ArgumentParser(description=__doc__);p.add_argument('--generated-dir',type=Path,required=True);p.add_argument('--prepared-dir',type=Path,default=Path('data/prepared/installments_columns'));p.add_argument('--value-count',dest='value_counts',nargs='+',type=int,default=[1000]);p.add_argument('--input-scale',type=float,default=0);p.add_argument('--repetitions',type=int,default=5);p.add_argument('--output-dir',type=Path,required=True);p.add_argument('--openfhe-dir',default='/usr/local/lib/OpenFHE');p.add_argument('--overwrite',action='store_true');a=p.parse_args();root=a.output_dir.resolve()
+ if len(a.value_counts)>1:
+  if root.exists():
+   if not a.overwrite:raise FileExistsError(root)
+   shutil.rmtree(root)
+  root.mkdir(parents=True)
+  runs=[]
+  for count in a.value_counts:
+   child=root/f'rows_{count}'
+   command=[sys.executable,str(Path(__file__).resolve()),'--generated-dir',str(a.generated_dir.resolve()),'--prepared-dir',str(a.prepared_dir.resolve()),'--value-count',str(count),'--input-scale',str(a.input_scale),'--repetitions',str(a.repetitions),'--output-dir',str(child),'--openfhe-dir',a.openfhe_dir,'--overwrite']
+   completed=subprocess.run(command,text=True,capture_output=True)
+   if completed.returncode:raise RuntimeError(f"real primitive count {count} failed:\n{completed.stdout}{completed.stderr}")
+   runs.append({'value_count':count,'directory':str(child.relative_to(root))})
+  write_json(root/'batch_result.json',{'status':'real_installments_primitive_batch_executed','runs':runs})
+  (root/'REPORT.md').write_text('# Real installments primitive batch\n\n'+'\n'.join(f"- `{run['value_count']}` real rows: `{run['directory']}/REPORT.md`" for run in runs)+'\n',encoding='utf-8')
+  print((root/'batch_result.json').read_text());return
+ a.value_count=a.value_counts[0]
  if root.exists():
   if not a.overwrite:raise FileExistsError(root)
   shutil.rmtree(root)
