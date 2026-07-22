@@ -169,7 +169,10 @@ def _relative_error(actual: float, expected: float) -> float:
     return abs(actual - expected) / max(1.0, abs(expected))
 
 
-def _report(root: Path, *, groups: dict[int, list[dict[str, str]]], scale: float, tolerance: float) -> None:
+def _report(
+    root: Path, *, groups: dict[int, list[dict[str, str]]], scale: float,
+    tolerance: float, report_group_limit: int,
+) -> None:
     with (root / "heir_results.csv").open("r", encoding="utf-8", newline="") as handle:
         he_rows = list(csv.DictReader(handle))
     with (root / "audited_results.csv").open("r", encoding="utf-8", newline="") as handle:
@@ -196,11 +199,17 @@ def _report(root: Path, *, groups: dict[int, list[dict[str, str]]], scale: float
         "| Opaque group | Reference PAYMENT_DIFF sum | HE sum | Sum absolute error | Status |",
         "|---:|---:|---:|---:|---|",
     ]
-    for row in audit_rows:
+    shown_audit_rows = audit_rows[:report_group_limit]
+    for row in shown_audit_rows:
         status = "PASS" if row["status"] == "PASS" else "FAIL"
         lines.append(
             f"| {row['opaque_group_id']} | {float(row['reference_sum']):.12g} | {float(row['he_sum']):.12g} | {float(row['sum_abs_error']):.12g} | {status} |"
         )
+    passed_groups = sum(row["status"] == "PASS" for row in audit_rows)
+    lines += [
+        "",
+        f"Only the first {len(shown_audit_rows)} opaque groups are shown above. All {len(audit_rows)} groups were encrypted, evaluated, decrypted for audit, and compared; {passed_groups}/{len(audit_rows)} passed. The complete audit table is `audited_results.csv`.",
+    ]
     parent_encrypt = statistics.median(float(row["parent_encrypt_seconds"]) for row in he_rows)
     feature = statistics.median(float(row["feature_seconds"]) for row in he_rows)
     reduction = statistics.median(float(row["sum_reduce_seconds"]) for row in he_rows)
@@ -238,9 +247,10 @@ def main() -> None:
     parser.add_argument("--repetitions", type=int, default=3)
     parser.add_argument("--relative-tolerance", type=float, default=1e-6)
     parser.add_argument("--input-scale", type=float, default=0.0)
+    parser.add_argument("--report-group-limit", type=int, default=10)
     parser.add_argument("--overwrite", action="store_true")
     args = parser.parse_args()
-    if args.repetitions < 1 or args.relative_tolerance <= 0 or args.input_scale < 0:
+    if args.repetitions < 1 or args.relative_tolerance <= 0 or args.input_scale < 0 or args.report_group_limit < 1:
         raise ValueError("repetitions/tolerance/scale must be positive (scale may be zero for automatic)")
     prepared = args.prepared_dir.resolve()
     blocks_path = prepared / "he_ready" / "group_blocks.csv"
@@ -301,9 +311,9 @@ def main() -> None:
             all_pass = all_pass and status == "PASS"
             writer.writerow({"opaque_group_id": group_id, "reference_sum": reference["sum"], "he_sum": he_sum, "sum_abs_error": sum_error, "sum_relative_error": relative, "status": status})
     metadata = json.loads(execution_path.read_text(encoding="utf-8"))
-    metadata.update({"generated_dir": str(args.generated_dir.resolve()), "prepared_dir": str(prepared), "build_seconds": {"configure": configure_seconds, "build": build_seconds}, "runner_wall_seconds": wall_seconds, "repetitions": args.repetitions, "relative_tolerance": args.relative_tolerance})
+    metadata.update({"generated_dir": str(args.generated_dir.resolve()), "prepared_dir": str(prepared), "build_seconds": {"configure": configure_seconds, "build": build_seconds}, "runner_wall_seconds": wall_seconds, "repetitions": args.repetitions, "relative_tolerance": args.relative_tolerance, "report_group_limit": args.report_group_limit})
     write_json(execution_path, metadata)
-    _report(root, groups=groups, scale=scale, tolerance=args.relative_tolerance)
+    _report(root, groups=groups, scale=scale, tolerance=args.relative_tolerance, report_group_limit=args.report_group_limit)
     write_json(root / "result.json", {"status": "grouped_payment_diff_sum_executed", "accuracy_status": "PASS" if all_pass else "FAIL", "groups": len(groups), "bucket_size": bucket_size, "report": "REPORT.md"})
     print((root / "result.json").read_text(encoding="utf-8"))
 

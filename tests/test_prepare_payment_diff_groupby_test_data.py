@@ -54,6 +54,7 @@ class PreparePaymentDiffGroupbyFixtureTest(unittest.TestCase):
                 vector_size=8,
                 max_rows=0,
                 seed="test",
+                selection="hash-sample",
             )
 
             self.assertEqual(report["layout"]["selected_groups"], 2)
@@ -80,6 +81,19 @@ class PreparePaymentDiffGroupbyFixtureTest(unittest.TestCase):
             self.assertTrue(all(row["payment_diff_var"] for row in references))
             manifest = json.loads((output / "layout_manifest.json").read_text(encoding="utf-8"))
             self.assertEqual(manifest["status"], "client_only_payment_diff_groupby_fixture_prepared")
+
+    def test_largest_fitting_selection_prefers_more_rows(self) -> None:
+        module = load_module()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); source = root / "installments.csv"
+            with source.open("w", encoding="utf-8", newline="") as handle:
+                writer = csv.writer(handle); writer.writerow(["SK_ID_CURR", "AMT_PAYMENT", "AMT_INSTALMENT"])
+                writer.writerows([["small", "1", "2"], ["large", "1", "2"], ["large", "2", "4"]])
+            output = root / "fixture"
+            module.prepare(source, output, group_count=1, bucket_size=4, vector_size=8, max_rows=0, seed="test", selection="largest-fitting")
+            with (output / "client_private" / "group_mapping.csv").open("r", encoding="utf-8", newline="") as handle:
+                row = next(csv.DictReader(handle))
+            self.assertEqual(row["SK_ID_CURR"], "large")
 
 
 if __name__ == "__main__":

@@ -135,6 +135,7 @@ def prepare(
     vector_size: int,
     max_rows: int,
     seed: str,
+    selection: str,
 ) -> dict[str, object]:
     """Write a small complete-group fixture from the raw installments source."""
     if not input_csv.is_file():
@@ -148,7 +149,16 @@ def prepare(
 
     counts, source_metrics = _read_valid_group_counts(input_csv, max_rows)
     fitting = [identifier for identifier, count in counts.items() if count <= bucket_size]
-    selected_identifiers = sorted(fitting, key=lambda item: _candidate_key(item, seed))[:group_count]
+    if selection == "hash-sample":
+        selected_identifiers = sorted(fitting, key=lambda item: _candidate_key(item, seed))[:group_count]
+        selection_method = "deterministic client-only hash ranking among groups that fit exactly one block"
+    elif selection == "largest-fitting":
+        selected_identifiers = sorted(
+            fitting, key=lambda item: (-counts[item], _candidate_key(item, seed))
+        )[:group_count]
+        selection_method = "largest complete numeric groups that fit exactly one block; hash only breaks equal-size ties"
+    else:
+        raise ValueError(f"unknown selection mode: {selection}")
     if len(selected_identifiers) < group_count:
         raise ValueError(
             f"only {len(selected_identifiers)} complete numeric groups fit bucket_size={bucket_size}; "
@@ -226,7 +236,7 @@ def prepare(
             "numeric_sanitation_rule": "SK_ID_CURR present; AMT_PAYMENT and AMT_INSTALMENT finite numeric",
         },
         "selection": {
-            "method": "deterministic client-only hash ranking among groups that fit exactly one block",
+            "method": selection_method,
             "seed": seed,
             "eligible_complete_groups": len(fitting),
             "excluded_oversized_groups": sum(count > bucket_size for count in counts.values()),
@@ -268,6 +278,7 @@ def main() -> None:
     parser.add_argument("--vector-size", type=int, default=8192)
     parser.add_argument("--max-rows", type=int, default=0, help="source-row cap; 0 reads all rows")
     parser.add_argument("--seed", default="payment-diff-groupby-fixture-v1")
+    parser.add_argument("--selection", choices=("hash-sample", "largest-fitting"), default="hash-sample")
     parser.add_argument("--overwrite", action="store_true")
     args = parser.parse_args()
     if args.max_rows < 0:
@@ -286,6 +297,7 @@ def main() -> None:
         vector_size=args.vector_size,
         max_rows=args.max_rows,
         seed=args.seed,
+        selection=args.selection,
     )
     print(json.dumps(report, indent=2))
 
