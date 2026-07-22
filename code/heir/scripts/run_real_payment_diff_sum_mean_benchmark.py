@@ -80,7 +80,8 @@ Bundle addBundles(const CryptoContext<DCRTPoly>& context, const Bundle& left, co
   return output;
 }
 int main(int argc, char** argv) {
-  if (argc != 7) return 2;
+  // executable + input CSV + scale + repetitions + HE CSV + execution JSON
+  if (argc != 6) return 2;
   try {
     const size_t slots = @SLOTS@; const double scale = std::stod(argv[2]); const int repetitions = std::stoi(argv[3]);
     const auto parents = readParents(argv[1]); const uint64_t count = parents.installment.size(); require(count > 1, "mean requires at least two rows");
