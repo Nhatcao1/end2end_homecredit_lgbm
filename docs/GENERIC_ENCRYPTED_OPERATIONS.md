@@ -83,26 +83,29 @@ ciphertexts.
 ## Literal encrypted min/max: separate reduction benchmark
 
 Min/max is not a threshold predicate. It reduces one encrypted vector through
-an encrypted comparison-and-selection tree. The benchmark below uses exactly
-four candidates—the smallest power-of-two review case—and normalizes them into
-the OpenFHE unit-circle contract during CKKS encoding. It produces encrypted
-minimum and maximum ciphertexts, then decrypts them solely for the Python
-accuracy report.
+an encrypted comparison-and-selection tree. The benchmark takes a raw column
+chunk—for example 100 or 1,000 values—and normalizes it into the OpenFHE
+unit-circle contract during CKKS encoding. A non-power-of-two count is padded
+by repeating a genuine candidate: 100 values become 128 encrypted lanes; 1,000
+become 1,024. It produces encrypted minimum and maximum ciphertexts, then
+decrypts them solely for the Python accuracy report.
 
 ```bash
 python3 code/heir/scripts/run_ckks_fhew_minmax_benchmark.py \
   --output-dir benchmark_runs/ckks_fhew_minmax_01 \
   --overwrite \
+  --value-count 100 \
   --input-scale 1024 \
   --openfhe-dir /usr/local/lib/OpenFHE
 ```
 
-The report is `benchmark_runs/ckks_fhew_minmax_01/REPORT.md`. The input must
-contain exactly four values and fit inside `(-input_scale / 2, input_scale / 2]`.
-Ties are valid for min/max; only the discarded argmin/argmax identity is
-non-unique. This is a specific small-vector
-capability/accuracy benchmark, not a claim that min/max is ready for every
-full column or grouped reduction.
+For the 1,000-candidate run, change only `--value-count 1000`; it encrypts
+1,024 lanes. To use real data, pass `--input-csv /path/to/column.csv`; it must
+have a `value` column. The report is
+`benchmark_runs/ckks_fhew_minmax_01/REPORT.md`. Ties are valid for min/max;
+only the discarded argmin/argmax identity is non-unique. This is a
+single-encrypted-vector capability/accuracy benchmark, not a claim that min/max
+is ready for a full 13-million-row column or a grouped reduction.
 
 After the arithmetic benchmark, encrypted mask combination and masked grouped
 reductions use the same generic `multiply` / `count_sum_squares` contracts.

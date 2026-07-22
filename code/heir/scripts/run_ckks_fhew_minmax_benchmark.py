@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Benchmark literal encrypted MIN and MAX over one four-value CKKS vector.
+"""Benchmark literal encrypted MIN and MAX over one packed CKKS vector.
 
 This is distinct from ``run_ckks_fhew_comparison_benchmark.py``:
 
@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import random
 import shutil
 import sys
 import time
@@ -29,7 +30,7 @@ from code.heir.scripts.run_ckks_fhew_comparison_benchmark import CMAKE
 from code.heir.scripts.run_payment_features_ciphertext_demo import run
 
 
-DEFAULT_VALUES = (-48.0, 25.0, 7.0, 80.0)
+DEFAULT_VALUE_COUNT = 128
 
 
 RUNNER = r'''
@@ -74,17 +75,20 @@ double decryptScalar(const CryptoContext<DCRTPoly>& context, const PrivateKey<DC
 }
 
 int main(int argc, char** argv) {
-  // values.csv input-scale min.ct max.ct metrics.json
-  if (argc != 6) return 2;
+  // padded-values.csv input-scale encrypted-count min.ct max.ct metrics.json
+  if (argc != 7) return 2;
   try {
-    constexpr uint32_t slots = 4;
-    constexpr uint32_t numValues = 4;
     constexpr uint32_t firstModSize = 60;
     constexpr uint32_t scalingModSize = 50;
     const double inputScale = std::stod(argv[2]);
+    const uint32_t numValues = static_cast<uint32_t>(std::stoul(argv[3]));
+    const uint32_t slots = numValues;
     require(inputScale > 0, "input scale must be positive");
+    require(numValues >= 2 && (numValues & (numValues - 1)) == 0,
+            "encrypted candidate count must be a power of two");
+    require(numValues <= 4096, "candidate count exceeds the 8192-ring CKKS slot capacity");
     auto rawValues = readVector(argv[1]);
-    require(rawValues.size() == numValues, "min/max benchmark requires exactly four real values");
+    require(rawValues.size() == numValues, "padded input size does not match encrypted candidate count");
     std::vector<double> normalized;
     normalized.reserve(numValues);
     for (double value : rawValues) {
@@ -138,13 +142,13 @@ int main(int argc, char** argv) {
     auto encryptedMaxAndIgnoredArgmax = context->EvalMaxSchemeSwitching(encryptedInput, keys.publicKey, numValues, slots);
     const double maxSeconds = seconds(maxStart);
     require(!encryptedMinAndIgnoredArgmin.empty() && !encryptedMaxAndIgnoredArgmax.empty(), "min/max result missing");
-    require(Serial::SerializeToFile(argv[3], encryptedMinAndIgnoredArgmin[0], SerType::BINARY), "cannot save encrypted min");
-    require(Serial::SerializeToFile(argv[4], encryptedMaxAndIgnoredArgmax[0], SerType::BINARY), "cannot save encrypted max");
+    require(Serial::SerializeToFile(argv[4], encryptedMinAndIgnoredArgmin[0], SerType::BINARY), "cannot save encrypted min");
+    require(Serial::SerializeToFile(argv[5], encryptedMaxAndIgnoredArgmax[0], SerType::BINARY), "cannot save encrypted max");
     const auto auditStart = Clock::now();
     const double minNormalized = decryptScalar(context, keys.secretKey, encryptedMinAndIgnoredArgmin[0]);
     const double maxNormalized = decryptScalar(context, keys.secretKey, encryptedMaxAndIgnoredArgmax[0]);
     const double auditSeconds = seconds(auditStart);
-    std::ofstream metrics(argv[5]);
+    std::ofstream metrics(argv[6]);
     metrics << std::setprecision(17)
       << "{\"setup_seconds\":" << setupSeconds
       << ",\"encrypt_seconds\":" << encryptSeconds
@@ -152,9 +156,12 @@ int main(int argc, char** argv) {
       << ",\"max_evaluation_seconds\":" << maxSeconds
       << ",\"audit_decrypt_seconds\":" << auditSeconds
       << ",\"input_scale\":" << inputScale
+      << ",\"encrypted_candidate_count\":" << numValues
+      << ",\"ring_dimension\":8192"
+      << ",\"multiplicative_depth\":" << multiplicativeDepth
       << ",\"min_normalized\":" << minNormalized
       << ",\"max_normalized\":" << maxNormalized
-      << ",\"input_contract\":\"all normalized values in (-0.5,0.5]; four candidates (power of two)\""
+      << ",\"input_contract\":\"all normalized values in (-0.5,0.5]; padded encrypted candidate count is a power of two\""
       << ",\"argmin_argmax_returned_but_not_retained\":true}\n";
     return 0;
   } catch (const OpenFHEException& error) {
@@ -170,13 +177,47 @@ def _read_values(path: Path) -> list[float]:
     return [float(row["value"]) for row in read_csv(path)]
 
 
+def _next_power_of_two(value: int) -> int:
+    if value < 2:
+        return 2
+    return 1 << (value - 1).bit_length()
+
+
 def _validate(values: list[float], input_scale: float) -> None:
-    if len(values) != 4:
-        raise ValueError("the current min/max benchmark accepts exactly four real values")
+    if not values:
+        raise ValueError("min/max benchmark needs at least one real value")
+    if len(values) > 4096:
+        raise ValueError("the 8192-ring benchmark supports at most 4096 real values per encrypted vector")
     if input_scale <= 0:
         raise ValueError("input scale must be positive")
     if any(not (-input_scale / 2 < value <= input_scale / 2) for value in values):
         raise ValueError("input violates the unit-circle contract; use an input scale greater than twice the absolute maximum")
+
+
+def _pad_with_real_candidate(values: list[float]) -> tuple[list[float], dict[str, int | str]]:
+    """Pad to a power of two without inventing an artificial low/high value."""
+    encrypted_count = _next_power_of_two(len(values))
+    if encrypted_count > 4096:
+        raise ValueError("padded candidate count exceeds 4096 CKKS slots")
+    padded = list(values)
+    # Repeating one genuine candidate cannot change either min or max. This
+    # avoids a sentinel whose value might accidentally become the reduction.
+    padded.extend([values[0]] * (encrypted_count - len(values)))
+    return padded, {
+        "real_candidate_count": len(values),
+        "encrypted_candidate_count": encrypted_count,
+        "padding_count": encrypted_count - len(values),
+        "padding_rule": "repeat the first genuine candidate; this cannot alter min or max",
+    }
+
+
+def _generated_values(count: int, low: float, high: float, seed: int) -> list[float]:
+    if count < 1:
+        raise ValueError("value count must be positive")
+    if not low < high:
+        raise ValueError("value-low must be smaller than value-high")
+    generator = random.Random(seed)
+    return [generator.uniform(low, high) for _ in range(count)]
 
 
 def _report(result: dict[str, object]) -> str:
@@ -185,24 +226,28 @@ def _report(result: dict[str, object]) -> str:
     return f'''# CKKS↔FHEW literal MIN/MAX benchmark
 
 This is a **reduction benchmark**, distinct from the lane-wise comparison
-benchmark. One four-value encrypted CKKS vector is passed separately to
-OpenFHE's `EvalMinSchemeSwitching` and `EvalMaxSchemeSwitching`; each performs
-an encrypted binary comparison/selection tree and returns one encrypted CKKS
+benchmark. One encrypted CKKS vector is passed separately to OpenFHE's
+`EvalMinSchemeSwitching` and `EvalMaxSchemeSwitching`; each performs an
+encrypted binary comparison/selection tree and returns one encrypted CKKS
 value.
 
 ## Input contract
 
 | Rule | Value |
 |---|---:|
-| Real candidates | 4 (power of two) |
+| Real candidates | {result["packing"]["real_candidate_count"]} |
+| Encrypted candidates | {result["packing"]["encrypted_candidate_count"]} (power of two) |
+| Duplicate padding lanes | {result["packing"]["padding_count"]} |
 | Public input scale | {execution["input_scale"]} |
 | Encoded interval | `(-0.5, 0.5]` |
 
 The owner divides raw values by the public scale **only while encoding the
-plaintext into CKKS**. It does not compute min or max client-side. The audit
-multiplies the decrypted result by the same scale only to express accuracy in
-the original units. Tied values are valid: they produce the same min/max value;
-only the discarded argmin/argmax identity may be non-unique.
+plaintext into CKKS**. It does not compute min or max client-side. If the raw
+count is not a power of two (for example, 100), the client repeats one genuine
+candidate to reach 128 encrypted lanes. Repetition cannot alter min or max.
+The audit multiplies the decrypted result by the same scale only to express
+accuracy in the original units. Tied values are valid: they produce the same
+min/max value; only the discarded argmin/argmax identity may be non-unique.
 
 ## Python versus encrypted result
 
@@ -236,7 +281,11 @@ def main() -> None:
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--openfhe-dir", default="/usr/local/lib/OpenFHE")
-    parser.add_argument("--input-csv", type=Path, help="optional one-column CSV with header 'value' and four values")
+    parser.add_argument("--input-csv", type=Path, help="optional one-column CSV with header 'value'; replaces generated values")
+    parser.add_argument("--value-count", type=int, default=DEFAULT_VALUE_COUNT, help="generated raw candidate count; e.g. 100 or 1000")
+    parser.add_argument("--value-low", type=float, default=-100.0, help="inclusive synthetic-data lower bound")
+    parser.add_argument("--value-high", type=float, default=100.0, help="exclusive synthetic-data upper bound")
+    parser.add_argument("--seed", type=int, default=20260722, help="deterministic synthetic-data seed")
     parser.add_argument("--input-scale", type=float, default=1024.0)
     args = parser.parse_args()
     root = args.output_dir.resolve()
@@ -245,10 +294,12 @@ def main() -> None:
             raise FileExistsError(f"refusing to overwrite: {root}; pass --overwrite")
         shutil.rmtree(root)
     root.mkdir(parents=True)
-    values = _read_values(args.input_csv) if args.input_csv else list(DEFAULT_VALUES)
+    values = _read_values(args.input_csv) if args.input_csv else _generated_values(args.value_count, args.value_low, args.value_high, args.seed)
     _validate(values, args.input_scale)
+    padded_values, packing = _pad_with_real_candidate(values)
     inputs = root / "plaintext_inputs"
-    write_values(inputs / "values.csv", values)
+    write_values(inputs / "raw_values.csv", values)
+    write_values(inputs / "padded_values.csv", padded_values)
     python_started = time.perf_counter()
     python_min, python_max = min(values), max(values)
     python_seconds = time.perf_counter() - python_started
@@ -263,7 +314,7 @@ def main() -> None:
     ciphertexts.mkdir()
     metrics_path = root / "execution.json"
     run([
-        str((build / "minmax_runner").resolve()), str((inputs / "values.csv").resolve()), str(args.input_scale),
+        str((build / "minmax_runner").resolve()), str((inputs / "padded_values.csv").resolve()), str(args.input_scale), str(packing["encrypted_candidate_count"]),
         str((ciphertexts / "encrypted_min.ct").resolve()), str((ciphertexts / "encrypted_max.ct").resolve()), str(metrics_path.resolve()),
     ], work)
     execution = json.loads(metrics_path.read_text(encoding="utf-8"))
@@ -276,7 +327,10 @@ def main() -> None:
     write_csv(root / "minmax_audit.csv", list(results[0]), results)
     result: dict[str, object] = {
         "status": "openfhe_ckks_fhew_minmax_executed",
-        "scope": "literal four-candidate encrypted minimum and maximum reductions",
+        "scope": "literal packed encrypted minimum and maximum reductions",
+        "input_source": str(args.input_csv.resolve()) if args.input_csv else "deterministic generated values",
+        "synthetic_generation": None if args.input_csv else {"count": args.value_count, "low": args.value_low, "high": args.value_high, "seed": args.seed},
+        "packing": packing,
         "python_seconds": python_seconds,
         "build_seconds": {"configure": configure_seconds, "build": build_seconds},
         "execution": execution,
