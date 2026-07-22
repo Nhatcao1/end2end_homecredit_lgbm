@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import unittest
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from code.heir.scripts.run_ckks_fhew_comparison_benchmark import (
     DEFAULT_LEFT,
     DEFAULT_RIGHT,
     RUNNER,
+    _read_values,
     _assert_input_contract,
     _classification_rows,
 )
@@ -29,6 +31,12 @@ class CkksFhewComparisonBenchmarkTest(unittest.TestCase):
     def test_zero_boundary_is_rejected(self) -> None:
         with self.assertRaisesRegex(ValueError, "minimum comparison margin"):
             _assert_input_contract([0.0] * 4, [0.0] * 4, 1.0, 0.25)
+
+    def test_reader_accepts_runner_audit_header(self) -> None:
+        with TemporaryDirectory() as temporary:
+            path = Path(temporary) / "audit.csv"
+            path.write_text("raw_comparison_value\n0.999\n0.001\n", encoding="utf-8")
+            self.assertEqual(_read_values(path), [0.999, 0.001])
 
     def test_report_calls_out_separate_session_boundary(self) -> None:
         script = Path(__file__).resolve().parents[1] / "code" / "heir" / "scripts" / "run_ckks_fhew_comparison_benchmark.py"

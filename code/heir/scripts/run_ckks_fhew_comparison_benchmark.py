@@ -188,7 +188,14 @@ int main(int argc, char** argv) {
 
 
 def _read_values(path: Path) -> list[float]:
-    return [float(row["value"]) for row in read_csv(path)]
+    """Read either owner input (`value`) or a one-column runner audit file."""
+    rows = read_csv(path)
+    if not rows:
+        return []
+    fields = list(rows[0])
+    if len(fields) != 1:
+        raise ValueError(f"expected exactly one numeric column in {path}, found {fields}")
+    return [float(row[fields[0]]) for row in rows]
 
 
 def _assert_input_contract(left: list[float], right: list[float], threshold: float, minimum_margin: float) -> None:
