@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import re
 import shutil
 import statistics
 import sys
@@ -126,7 +127,9 @@ def report(he_csv: Path, python_csv: Path, execution_json: Path, output: Path) -
     he = grouped(he_csv, "evaluate_seconds"); py = grouped(python_csv, "python_seconds")
     encryption = grouped(he_csv, "encrypt_seconds"); decrypt = grouped(he_csv, "decrypt_seconds"); online = grouped(he_csv, "online_seconds")
     execution = json.loads(execution_json.read_text(encoding="utf-8"))
-    lines = ["# CKKS primitive benchmark", "", f"One CKKS context/key set setup: `{execution['setup_seconds']:.9f}` s. Runtime ring dimension: `{execution['ring_dimension']}`. Requested slots: `{execution['requested_slot_count']}`. `OMP_NUM_THREADS=1`. Setup is a shared one-time cost and is excluded from the operation slowdown columns.", "", "| Calculation | Values | Decimals | Python calculation (median s) | HE evaluation (median s) | HE encryption (median s) | HE decryption (median s) | HE online: encrypt + evaluate + decrypt (median s) | Eval ÷ Python | Online ÷ Python |", "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|"]
+    depth = execution.get("multiply_context_budget", {})
+    depth_note = f" Multiply context depth: `{depth.get('requested_multiplicative_depth')}` (translated default: `{depth.get('translated_depth_before_patch')}`)." if depth else ""
+    lines = ["# CKKS primitive benchmark", "", f"One CKKS context/key set setup: `{execution['setup_seconds']:.9f}` s. Runtime ring dimension: `{execution['ring_dimension']}`. Requested slots: `{execution['requested_slot_count']}`. `OMP_NUM_THREADS=1`. Setup is a shared one-time cost and is excluded from the operation slowdown columns.{depth_note}", "", "| Calculation | Values | Decimals | Python calculation (median s) | HE evaluation (median s) | HE encryption (median s) | HE decryption (median s) | HE online: encrypt + evaluate + decrypt (median s) | Eval ÷ Python | Online ÷ Python |", "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|"]
     for key in sorted(he):
         label = "CT×CT" if key[0] == "CTxCT" else key[0]
         python_seconds = statistics.median(py[key]); evaluation_seconds = statistics.median(he[key]); online_seconds = statistics.median(online[key])
@@ -144,6 +147,7 @@ def main() -> None:
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--openfhe-dir", default="/usr/local/lib/OpenFHE")
     parser.add_argument("--repetitions", type=int, default=5)
+    parser.add_argument("--ckks-mul-depth", type=int, default=3, help="multiply-capable CKKS depth; default: 3")
     parser.add_argument("--overwrite", action="store_true")
     args = parser.parse_args(); root=args.output_dir.resolve()
     if root.exists():
@@ -152,10 +156,20 @@ def main() -> None:
     root.mkdir(parents=True)
     generated=args.generated_dir.resolve(); work=root/"runner"; work.mkdir()
     for directory,prefix in ((generated/"00_encrypted_add","add"),(generated/"01_encrypted_subtract","sub"),(generated/"02_encrypted_multiply","mul")): copy_generated_sources(directory,work,prefix)
+    if args.ckks_mul_depth < 2: raise ValueError("--ckks-mul-depth must be at least 2")
+    multiply_cpp = work / "mul_output.cpp"
+    pattern = r"(SetMultiplicativeDepth\()\d+(\s*\);)"
+    match = re.search(pattern, multiply_cpp.read_text(encoding="utf-8"))
+    if match is None: raise ValueError("generated multiply source has no SetMultiplicativeDepth call")
+    original_depth = int(re.search(r"\d+", match.group(0)).group(0))
+    patched, replacements = re.subn(pattern, rf"\g<1>{args.ckks_mul_depth}\g<2>", multiply_cpp.read_text(encoding="utf-8"))
+    if replacements != 1: raise ValueError(f"expected one multiply depth setting; found {replacements}")
+    multiply_cpp.write_text(patched, encoding="utf-8")
     (work/"primitive_runner.cpp").write_text(RUNNER.replace("@SLOTS@", "8192"),encoding="utf-8"); (work/"CMakeLists.txt").write_text(CMAKE,encoding="utf-8")
     build=work/"build"; configure,_=run(["cmake","-S",str(work.resolve()),"-B",str(build.resolve()),f"-DOpenFHE_DIR={args.openfhe_dir}"],work); build_seconds,_=run(["cmake","--build",str(build.resolve()),"--target","primitive_runner"],work)
     py=root/"python_results.csv"; python_baseline(args.data_dir.resolve(),py,args.repetitions)
     he=root/"heir_results.csv"; execution=root/"execution.json"; wall,log=run(["env","OMP_NUM_THREADS=1",str((build/"primitive_runner").resolve()),str(args.data_dir.resolve()),str(he.resolve()),str(args.repetitions),str(execution.resolve())],work); (work/"runner.log").write_text(log,encoding="utf-8")
+    execution_data=json.loads(execution.read_text(encoding="utf-8")); execution_data["multiply_context_budget"]={"translated_depth_before_patch":original_depth,"requested_multiplicative_depth":args.ckks_mul_depth}; write_json(execution, execution_data)
     report(he,py,execution,root/"REPORT.md"); result={"status":"ckks_primitive_benchmark_executed","report":"REPORT.md","execution":"execution.json","build_seconds":{"configure":configure,"build":build_seconds},"runner_wall_seconds":wall}; write_json(root/"result.json",result); print(json.dumps(result,indent=2))
 
 
