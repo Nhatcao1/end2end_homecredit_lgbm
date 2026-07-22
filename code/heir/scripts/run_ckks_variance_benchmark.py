@@ -90,8 +90,8 @@ int main(int argc, char** argv) {
     meta << std::setprecision(17) << "{\"setup_seconds\":" << seconds(setup)
          << ",\"ring_dimension\":" << context->GetRingDimension()
          << ",\"slot_count\":" << slots << ",\"input_scale\":" << inputScale
-         << ",\"multiplicative_depth\":@DEPTH@,\"first_mod_size\":@FIRST_MOD_SIZE@
-         << ",\"scaling_mod_size\":@SCALING_MOD_SIZE@
+         << ",\"multiplicative_depth\":@DEPTH@,\"first_mod_size\":@FIRST_MOD_SIZE@"
+         << ",\"scaling_mod_size\":@SCALING_MOD_SIZE@"
          << ",\"omp_num_threads\":1}\n";
     std::ofstream out(argv[4]); out << std::setprecision(17)
       << "value_count,decimals,repetition,ciphertext_chunks,input_scale,encrypt_seconds,sum_evaluate_seconds,square_evaluate_seconds,merge_seconds,variance_finalize_seconds,square_decrypt_seconds,variance_decrypt_seconds,online_seconds,he_sum_squares,square_abs_error,he_sample_variance,variance_abs_error\n";
