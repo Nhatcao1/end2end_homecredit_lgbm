@@ -9,7 +9,6 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-import re
 import shutil
 import statistics
 import sys
@@ -50,6 +49,7 @@ RUNNER = r'''
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include "openfhe.h"
 #include "sum_output.h"
 #include "multiply_output.h"
 using namespace lbcrypto;
@@ -73,14 +73,25 @@ int main(int argc, char** argv) {
     const size_t slots = @SIZE@; const double inputScale = std::stod(argv[3]);
     if (!(inputScale > 0.0)) throw std::runtime_error("input scale must be positive");
     auto setup = std::chrono::steady_clock::now();
-    auto context = encrypted_multiply__generate_crypto_context();
+    CCParams<CryptoContextCKKSRNS> parameters;
+    parameters.SetMultiplicativeDepth(@DEPTH@);
+    parameters.SetFirstModSize(@FIRST_MOD_SIZE@);
+    parameters.SetScalingModSize(@SCALING_MOD_SIZE@);
+    parameters.SetScalingTechnique(FLEXIBLEAUTOEXT);
+    parameters.SetRingDim(@RING_DIMENSION@);
+    parameters.SetBatchSize(@SIZE@);
+    auto context = GenCryptoContext(parameters);
+    context->Enable(PKE); context->Enable(KEYSWITCH); context->Enable(LEVELEDSHE);
     auto keys = context->KeyGen(); if (!keys.good()) throw std::runtime_error("key generation failed");
+    context->EvalMultKeyGen(keys.secretKey);
     context = encrypted_multiply__configure_crypto_context(context, keys.secretKey);
     context = encrypted_sum__configure_crypto_context(context, keys.secretKey);
     std::ofstream meta(argv[5]);
     meta << std::setprecision(17) << "{\"setup_seconds\":" << seconds(setup)
          << ",\"ring_dimension\":" << context->GetRingDimension()
          << ",\"slot_count\":" << slots << ",\"input_scale\":" << inputScale
+         << ",\"multiplicative_depth\":@DEPTH@,\"first_mod_size\":@FIRST_MOD_SIZE@
+         << ",\"scaling_mod_size\":@SCALING_MOD_SIZE@
          << ",\"omp_num_threads\":1}\n";
     std::ofstream out(argv[4]); out << std::setprecision(17)
       << "value_count,decimals,repetition,ciphertext_chunks,input_scale,encrypt_seconds,sum_evaluate_seconds,square_evaluate_seconds,merge_seconds,variance_finalize_seconds,square_decrypt_seconds,variance_decrypt_seconds,online_seconds,he_sum_squares,square_abs_error,he_sample_variance,variance_abs_error\n";
@@ -128,20 +139,6 @@ int main(int argc, char** argv) {
 '''
 
 
-def raise_multiply_context_budget(source: str, requested_depth: int) -> tuple[str, int]:
-    if requested_depth < 4:
-        raise ValueError("--ckks-mul-depth must be at least 4 for sample variance")
-    pattern = r"(SetMultiplicativeDepth\()\d+(\s*\);)"
-    match = re.search(pattern, source)
-    if match is None:
-        raise ValueError("generated packed-multiply source has no SetMultiplicativeDepth call")
-    original = int(re.search(r"\d+", match.group(0)).group(0))
-    patched, count = re.subn(pattern, rf"\g<1>{requested_depth}\g<2>", source)
-    if count != 1:
-        raise ValueError(f"expected one packed-multiply depth setting; found {count}")
-    return patched, original
-
-
 def pandas_reference(data: Path, counts_: tuple[int, ...], input_scale: float, output: Path) -> None:
     try:
         import pandas as pd
@@ -168,11 +165,14 @@ def main() -> None:
     parser.add_argument("--value-counts", nargs="+", type=int, default=[1_000, 50_000, 1_000_000])
     parser.add_argument("--input-scale", type=float, default=40_000.0)
     parser.add_argument("--ckks-mul-depth", type=int, default=12)
+    parser.add_argument("--first-mod-size", type=int, default=60)
+    parser.add_argument("--scaling-mod-size", type=int, default=50)
+    parser.add_argument("--ring-dimension", type=int, default=32_768)
     parser.add_argument("--openfhe-dir", default="/usr/local/lib/OpenFHE")
     parser.add_argument("--overwrite", action="store_true")
     args = parser.parse_args()
-    if args.input_scale <= 0 or args.ckks_mul_depth < 4:
-        raise ValueError("input scale must be positive and CKKS depth must be at least 4")
+    if args.input_scale <= 0 or args.ckks_mul_depth < 4 or args.first_mod_size <= 0 or args.scaling_mod_size <= 0 or args.ring_dimension < 16_384:
+        raise ValueError("invalid CKKS context parameters")
     root = args.output_dir.resolve()
     if root.exists():
         if not args.overwrite:
@@ -188,10 +188,8 @@ def main() -> None:
     work = root / "runner"; work.mkdir()
     copy_generated_sources((args.generated_dir / sum_kernel["source"]).parent, work, "sum")
     copy_generated_sources((args.generated_dir / multiply_kernel["source"]).parent, work, "multiply")
-    multiply_cpp = work / "multiply_output.cpp"
-    patched, original_depth = raise_multiply_context_budget(multiply_cpp.read_text(encoding="utf-8"), args.ckks_mul_depth)
-    multiply_cpp.write_text(patched, encoding="utf-8")
-    (work / "variance_runner.cpp").write_text(RUNNER.replace("@SIZE@", str(slots)), encoding="utf-8")
+    runner_source = RUNNER.replace("@SIZE@", str(slots)).replace("@DEPTH@", str(args.ckks_mul_depth)).replace("@FIRST_MOD_SIZE@", str(args.first_mod_size)).replace("@SCALING_MOD_SIZE@", str(args.scaling_mod_size)).replace("@RING_DIMENSION@", str(args.ring_dimension))
+    (work / "variance_runner.cpp").write_text(runner_source, encoding="utf-8")
     (work / "CMakeLists.txt").write_text(CMAKE, encoding="utf-8")
     build = work / "build"
     run(["cmake", "-S", str(work.resolve()), "-B", str(build.resolve()), f"-DOpenFHE_DIR={args.openfhe_dir}"], work)
@@ -202,14 +200,14 @@ def main() -> None:
     wall, log = run(["env", "OMP_NUM_THREADS=1", str((build / "variance_runner").resolve()), str(args.data_dir.resolve()), ",".join(map(str, counts_)), str(args.input_scale), str(heir.resolve()), str(execution_path.resolve())], work)
     (work / "runner.log").write_text(log, encoding="utf-8")
     execution = json.loads(execution_path.read_text(encoding="utf-8"))
-    execution["square_variance_context_budget"] = {"translated_depth_before_patch": original_depth, "requested_multiplicative_depth": args.ckks_mul_depth, "method": "patched translated HEIR packed-multiply context"}
+    execution["square_variance_context"] = {"multiplicative_depth": args.ckks_mul_depth, "first_mod_size": args.first_mod_size, "scaling_mod_size": args.scaling_mod_size, "ring_dimension_requested": args.ring_dimension, "method": "custom OpenFHE context shared by HEIR multiply and SUM kernels"}
     write_json(execution_path, execution)
     with heir.open(newline="", encoding="utf-8") as handle: heir_rows = list(csv.DictReader(handle))
     with pandas.open(newline="", encoding="utf-8") as handle: pandas_rows = list(csv.DictReader(handle))
     lines = [
         "# CKKS-SQSUM-01 and CKKS-VAR-01", "",
         "Both workloads use the same normalized encrypted input `x / scale`. `CKKS-SQSUM-01` first evaluates HEIR packed `CT×CT` (`x × x`) and then the HEIR SUM reduction. `CKKS-VAR-01` uses encrypted SUM and SUM-OF-SQUARES branches, then computes sample variance without an intermediate decrypt.", "",
-        f"Input scale: `{args.input_scale:g}`. Shared CKKS depth: `{args.ckks_mul_depth}` (translated packed-multiply depth before patch: `{original_depth}`).", "",
+        f"Input scale: `{args.input_scale:g}`. Shared custom CKKS context: ring `{args.ring_dimension}`, depth `{args.ckks_mul_depth}`, first modulus `{args.first_mod_size}` bits, scaling modulus `{args.scaling_mod_size}` bits.", "",
         "## CKKS-SQSUM-01 — packed encrypted square, then encrypted sum", "",
         "| Values | Decimals | Pandas square sum (s) | HE encrypt (s) | HE square reduction (s) | HE merge (s) | Audit decrypt (s) | Square-sum max error |", "|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
