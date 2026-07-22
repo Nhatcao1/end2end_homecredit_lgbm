@@ -137,6 +137,12 @@ def patch_mean_depth(source: str, requested_depth: int) -> tuple[str, int]:
     return patched, original
 
 
+def emitted_parameter(source: str, name: str) -> int | None:
+    """Read an explicit OpenFHE parameter from translated HEIR C++ if present."""
+    match = re.search(rf"{re.escape(name)}\((\d+)\);", source)
+    return int(match.group(1)) if match else None
+
+
 def pandas_reference(installment: list[float], payment: list[float], repetitions: int, output: Path) -> None:
     try:
         import pandas as pd
@@ -185,6 +191,12 @@ def report(root: Path, value_count: int, scale: float, mean_depth: int, original
         f"| Real rows | Logical lanes / CT | CKKS representation scale | Shared setup | Mean context depth |",
         "|---:|---:|---:|---:|---:|",
         f"| {value_count} | {execution['logical_slots']} | {scale:g} | {float(execution['setup_seconds']):.9f} s | {mean_depth} (translated default: {original_depth}) |",
+        "",
+        "| CKKS context parameter | Effective value |",
+        "|---|---:|",
+        f"| Multiplicative depth | {execution['emitted_ckks_parameters']['multiplicative_depth']} |",
+        f"| First modulus size (bits) | {execution['emitted_ckks_parameters']['first_mod_size']} |",
+        f"| Scaling modulus size (bits) | {execution['emitted_ckks_parameters']['scaling_mod_size']} |",
         "",
         "## Per-output calculation and accuracy",
         "",
@@ -240,6 +252,11 @@ def one_run(args: argparse.Namespace, root: Path, value_count: int) -> None:
     mean_cpp = work / "mean_output.cpp"
     patched, original_depth = patch_mean_depth(mean_cpp.read_text(encoding="utf-8"), args.ckks_mul_depth)
     mean_cpp.write_text(patched, encoding="utf-8")
+    emitted_parameters = {
+        "multiplicative_depth": emitted_parameter(patched, "SetMultiplicativeDepth"),
+        "first_mod_size": emitted_parameter(patched, "SetFirstModSize") or "HEIR default (not explicitly emitted)",
+        "scaling_mod_size": emitted_parameter(patched, "SetScalingModSize") or "HEIR default (not explicitly emitted)",
+    }
     (work / "payment_diff_runner.cpp").write_text(RUNNER.replace("@SLOTS@", str(slots)), encoding="utf-8")
     (work / "CMakeLists.txt").write_text(CMAKE, encoding="utf-8")
     build = work / "build"
@@ -248,7 +265,7 @@ def one_run(args: argparse.Namespace, root: Path, value_count: int) -> None:
     he = root / "heir_results.csv"; execution = root / "execution.json"
     wall_seconds, log = run(["env", "OMP_NUM_THREADS=1", str((build / "payment_diff_runner").resolve()), str(stage.resolve()), str(scale), str(args.repetitions), str(he.resolve()), str(execution.resolve())], work)
     (work / "runner.log").write_text(log, encoding="utf-8")
-    metadata = json.loads(execution.read_text(encoding="utf-8")); metadata.update({"value_count": value_count, "mean_context_budget": {"translated_depth_before_patch": original_depth, "requested_multiplicative_depth": args.ckks_mul_depth}, "build_seconds": {"configure": configure_seconds, "build": build_seconds}, "runner_wall_seconds": wall_seconds})
+    metadata = json.loads(execution.read_text(encoding="utf-8")); metadata.update({"value_count": value_count, "mean_context_budget": {"translated_depth_before_patch": original_depth, "requested_multiplicative_depth": args.ckks_mul_depth}, "emitted_ckks_parameters": emitted_parameters, "build_seconds": {"configure": configure_seconds, "build": build_seconds}, "runner_wall_seconds": wall_seconds})
     write_json(execution, metadata)
     # Fill accuracy errors against the same pandas oracle after the HE process
     # finishes, preserving the C++ runner's actual encrypted measurements.

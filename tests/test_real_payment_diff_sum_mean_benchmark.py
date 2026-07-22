@@ -18,6 +18,11 @@ class RealPaymentDiffSumMeanBenchmarkTest(unittest.TestCase):
         self.assertEqual(original, 1)
         self.assertIn("SetMultiplicativeDepth(4)", patched)
 
+    def test_emitted_modulus_settings_are_reported_when_available(self):
+        source = "params.SetFirstModSize(60); params.SetScalingModSize(50);"
+        self.assertEqual(benchmark.emitted_parameter(source, "SetFirstModSize"), 60)
+        self.assertEqual(benchmark.emitted_parameter(source, "SetScalingModSize"), 50)
+
 
 if __name__ == "__main__":
     unittest.main()
