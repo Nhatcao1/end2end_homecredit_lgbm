@@ -170,16 +170,13 @@ def _read_values(path: Path) -> list[float]:
     return [float(row["value"]) for row in read_csv(path)]
 
 
-def _validate(values: list[float], input_scale: float, minimum_gap: float) -> None:
+def _validate(values: list[float], input_scale: float) -> None:
     if len(values) != 4:
         raise ValueError("the current min/max benchmark accepts exactly four real values")
-    if input_scale <= 0 or minimum_gap <= 0:
-        raise ValueError("input scale and minimum gap must be positive")
+    if input_scale <= 0:
+        raise ValueError("input scale must be positive")
     if any(not (-input_scale / 2 < value <= input_scale / 2) for value in values):
         raise ValueError("input violates the unit-circle contract; use an input scale greater than twice the absolute maximum")
-    ordered = sorted(values)
-    if any(right - left < minimum_gap for left, right in zip(ordered, ordered[1:])):
-        raise ValueError("values violate the public minimum gap; ties/near-ties are excluded from this accuracy benchmark")
 
 
 def _report(result: dict[str, object]) -> str:
@@ -200,12 +197,12 @@ value.
 | Real candidates | 4 (power of two) |
 | Public input scale | {execution["input_scale"]} |
 | Encoded interval | `(-0.5, 0.5]` |
-| Public minimum gap | {result["minimum_gap"]} |
 
 The owner divides raw values by the public scale **only while encoding the
 plaintext into CKKS**. It does not compute min or max client-side. The audit
 multiplies the decrypted result by the same scale only to express accuracy in
-the original units.
+the original units. Tied values are valid: they produce the same min/max value;
+only the discarded argmin/argmax identity may be non-unique.
 
 ## Python versus encrypted result
 
@@ -241,7 +238,6 @@ def main() -> None:
     parser.add_argument("--openfhe-dir", default="/usr/local/lib/OpenFHE")
     parser.add_argument("--input-csv", type=Path, help="optional one-column CSV with header 'value' and four values")
     parser.add_argument("--input-scale", type=float, default=1024.0)
-    parser.add_argument("--minimum-gap", type=float, default=0.25)
     args = parser.parse_args()
     root = args.output_dir.resolve()
     if root.exists():
@@ -250,7 +246,7 @@ def main() -> None:
         shutil.rmtree(root)
     root.mkdir(parents=True)
     values = _read_values(args.input_csv) if args.input_csv else list(DEFAULT_VALUES)
-    _validate(values, args.input_scale, args.minimum_gap)
+    _validate(values, args.input_scale)
     inputs = root / "plaintext_inputs"
     write_values(inputs / "values.csv", values)
     python_started = time.perf_counter()
@@ -281,7 +277,6 @@ def main() -> None:
     result: dict[str, object] = {
         "status": "openfhe_ckks_fhew_minmax_executed",
         "scope": "literal four-candidate encrypted minimum and maximum reductions",
-        "minimum_gap": args.minimum_gap,
         "python_seconds": python_seconds,
         "build_seconds": {"configure": configure_seconds, "build": build_seconds},
         "execution": execution,

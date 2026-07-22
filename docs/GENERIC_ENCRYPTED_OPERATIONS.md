@@ -94,13 +94,13 @@ python3 code/heir/scripts/run_ckks_fhew_minmax_benchmark.py \
   --output-dir benchmark_runs/ckks_fhew_minmax_01 \
   --overwrite \
   --input-scale 1024 \
-  --minimum-gap 0.25 \
   --openfhe-dir /usr/local/lib/OpenFHE
 ```
 
 The report is `benchmark_runs/ckks_fhew_minmax_01/REPORT.md`. The input must
-contain exactly four values, have a public gap between candidates, and fit
-inside `(-input_scale / 2, input_scale / 2]`. This is a specific small-vector
+contain exactly four values and fit inside `(-input_scale / 2, input_scale / 2]`.
+Ties are valid for min/max; only the discarded argmin/argmax identity is
+non-unique. This is a specific small-vector
 capability/accuracy benchmark, not a claim that min/max is ready for every
 full column or grouped reduction.
 

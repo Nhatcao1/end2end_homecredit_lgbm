@@ -13,14 +13,13 @@ class CkksFhewMinMaxBenchmarkTest(unittest.TestCase):
         self.assertIn("SetComputeArgmin(true)", RUNNER)
         self.assertIn("if (argc != 6)", RUNNER)
 
-    def test_default_values_meet_unit_circle_and_gap_contract(self) -> None:
-        _validate(list(DEFAULT_VALUES), 1024.0, 0.25)
+    def test_default_values_meet_unit_circle_contract(self) -> None:
+        _validate(list(DEFAULT_VALUES), 1024.0)
 
-    def test_ties_and_out_of_range_inputs_are_rejected(self) -> None:
-        with self.assertRaisesRegex(ValueError, "minimum gap"):
-            _validate([1.0, 1.0, 2.0, 3.0], 1024.0, 0.25)
+    def test_ties_are_valid_but_out_of_range_inputs_are_rejected(self) -> None:
+        _validate([1.0, 1.0, 2.0, 3.0], 1024.0)
         with self.assertRaisesRegex(ValueError, "unit-circle"):
-            _validate([-600.0, -1.0, 1.0, 2.0], 1024.0, 0.25)
+            _validate([-600.0, -1.0, 1.0, 2.0], 1024.0)
 
 
 if __name__ == "__main__":
