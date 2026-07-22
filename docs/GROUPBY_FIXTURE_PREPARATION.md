@@ -51,11 +51,12 @@ block independently:
 encrypt AMT_INSTALMENT + AMT_PAYMENT + validity mask
   -> HEIR encrypted_subtract(PAYMENT_DIFF)
   -> HEIR encrypted_sum(PAYMENT_DIFF)  = one encrypted group sum
-  -> HEIR encrypted_sum(validity mask) = one encrypted group count
   -> decrypt only for the audit table
 ```
 
-This proves the group layout, the after-encryption feature calculation, and
-one aggregate per group. It is intentionally not yet an efficient many-group
+The validity mask remains part of the prepared layout and establishes which
+lanes are real; because padded parent values are zero, it is not evaluated in
+this SUM-only benchmark. This proves the group layout, the after-encryption
+feature calculation, and one aggregate per group. It is intentionally not yet an efficient many-group
 packing implementation: every 128-lane applicant block occupies one 8192-lane
 CKKS ciphertext. The report makes this explicit.

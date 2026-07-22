@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Run the first encrypted real-data ``groupby(SK_ID_CURR)`` proof.
+"""Run the first encrypted real-data ``groupby(SK_ID_CURR)`` sum proof.
 
 The client-side fixture contains one fixed-size, masked block per selected
 applicant.  This runner encrypts its *parent* columns, evaluates the generic
 HEIR subtraction kernel, and evaluates the generic HEIR sum kernel for each
-block.  The resulting encrypted scalar is one ``PAYMENT_DIFF`` sum per opaque
-group.  An encrypted sum of the 1/0 validity mask is the group count.
+block. The resulting encrypted scalar is one ``PAYMENT_DIFF`` sum per opaque
+group.
 
 This is intentionally a correctness-first grouped benchmark. Each applicant
 uses an independent 8192-lane ciphertext in one shared CKKS session. It does
@@ -62,7 +62,7 @@ RUNNER = r'''
 #include "sum_output.h"
 using namespace lbcrypto;
 using Bundle = std::vector<Ciphertext<DCRTPoly>>;
-struct Group { std::vector<double> payment, installment, valid; };
+struct Group { std::vector<double> payment, installment; std::vector<int> seen; };
 double seconds(std::chrono::steady_clock::time_point start) { return std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count(); }
 void require(bool value, const std::string& message) { if (!value) throw std::runtime_error(message); }
 std::vector<std::string> split(const std::string& line) { std::stringstream input(line); std::vector<std::string> fields; std::string value; while (std::getline(input, value, ',')) fields.push_back(value); return fields; }
@@ -72,10 +72,10 @@ std::map<unsigned long long, Group> readGroups(const std::string& path, size_t s
     if (line.empty()) continue; const auto fields = split(line); require(fields.size() == 7, "expected seven CSV columns");
     const auto groupId = std::stoull(fields[2]); const size_t lane = std::stoull(fields[3]); const double payment = std::stod(fields[4]); const double installment = std::stod(fields[5]); const int valid = std::stoi(fields[6]);
     require(lane < bucket && lane < slots, "lane outside declared group bucket"); require(valid == 0 || valid == 1, "validity mask must be 0 or 1");
-    auto inserted = groups.emplace(groupId, Group{std::vector<double>(slots, 0.0), std::vector<double>(slots, 0.0), std::vector<double>(slots, 0.0)}); Group& group = inserted.first->second;
-    require(group.valid[lane] == 0.0, "duplicate lane for opaque group");
+    auto inserted = groups.emplace(groupId, Group{std::vector<double>(slots, 0.0), std::vector<double>(slots, 0.0), std::vector<int>(bucket, 0)}); Group& group = inserted.first->second;
+    require(group.seen[lane] == 0, "duplicate lane for opaque group"); group.seen[lane] = 1;
     if (valid == 0) { require(payment == 0.0 && installment == 0.0, "padded lane must contain zero parents"); continue; }
-    group.payment[lane] = payment / scale; group.installment[lane] = installment / scale; group.valid[lane] = 1.0;
+    group.payment[lane] = payment / scale; group.installment[lane] = installment / scale;
   }
   require(!groups.empty(), "no group blocks read"); return groups;
 }
@@ -88,17 +88,15 @@ int main(int argc, char** argv) {
     auto setup = std::chrono::steady_clock::now(); auto context = encrypted_sum__generate_crypto_context(); auto keys = context->KeyGen(); require(keys.good(), "key generation failed");
     context = encrypted_sum__configure_crypto_context(context, keys.secretKey); context = encrypted_subtract__configure_crypto_context(context, keys.secretKey);
     std::ofstream meta(argv[6]); meta << std::setprecision(17) << "{\"setup_seconds\":" << seconds(setup) << ",\"logical_slots\":" << slots << ",\"ckks_slot_capacity\":" << context->GetRingDimension() / 2 << ",\"groups\":" << groups.size() << ",\"bucket_size\":" << bucket << ",\"input_scale\":" << scale << "}\n";
-    std::ofstream out(argv[5]); out << std::setprecision(17) << "repetition,opaque_group_id,parent_encrypt_seconds,mask_encrypt_seconds,feature_seconds,count_reduce_seconds,sum_reduce_seconds,audit_decrypt_seconds,online_seconds,he_count,he_sum\n";
+    std::ofstream out(argv[5]); out << std::setprecision(17) << "repetition,opaque_group_id,parent_encrypt_seconds,feature_seconds,sum_reduce_seconds,audit_decrypt_seconds,online_seconds,he_sum\n";
     for (int repetition = 1; repetition <= repetitions; ++repetition) for (const auto& item : groups) {
       const auto& group = item.second; auto started = std::chrono::steady_clock::now(); auto encryptedInstallment = encrypted_subtract__encrypt__arg0(context, group.installment, keys.publicKey); auto encryptedPayment = encrypted_subtract__encrypt__arg1(context, group.payment, keys.publicKey); const double parentEncrypt = seconds(started);
-      started = std::chrono::steady_clock::now(); auto encryptedValid = encrypted_sum__encrypt__arg0(context, group.valid, keys.publicKey); const double maskEncrypt = seconds(started);
       started = std::chrono::steady_clock::now(); auto paymentDiff = encrypted_subtract(context, encryptedInstallment, encryptedPayment); const double feature = seconds(started);
-      started = std::chrono::steady_clock::now(); Bundle encryptedCount = encrypted_sum(context, encryptedValid); const double countReduce = seconds(started);
       started = std::chrono::steady_clock::now(); Bundle encryptedSum = encrypted_sum(context, paymentDiff); const double sumReduce = seconds(started);
-      require(encryptedCount.size() == 1 && encryptedSum.size() == 1, "expected scalar HEIR reductions");
-      started = std::chrono::steady_clock::now(); const double heCount = encrypted_sum__decrypt__result0(context, encryptedCount, keys.secretKey); const double heSum = encrypted_sum__decrypt__result0(context, encryptedSum, keys.secretKey) * scale; const double decrypt = seconds(started);
-      const double online = parentEncrypt + maskEncrypt + feature + countReduce + sumReduce + decrypt;
-      out << repetition << ',' << item.first << ',' << parentEncrypt << ',' << maskEncrypt << ',' << feature << ',' << countReduce << ',' << sumReduce << ',' << decrypt << ',' << online << ',' << heCount << ',' << heSum << '\n';
+      require(encryptedSum.size() == 1, "expected scalar HEIR sum reduction");
+      started = std::chrono::steady_clock::now(); const double heSum = encrypted_sum__decrypt__result0(context, encryptedSum, keys.secretKey) * scale; const double decrypt = seconds(started);
+      const double online = parentEncrypt + feature + sumReduce + decrypt;
+      out << repetition << ',' << item.first << ',' << parentEncrypt << ',' << feature << ',' << sumReduce << ',' << decrypt << ',' << online << ',' << heSum << '\n';
     }
     return 0;
   } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
@@ -138,7 +136,7 @@ def _read_reference(path: Path) -> dict[int, dict[str, float]]:
     with path.open("r", encoding="utf-8", newline="") as handle:
         rows = list(csv.DictReader(handle))
     return {
-        int(row["opaque_group_id"]): {"count": float(row["count"]), "sum": float(row["payment_diff_sum"])}
+        int(row["opaque_group_id"]): {"sum": float(row["payment_diff_sum"])}
         for row in rows
     }
 
@@ -149,8 +147,8 @@ def _python_baseline(groups: dict[int, list[dict[str, str]]], repetitions: int, 
         writer = csv.writer(handle)
         writer.writerow(
             [
-                "repetition", "opaque_group_id", "feature_seconds", "count_seconds",
-                "sum_seconds", "workload_seconds", "count", "payment_diff_sum",
+                "repetition", "opaque_group_id", "feature_seconds", "sum_seconds",
+                "workload_seconds", "payment_diff_sum",
             ]
         )
         for repetition in range(1, repetitions + 1):
@@ -160,16 +158,10 @@ def _python_baseline(groups: dict[int, list[dict[str, str]]], repetitions: int, 
                 differences = [float(row["AMT_INSTALMENT"]) - float(row["AMT_PAYMENT"]) for row in real]
                 feature_seconds = time.perf_counter() - started
                 started = time.perf_counter()
-                count = len(real)
-                count_seconds = time.perf_counter() - started
-                started = time.perf_counter()
                 total = math.fsum(differences)
                 sum_seconds = time.perf_counter() - started
                 writer.writerow(
-                    [
-                        repetition, group_id, feature_seconds, count_seconds, sum_seconds,
-                        feature_seconds + count_seconds + sum_seconds, count, total,
-                    ]
+                    [repetition, group_id, feature_seconds, sum_seconds, feature_seconds + sum_seconds, total]
                 )
 
 
@@ -191,7 +183,7 @@ def _report(root: Path, *, groups: dict[int, list[dict[str, str]]], scale: float
     lines = [
         "# First encrypted PAYMENT_DIFF groupby proof",
         "",
-        "Each opaque applicant group is one fixed 128-lane client-prepared block. The runner encrypts only `AMT_INSTALMENT`, `AMT_PAYMENT`, and the 1/0 validity mask. It calculates `PAYMENT_DIFF = AMT_INSTALMENT - AMT_PAYMENT` after encryption, then returns one encrypted sum and one encrypted count per group.",
+        "Each opaque applicant group is one fixed 128-lane client-prepared block. The runner encrypts only `AMT_INSTALMENT` and `AMT_PAYMENT`. It calculates `PAYMENT_DIFF = AMT_INSTALMENT - AMT_PAYMENT` after encryption, then returns one encrypted sum per group.",
         "",
         "This is a correctness-first grouping test: every group uses an independent 8192-lane ciphertext within one shared CKKS session. It is not yet the packed segmented-reduction optimisation.",
         "",
@@ -201,40 +193,38 @@ def _report(root: Path, *, groups: dict[int, list[dict[str, str]]], scale: float
         "",
         "## Accuracy by opaque group",
         "",
-        "| Opaque group | Reference count | HE count | Count error | Reference PAYMENT_DIFF sum | HE sum | Sum abs. error | Status |",
-        "|---:|---:|---:|---:|---:|---:|---:|---|",
+        "| Opaque group | Reference PAYMENT_DIFF sum | HE sum | Sum absolute error | Status |",
+        "|---:|---:|---:|---:|---|",
     ]
     for row in audit_rows:
         status = "PASS" if row["status"] == "PASS" else "FAIL"
         lines.append(
-            f"| {row['opaque_group_id']} | {float(row['reference_count']):.0f} | {float(row['he_count']):.12g} | {float(row['count_abs_error']):.12g} | {float(row['reference_sum']):.12g} | {float(row['he_sum']):.12g} | {float(row['sum_abs_error']):.12g} | {status} |"
+            f"| {row['opaque_group_id']} | {float(row['reference_sum']):.12g} | {float(row['he_sum']):.12g} | {float(row['sum_abs_error']):.12g} | {status} |"
         )
     parent_encrypt = statistics.median(float(row["parent_encrypt_seconds"]) for row in he_rows)
-    mask_encrypt = statistics.median(float(row["mask_encrypt_seconds"]) for row in he_rows)
     feature = statistics.median(float(row["feature_seconds"]) for row in he_rows)
-    count = statistics.median(float(row["count_reduce_seconds"]) for row in he_rows)
     reduction = statistics.median(float(row["sum_reduce_seconds"]) for row in he_rows)
     decrypt = statistics.median(float(row["audit_decrypt_seconds"]) for row in he_rows)
     online = statistics.median(float(row["online_seconds"]) for row in he_rows)
     python_workload = statistics.median(float(row["workload_seconds"]) for row in python_rows)
-    he_calculation = feature + count + reduction
+    he_calculation = feature + reduction
     lines += [
         "",
         "## Median latency per applicant block",
         "",
-        "| Parent encrypt | Mask encrypt | PAYMENT_DIFF | Encrypted COUNT | Encrypted SUM | Audit decrypt | HE online |",
-        "|---:|---:|---:|---:|---:|---:|---:|",
-        f"| {parent_encrypt:.9f} | {mask_encrypt:.9f} | {feature:.9f} | {count:.9f} | {reduction:.9f} | {decrypt:.9f} | {online:.9f} |",
+        "| Parent encrypt | PAYMENT_DIFF | Encrypted SUM | Audit decrypt | HE online |",
+        "|---:|---:|---:|---:|---:|",
+        f"| {parent_encrypt:.9f} | {feature:.9f} | {reduction:.9f} | {decrypt:.9f} | {online:.9f} |",
         "",
         "## Python baseline comparison",
         "",
-        "Python timing is the matching in-memory per-group operation: calculate `PAYMENT_DIFF`, count valid rows, and sum the differences. CSV read, client grouping/padding, and DataFrame construction are excluded from both Python and HE timing.",
+        "Python timing is the matching in-memory per-group operation: calculate `PAYMENT_DIFF` and sum the real rows. CSV read, client grouping/padding, and DataFrame construction are excluded from both Python and HE timing.",
         "",
         "| Python workload median (s) | HE calculation median (s) | HE calc ÷ Python | HE online median (s) | HE online ÷ Python |",
         "|---:|---:|---:|---:|---:|",
         f"| {python_workload:.9f} | {he_calculation:.9f} | {he_calculation / python_workload:.2f}× | {online:.9f} | {online / python_workload:.2f}× |",
         "",
-        f"Acceptance uses relative tolerance `{tolerance:g}` for the sum and absolute tolerance `{tolerance:g}` for count. Raw result rows: `heir_results.csv`, `audited_results.csv`, `execution.json`.",
+        f"Acceptance uses relative tolerance `{tolerance:g}` for the sum (with an absolute `{tolerance:g}` bound when the reference sum is zero). Raw result rows: `heir_results.csv`, `audited_results.csv`, `execution.json`.",
     ]
     (root / "REPORT.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -300,21 +290,21 @@ def main() -> None:
     audit_path = root / "audited_results.csv"
     all_pass = True
     with audit_path.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=["opaque_group_id", "reference_count", "he_count", "count_abs_error", "reference_sum", "he_sum", "sum_abs_error", "sum_relative_error", "status"])
+        writer = csv.DictWriter(handle, fieldnames=["opaque_group_id", "reference_sum", "he_sum", "sum_abs_error", "sum_relative_error", "status"])
         writer.writeheader()
         for group_id in sorted(references):
             row, reference = latest[group_id], references[group_id]
-            he_count, he_sum = float(row["he_count"]), float(row["he_sum"])
-            count_error, sum_error = abs(he_count - reference["count"]), abs(he_sum - reference["sum"])
+            he_sum = float(row["he_sum"])
+            sum_error = abs(he_sum - reference["sum"])
             relative = _relative_error(he_sum, reference["sum"])
-            status = "PASS" if count_error <= args.relative_tolerance and relative <= args.relative_tolerance else "FAIL"
+            status = "PASS" if relative <= args.relative_tolerance else "FAIL"
             all_pass = all_pass and status == "PASS"
-            writer.writerow({"opaque_group_id": group_id, "reference_count": reference["count"], "he_count": he_count, "count_abs_error": count_error, "reference_sum": reference["sum"], "he_sum": he_sum, "sum_abs_error": sum_error, "sum_relative_error": relative, "status": status})
+            writer.writerow({"opaque_group_id": group_id, "reference_sum": reference["sum"], "he_sum": he_sum, "sum_abs_error": sum_error, "sum_relative_error": relative, "status": status})
     metadata = json.loads(execution_path.read_text(encoding="utf-8"))
     metadata.update({"generated_dir": str(args.generated_dir.resolve()), "prepared_dir": str(prepared), "build_seconds": {"configure": configure_seconds, "build": build_seconds}, "runner_wall_seconds": wall_seconds, "repetitions": args.repetitions, "relative_tolerance": args.relative_tolerance})
     write_json(execution_path, metadata)
     _report(root, groups=groups, scale=scale, tolerance=args.relative_tolerance)
-    write_json(root / "result.json", {"status": "grouped_payment_diff_count_sum_executed", "accuracy_status": "PASS" if all_pass else "FAIL", "groups": len(groups), "bucket_size": bucket_size, "report": "REPORT.md"})
+    write_json(root / "result.json", {"status": "grouped_payment_diff_sum_executed", "accuracy_status": "PASS" if all_pass else "FAIL", "groups": len(groups), "bucket_size": bucket_size, "report": "REPORT.md"})
     print((root / "result.json").read_text(encoding="utf-8"))
 
 

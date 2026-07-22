@@ -1,0 +1,34 @@
+flowchart TD
+    raw["Client-private installments_payments.csv<br/>SK_ID_CURR, AMT_INSTALMENT, AMT_PAYMENT"]
+    clean["Client filters incomplete/non-numeric parent rows"]
+    group["Client groupby SK_ID_CURR<br/>select 10 complete groups that fit B=128"]
+    baseline["Plaintext reference, client-private<br/>PAYMENT_DIFF = instalment - payment<br/>groupby sum"]
+    mapping["Client-private mapping<br/>SK_ID_CURR ↔ opaque_group_id"]
+
+    raw --> clean --> group
+    group --> baseline
+    group --> mapping
+
+    subgraph prepared["HE-ready grouped layout"]
+        block["One fixed 128-lane block per opaque group<br/>AMT_INSTALMENT, AMT_PAYMENT<br/>real lanes then zero padding"]
+        mask["Validity mask retained as layout evidence<br/>1 = real lane; 0 = zero padding<br/>not evaluated in this SUM-only benchmark"]
+    end
+    group --> block
+    group --> mask
+
+    subgraph he["Shared CKKS session on HE evaluator"]
+        encrypt["Encrypt both parent columns<br/>one ciphertext per group block"]
+        diff["HEIR generic subtract<br/>PAYMENT_DIFF = instalment - payment"]
+        sum["HEIR generic sum<br/>one encrypted sum per opaque group"]
+        encryptedResult["Encrypted group SUM result"]
+        encrypt --> diff --> sum --> encryptedResult
+    end
+    block --> encrypt
+
+    audit["Client decrypts audit output<br/>match opaque group IDs locally<br/>compare 10 HE sums to plaintext groupby sums"]
+    encryptedResult --> audit
+    baseline --> audit
+    mapping -. private only .-> audit
+
+    later["Later scalable version<br/>multiple group segments per ciphertext<br/>segmented reductions, not implemented here"]
+    sum -. future .-> later
