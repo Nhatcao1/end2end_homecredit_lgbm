@@ -29,7 +29,7 @@ does not derive ratios, differences, means, or other business features.
 | `sum` | native CKKS packed reduction | Implemented generic fixed-public-count kernel |
 | `mean`, sample variance | native CKKS packed reduction | Implemented when group count is public and fixed |
 | `a / b` | reciprocal polynomial + multiply | Implemented with a bounded positive-denominator contract |
-| `x > threshold` | CKKS sign polynomial | Planned |
+| `x > threshold` | OpenFHE CKKS↔FHEW sign comparison | Executable standalone benchmark; exact equality remains excluded by a public margin contract |
 | `min` / `max` | OpenFHE CKKS-to-FHEW switching | Separate session required; not emitted by HEIR |
 
 ## Representative source benchmarks
@@ -42,6 +42,43 @@ every original feature function as a separate HE program.
 | `installments_payment_diff` | `AMT_INSTALMENT - AMT_PAYMENT` | Executable exact CKKS | Validates raw two-column arithmetic, null packing, HEIR lowering, timing, and decryption accuracy. |
 | `application_days_employed_perc` | `DAYS_EMPLOYED / DAYS_BIRTH` | Deferred | Validates the required reciprocal/division design and source sentinel-to-null handling. |
 | `installments_dpd_clip` | `max(DAYS_ENTRY_PAYMENT - DAYS_INSTALMENT, 0)` | Deferred | Covers comparison/clipping, which must remain visibly separate from ordinary CKKS arithmetic. |
+
+## Exact ordered comparison: separate CKKS↔FHEW benchmark
+
+`<`, `>`, threshold rules, and later min/max require an ordered predicate.
+They are **not** native CKKS operations. The following benchmark uses
+OpenFHE's CKKS-to-FHEW sign operation and returns an encrypted CKKS sign result
+for both encrypted-column comparison and a public-threshold rule. It writes a
+lane-level decrypted audit only to establish correctness; its two result
+ciphertexts stay encrypted.
+
+```bash
+python3 code/heir/scripts/run_ckks_fhew_comparison_benchmark.py \
+  --output-dir benchmark_runs/ckks_fhew_comparison_01 \
+  --overwrite \
+  --openfhe-dir /usr/local/lib/OpenFHE
+```
+
+Read `REPORT.md` and `comparison_audit.csv` in that output directory. The
+default is four deliberately non-equal test lanes. To test four owner-provided
+values, provide two one-column `value` CSV files:
+
+```bash
+python3 code/heir/scripts/run_ckks_fhew_comparison_benchmark.py \
+  --output-dir benchmark_runs/ckks_fhew_comparison_custom_01 \
+  --overwrite \
+  --left-csv /path/to/left.csv \
+  --right-csv /path/to/right.csv \
+  --threshold 0 \
+  --minimum-margin 0.25 \
+  --openfhe-dir /usr/local/lib/OpenFHE
+```
+
+The `minimum-margin` is a public numerical contract, not a secret-data check:
+the evaluator must reject exact equality/near-zero candidates or use a separate
+equality/tolerance design. These scheme-switching ciphertexts belong to their
+own OpenFHE session and cannot be mixed directly with ordinary HEIR CKKS
+ciphertexts.
 
 After the arithmetic benchmark, encrypted mask combination and masked grouped
 reductions use the same generic `multiply` / `count_sum_squares` contracts.
