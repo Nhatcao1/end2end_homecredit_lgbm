@@ -79,7 +79,6 @@ int main(int argc, char** argv) {
     parameters.SetScalingModSize(@SCALING_MOD_SIZE@);
     parameters.SetScalingTechnique(FLEXIBLEAUTOEXT);
     parameters.SetRingDim(@RING_DIMENSION@);
-    parameters.SetBatchSize(@SIZE@);
     auto context = GenCryptoContext(parameters);
     context->Enable(PKE); context->Enable(KEYSWITCH); context->Enable(LEVELEDSHE);
     auto keys = context->KeyGen(); if (!keys.good()) throw std::runtime_error("key generation failed");
@@ -89,7 +88,7 @@ int main(int argc, char** argv) {
     std::ofstream meta(argv[5]);
     meta << std::setprecision(17) << "{\"setup_seconds\":" << seconds(setup)
          << ",\"ring_dimension\":" << context->GetRingDimension()
-         << ",\"slot_count\":" << slots << ",\"input_scale\":" << inputScale
+         << ",\"logical_kernel_lanes\":" << slots << ",\"ckks_slot_capacity\":" << context->GetRingDimension() / 2 << ",\"input_scale\":" << inputScale
          << ",\"multiplicative_depth\":@DEPTH@,\"first_mod_size\":@FIRST_MOD_SIZE@"
          << ",\"scaling_mod_size\":@SCALING_MOD_SIZE@"
          << ",\"omp_num_threads\":1}\n";
@@ -209,7 +208,7 @@ def main() -> None:
     lines = [
         "# CKKS-SQSUM-01 and CKKS-VAR-01", "",
         "Both workloads use the same normalized encrypted input `x / scale`. `CKKS-SQSUM-01` first evaluates HEIR packed `CT×CT` (`x × x`) and then the HEIR SUM reduction. `CKKS-VAR-01` uses encrypted SUM and SUM-OF-SQUARES branches, then computes sample variance without an intermediate decrypt.", "",
-        f"Input scale: `{args.input_scale:g}`. Shared custom CKKS context: ring `{args.ring_dimension}`, depth `{args.ckks_mul_depth}`, first modulus `{args.first_mod_size}` bits, scaling modulus `{args.scaling_mod_size}` bits.", "",
+        f"Input scale: `{args.input_scale:g}`. Shared custom CKKS context: ring `{args.ring_dimension}`, capacity `{args.ring_dimension // 2}` slots, depth `{args.ckks_mul_depth}`, first modulus `{args.first_mod_size}` bits, scaling modulus `{args.scaling_mod_size}` bits. The HEIR kernels operate on their first 8192 logical lanes; remaining CKKS slots are unused.", "",
         "## CKKS-SQSUM-01 — packed encrypted square, then encrypted sum", "",
         "| Values | Decimals | Pandas square sum (s) | HE encrypt (s) | HE square reduction (s) | HE merge (s) | Audit decrypt (s) | Square-sum max error |", "|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
