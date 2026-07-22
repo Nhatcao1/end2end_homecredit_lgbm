@@ -88,9 +88,9 @@ int main(int argc, char** argv) {
     auto setup = std::chrono::steady_clock::now(); auto context = fixed_count_mean__generate_crypto_context(); auto keys = context->KeyGen();
     require(keys.good(), "key generation failed"); context = fixed_count_mean__configure_crypto_context(context, keys.secretKey);
     context = encrypted_sum__configure_crypto_context(context, keys.secretKey); context = encrypted_subtract__configure_crypto_context(context, keys.secretKey);
-    std::ofstream meta(argv[6]); meta << std::setprecision(17) << "{\"setup_seconds\":" << seconds(setup)
+    std::ofstream meta(argv[5]); meta << std::setprecision(17) << "{\"setup_seconds\":" << seconds(setup)
       << ",\"input_scale\":" << scale << ",\"logical_slots\":" << slots << ",\"ckks_slot_capacity\":" << context->GetRingDimension() / 2 << "}\n";
-    std::ofstream out(argv[5]); out << std::setprecision(17)
+    std::ofstream out(argv[4]); out << std::setprecision(17)
       << "repetition,ciphertext_chunks,parent_encrypt_seconds,mask_encrypt_seconds,feature_seconds,branch_copy_seconds,count_reduce_seconds,sum_reduce_seconds,merge_seconds,mean_scale_seconds,audit_decrypt_seconds,online_seconds,he_count,count_abs_error,he_sum,sum_abs_error,he_mean,mean_abs_error\n";
     for (int repetition = 1; repetition <= repetitions; ++repetition) {
       double parentEncrypt = 0.0, maskEncrypt = 0.0, feature = 0.0, copies = 0.0, countReduce = 0.0, sumReduce = 0.0, merge = 0.0;
