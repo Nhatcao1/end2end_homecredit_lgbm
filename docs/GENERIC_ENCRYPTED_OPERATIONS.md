@@ -80,6 +80,30 @@ equality/tolerance design. These scheme-switching ciphertexts belong to their
 own OpenFHE session and cannot be mixed directly with ordinary HEIR CKKS
 ciphertexts.
 
+## Literal encrypted min/max: separate reduction benchmark
+
+Min/max is not a threshold predicate. It reduces one encrypted vector through
+an encrypted comparison-and-selection tree. The benchmark below uses exactly
+four candidates—the smallest power-of-two review case—and normalizes them into
+the OpenFHE unit-circle contract during CKKS encoding. It produces encrypted
+minimum and maximum ciphertexts, then decrypts them solely for the Python
+accuracy report.
+
+```bash
+python3 code/heir/scripts/run_ckks_fhew_minmax_benchmark.py \
+  --output-dir benchmark_runs/ckks_fhew_minmax_01 \
+  --overwrite \
+  --input-scale 1024 \
+  --minimum-gap 0.25 \
+  --openfhe-dir /usr/local/lib/OpenFHE
+```
+
+The report is `benchmark_runs/ckks_fhew_minmax_01/REPORT.md`. The input must
+contain exactly four values, have a public gap between candidates, and fit
+inside `(-input_scale / 2, input_scale / 2]`. This is a specific small-vector
+capability/accuracy benchmark, not a claim that min/max is ready for every
+full column or grouped reduction.
+
 After the arithmetic benchmark, encrypted mask combination and masked grouped
 reductions use the same generic `multiply` / `count_sum_squares` contracts.
 `min`, `max`, and `nunique` are not silently included in this first lane.
