@@ -64,21 +64,23 @@ def _read_history_keys(path: Path) -> set[str]:
     return keys
 
 
-def _read_bridge_layouts(bridge_dir: Path) -> tuple[dict[int, str], dict[int, str], bool]:
+def _read_bridge_layouts(bridge_dir: Path) -> tuple[dict[int, str] | None, dict[int, str], bool]:
     receiver_path = bridge_dir / "client_private" / "receiver_application_layout.csv"
     sender_path = bridge_dir / "private_exchange" / "sender_application_layout.csv"
-    receiver: dict[int, str] = {}
+    receiver: dict[int, str] | None = None
     sender: dict[int, str] = {}
-    with receiver_path.open("r", encoding="utf-8-sig", newline="") as handle:
-        reader = csv.DictReader(handle)
-        expected = {"app_index", KEY, "TARGET"}
-        if set(reader.fieldnames or []) != expected:
-            raise ValueError("receiver bridge layout schema is unexpected")
-        for row in reader:
-            index = int(row["app_index"])
-            if index in receiver:
-                raise ValueError("receiver bridge layout duplicates app_index")
-            receiver[index] = row[KEY].strip()
+    if receiver_path.is_file():
+        receiver = {}
+        with receiver_path.open("r", encoding="utf-8-sig", newline="") as handle:
+            reader = csv.DictReader(handle)
+            expected = {"app_index", KEY, "TARGET"}
+            if set(reader.fieldnames or []) != expected:
+                raise ValueError("receiver bridge layout schema is unexpected")
+            for row in reader:
+                index = int(row["app_index"])
+                if index in receiver:
+                    raise ValueError("receiver bridge layout duplicates app_index")
+                receiver[index] = row[KEY].strip()
     target_in_sender_exchange = False
     with sender_path.open("r", encoding="utf-8-sig", newline="") as handle:
         reader = csv.DictReader(handle)
@@ -110,7 +112,6 @@ def validate(
     history_keys = _read_history_keys(installments)
     expected_matches = set(application_keys).intersection(history_keys)
     receiver, sender, target_in_sender_exchange = _read_bridge_layouts(bridge_dir)
-    receiver_keys = set(receiver.values())
     bridge_matches = {key for key in sender.values() if key}
     bridge_blank_slots = sum(not key for key in sender.values())
     true_positives = len(expected_matches.intersection(bridge_matches))
@@ -118,15 +119,21 @@ def validate(
     false_negatives = len(expected_matches.difference(bridge_matches))
     precision = true_positives / (true_positives + false_positives) if (true_positives + false_positives) else 1.0
     recall = true_positives / (true_positives + false_negatives) if (true_positives + false_negatives) else 1.0
-    receiver_layout_matches_source = receiver_keys == set(application_keys) and len(receiver) == len(application_keys)
+    dense_sender_slots = len(sender) == len(application_keys) and set(sender) == set(range(len(application_keys)))
+    receiver_layout_available = receiver is not None
+    receiver_layout_matches_source = (
+        set(receiver.values()) == set(application_keys) and len(receiver) == len(application_keys)
+        if receiver is not None else None
+    )
     sender_slot_alignment = (
-        set(receiver) == set(sender)
-        and all(not key or key == receiver[index] for index, key in sender.items())
+        set(receiver) == set(sender) and all(not key or key == receiver[index] for index, key in sender.items())
+        if receiver is not None else None
     )
     result = {
         "status": "PASS" if (
-            receiver_layout_matches_source
-            and sender_slot_alignment
+            dense_sender_slots
+            and (receiver_layout_matches_source is not False)
+            and (sender_slot_alignment is not False)
             and expected_matches == bridge_matches
             and bridge_blank_slots == len(application_keys) - len(expected_matches)
             and not target_in_sender_exchange
@@ -139,6 +146,8 @@ def validate(
             "psi_bridge_matched_applicants": len(bridge_matches),
             "plaintext_left_join_unmatched_applicants": len(application_keys) - len(expected_matches),
             "psi_bridge_blank_sender_slots": bridge_blank_slots,
+            "sender_dense_slots_match_application_rows": dense_sender_slots,
+            "receiver_private_layout_available": receiver_layout_available,
             "true_positives": true_positives,
             "false_positives": false_positives,
             "false_negatives": false_negatives,
@@ -170,10 +179,10 @@ membership/slot check must pass.
 
 | Check | Plaintext / expected | PSI bridge | Result |
 |---|---:|---:|---|
-| Application rows | {checks['application_train_test_union_rows']} | {checks['application_train_test_union_rows'] if checks['receiver_layout_matches_train_test_union'] else 'different'} | {'PASS' if checks['receiver_layout_matches_train_test_union'] else 'FAIL'} |
+| Application rows | {checks['application_train_test_union_rows']} | {checks['application_train_test_union_rows'] if checks['sender_dense_slots_match_application_rows'] else 'different'} | {'PASS' if checks['sender_dense_slots_match_application_rows'] else 'FAIL'} |
 | Matched applicants | {checks['plaintext_left_join_matched_applicants']} | {checks['psi_bridge_matched_applicants']} | {'PASS' if checks['matched_applicant_set_matches_plaintext'] else 'FAIL'} |
 | Unmatched / blank sender slots | {checks['plaintext_left_join_unmatched_applicants']} | {checks['psi_bridge_blank_sender_slots']} | {'PASS' if checks['plaintext_left_join_unmatched_applicants'] == checks['psi_bridge_blank_sender_slots'] else 'FAIL'} |
-| Sender slot points to the same receiver applicant | — | — | {'PASS' if checks['sender_slots_match_receiver_positions'] else 'FAIL'} |
+| Sender slot points to the same receiver applicant | — | — | {'PASS' if checks['sender_slots_match_receiver_positions'] is True else ('Not available' if checks['sender_slots_match_receiver_positions'] is None else 'FAIL')} |
 | TARGET excluded from sender exchange | — | — | {'PASS' if checks['target_excluded_from_sender_exchange'] else 'FAIL'} |
 
 ## Exact PSI join accuracy
@@ -193,7 +202,12 @@ Overall result: **{result['status']}**.
 
 Raw identifiers remain in client input and bridge-private files; this report
 contains counts only.
-"""
+""" + (
+        "\nThe older bridge run has no `client_private/receiver_application_layout.csv`. "
+        "This report still proves exact match membership and receiver-left row count, "
+        "but cannot independently inspect the randomized private `app_index` mapping.\n"
+        if not checks["receiver_private_layout_available"] else ""
+    )
 
 
 def main() -> None:

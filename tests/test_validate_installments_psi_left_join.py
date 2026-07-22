@@ -53,6 +53,21 @@ class ValidateInstallmentsPsiLeftJoinTest(unittest.TestCase):
             self.assertEqual(result["checks"]["precision"], 1.0)
             self.assertEqual(result["checks"]["recall"], 1.0)
 
+    def test_validates_old_bridge_when_private_receiver_layout_is_absent(self) -> None:
+        module = load_module()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            train, test, installments = root / "train.csv", root / "test.csv", root / "installments.csv"
+            write_csv(train, ["SK_ID_CURR", "TARGET"], [{"SK_ID_CURR": "101", "TARGET": 0}])
+            write_csv(test, ["SK_ID_CURR"], [{"SK_ID_CURR": "102"}])
+            write_csv(installments, ["SK_ID_CURR"], [{"SK_ID_CURR": "102"}])
+            bridge = root / "bridge"
+            write_csv(bridge / "private_exchange" / "sender_application_layout.csv", ["app_index", "SK_ID_CURR"], [{"app_index": 0, "SK_ID_CURR": "102"}, {"app_index": 1, "SK_ID_CURR": ""}])
+            result = module.validate(train, test, installments, bridge)
+            self.assertEqual(result["status"], "PASS")
+            self.assertFalse(result["checks"]["receiver_private_layout_available"])
+            self.assertIsNone(result["checks"]["sender_slots_match_receiver_positions"])
+
 
 if __name__ == "__main__":
     unittest.main()
