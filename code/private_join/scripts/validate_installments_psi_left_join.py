@@ -69,6 +69,14 @@ def _read_bridge_layouts(bridge_dir: Path) -> tuple[dict[int, str] | None, dict[
     sender_path = bridge_dir / "private_exchange" / "sender_application_layout.csv"
     receiver: dict[int, str] | None = None
     sender: dict[int, str] = {}
+    if not sender_path.is_file():
+        raise FileNotFoundError(
+            f"PSI bridge is incomplete: missing {sender_path}. "
+            "Raw data/psi party outputs are not a bridge. Run "
+            "code/bridge/psi_to_heir.py with the same receiver source that was "
+            "used to prepare the PSI input, then pass that bridge output directory "
+            "to --bridge-dir."
+        )
     if receiver_path.is_file():
         receiver = {}
         with receiver_path.open("r", encoding="utf-8-sig", newline="") as handle:

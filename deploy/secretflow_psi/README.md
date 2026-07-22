@@ -14,17 +14,26 @@ server before recording final performance numbers.
 
 ## Server smoke run
 
-From the repository root, prepare a receiver application set and the union of
-all five sender history-table applicant sets. Repeat `--sender-source` once per
-table. The adapter deduplicates applicants both within and across the tables.
+From the repository root, first make the receiver exactly match the original
+notebook: `application_train ∪ application_test`. This is client-only CSV
+preparation, not PSI or HE. Then prepare its identifier-only PSI input and the
+union of all five sender history-table applicant sets. Repeat `--sender-source`
+once per table. The adapter deduplicates applicants both within and across the
+tables.
 `bureau_balance.csv` is not listed because it has `SK_ID_BUREAU`, not
 `SK_ID_CURR`; its applicant association comes through `bureau.csv`.
 
 ```bash
 mkdir -p data/psi/receiver data/psi/sender
 
+python3 code/private_join/scripts/prepare_application_receiver_union.py \
+  --application-train data/home_credit/application_train.csv \
+  --application-test data/home_credit/application_test.csv \
+  --output data/psi/receiver/application_train_test_union.csv \
+  --overwrite
+
 python3 code/private_join/scripts/prepare_psi_inputs.py \
-  --receiver-source data/home_credit/application_train.csv \
+  --receiver-source data/psi/receiver/application_train_test_union.csv \
   --sender-source data/home_credit/bureau.csv \
   --sender-source data/home_credit/previous_application.csv \
   --sender-source data/home_credit/POS_CASH_balance.csv \
@@ -64,7 +73,7 @@ Create the dense receiver-left-join layout and Markdown report:
 
 ```bash
 python3 code/bridge/psi_to_heir.py \
-  --receiver-source data/home_credit/application_train.csv \
+  --receiver-source data/psi/receiver/application_train_test_union.csv \
   --receiver-psi-output data/psi/receiver/psi_output.csv \
   --sender-psi-output data/psi/sender/psi_output.csv \
   --sender-name home_credit_history_union \
