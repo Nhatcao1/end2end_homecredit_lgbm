@@ -17,7 +17,7 @@ class CkksFhewMinMaxBenchmarkTest(unittest.TestCase):
     def test_uses_literal_openfhe_min_and_max_reductions(self) -> None:
         self.assertIn("EvalMinSchemeSwitching", RUNNER)
         self.assertIn("EvalMaxSchemeSwitching", RUNNER)
-        self.assertIn("EvalCompareSwitchPrecompute(1, 1)", RUNNER)
+        self.assertIn("EvalCompareSwitchPrecompute(1, 1, true)", RUNNER)
         self.assertIn("SetComputeArgmin(true)", RUNNER)
         self.assertIn("if (argc != 7)", RUNNER)
         self.assertIn("numValues <= 4096", RUNNER)

@@ -130,7 +130,9 @@ int main(int argc, char** argv) {
     context->EvalSchemeSwitchingKeyGen(keys, lweSecretKey);
     // Inputs are already normalized to (-0.5, 0.5], so their differences are
     // in (-1, 1]. This is the documented OpenFHE unit-circle min/max route.
-    context->EvalCompareSwitchPrecompute(1, 1);
+    // `unit=true` is required because the encoded candidates are explicitly
+    // normalized into (-0.5, 0.5] before CKKS encryption.
+    context->EvalCompareSwitchPrecompute(1, 1, true);
     const double setupSeconds = seconds(setupStart);
 
     const auto encryptStart = Clock::now();
@@ -160,6 +162,7 @@ int main(int argc, char** argv) {
       << ",\"encrypted_candidate_count\":" << numValues
       << ",\"ring_dimension\":8192"
       << ",\"multiplicative_depth\":" << multiplicativeDepth
+      << ",\"comparison_unit_normalized\":true"
       << ",\"min_normalized\":" << minNormalized
       << ",\"max_normalized\":" << maxNormalized
       << ",\"input_contract\":\"all normalized values in (-0.5,0.5]; padded encrypted candidate count is a power of two\""
@@ -288,12 +291,14 @@ min/max value; only the discarded argmin/argmax identity may be non-unique.
 
 | Stage | Seconds |
 |---|---:|
-| Python `min` + `max` audit baseline | {result["python_seconds"]:.9f} |
+| Python `min` | {result["python_seconds"]["min"]:.9f} |
+| Python `max` | {result["python_seconds"]["max"]:.9f} |
 | One-time CKKS/FHEW session and switching-key setup | {execution["setup_seconds"]:.6f} |
 | Encrypt one packed input vector | {execution["encrypt_seconds"]:.6f} |
-| Encrypted min reduction | {execution["min_evaluation_seconds"]:.6f} |
-| Encrypted max reduction | {execution["max_evaluation_seconds"]:.6f} |
+| Encrypted min reduction (`HE ÷ Python`: {execution["min_evaluation_seconds"] / result["python_seconds"]["min"]:.2f}×) | {execution["min_evaluation_seconds"]:.6f} |
+| Encrypted max reduction (`HE ÷ Python`: {execution["max_evaluation_seconds"] / result["python_seconds"]["max"]:.2f}×) | {execution["max_evaluation_seconds"]:.6f} |
 | Audit decryption only | {execution["audit_decrypt_seconds"]:.6f} |
+| Shared online: encrypt + MIN + MAX + audit (`HE ÷ Python min+max`: {(execution["encrypt_seconds"] + execution["min_evaluation_seconds"] + execution["max_evaluation_seconds"] + execution["audit_decrypt_seconds"]) / (result["python_seconds"]["min"] + result["python_seconds"]["max"]):.2f}×) | {execution["encrypt_seconds"] + execution["min_evaluation_seconds"] + execution["max_evaluation_seconds"] + execution["audit_decrypt_seconds"]:.6f} |
 
 ## Ciphertext boundary
 
@@ -337,8 +342,11 @@ def main() -> None:
     write_values(inputs / "raw_values.csv", values)
     write_values(inputs / "padded_values.csv", padded_values)
     python_started = time.perf_counter()
-    python_min, python_max = min(values), max(values)
-    python_seconds = time.perf_counter() - python_started
+    python_min = min(values)
+    python_min_seconds = time.perf_counter() - python_started
+    python_started = time.perf_counter()
+    python_max = max(values)
+    python_max_seconds = time.perf_counter() - python_started
     work = root / "runner"
     work.mkdir()
     (work / "minmax_runner.cpp").write_text(RUNNER, encoding="utf-8")
@@ -367,7 +375,7 @@ def main() -> None:
         "input_source": source_info,
         "input_scale_policy": scale_policy,
         "packing": packing,
-        "python_seconds": python_seconds,
+        "python_seconds": {"min": python_min_seconds, "max": python_max_seconds},
         "build_seconds": {"configure": configure_seconds, "build": build_seconds},
         "execution": execution,
         "results": results,
