@@ -76,18 +76,20 @@ double decryptScalar(const CryptoContext<DCRTPoly>& context, const PrivateKey<DC
 }
 
 int main(int argc, char** argv) {
-  // padded-values.csv input-scale encrypted-count min.ct max.ct metrics.json
-  if (argc != 7) return 2;
+  // padded-values.csv input-scale encrypted-count min.ct max.ct metrics.json ring-dimension
+  if (argc != 8) return 2;
   try {
     constexpr uint32_t firstModSize = 60;
     constexpr uint32_t scalingModSize = 50;
     const double inputScale = std::stod(argv[2]);
     const uint32_t numValues = static_cast<uint32_t>(std::stoul(argv[3]));
+    const uint32_t ringDimension = static_cast<uint32_t>(std::stoul(argv[7]));
     const uint32_t slots = numValues;
     require(inputScale > 0, "input scale must be positive");
     require(numValues >= 2 && (numValues & (numValues - 1)) == 0,
             "encrypted candidate count must be a power of two");
-    require(numValues <= 4096, "candidate count exceeds the 8192-ring CKKS slot capacity");
+    require(ringDimension >= 2 * numValues && (ringDimension & (ringDimension - 1)) == 0,
+            "ring dimension must be a power of two with at least twice the candidate count");
     auto rawValues = readVector(argv[1]);
     require(rawValues.size() == numValues, "padded input size does not match encrypted candidate count");
     std::vector<double> normalized;
@@ -109,7 +111,7 @@ int main(int argc, char** argv) {
     parameters.SetScalingModSize(scalingModSize);
     parameters.SetScalingTechnique(FLEXIBLEAUTO);
     parameters.SetSecurityLevel(HEStd_NotSet);
-    parameters.SetRingDim(8192);
+    parameters.SetRingDim(ringDimension);
     parameters.SetBatchSize(slots);
     parameters.SetSecretKeyDist(UNIFORM_TERNARY);
     parameters.SetKeySwitchTechnique(HYBRID);
@@ -160,7 +162,7 @@ int main(int argc, char** argv) {
       << ",\"audit_decrypt_seconds\":" << auditSeconds
       << ",\"input_scale\":" << inputScale
       << ",\"encrypted_candidate_count\":" << numValues
-      << ",\"ring_dimension\":8192"
+      << ",\"ring_dimension\":" << context->GetRingDimension()
       << ",\"multiplicative_depth\":" << multiplicativeDepth
       << ",\"comparison_unit_normalized\":true"
       << ",\"min_normalized\":" << minNormalized
@@ -187,22 +189,22 @@ def _next_power_of_two(value: int) -> int:
     return 1 << (value - 1).bit_length()
 
 
-def _validate(values: list[float], input_scale: float) -> None:
+def _validate(values: list[float], input_scale: float, candidate_capacity: int = 4096) -> None:
     if not values:
         raise ValueError("min/max benchmark needs at least one real value")
-    if len(values) > 4096:
-        raise ValueError("the 8192-ring benchmark supports at most 4096 real values per encrypted vector")
+    if len(values) > candidate_capacity:
+        raise ValueError(f"the selected ring supports at most {candidate_capacity} real values per encrypted vector")
     if input_scale <= 0:
         raise ValueError("input scale must be positive")
     if any(not (-input_scale / 2 < value <= input_scale / 2) for value in values):
         raise ValueError("input violates the unit-circle contract; use an input scale greater than twice the absolute maximum")
 
 
-def _pad_with_real_candidate(values: list[float]) -> tuple[list[float], dict[str, int | str]]:
+def _pad_with_real_candidate(values: list[float], candidate_capacity: int = 4096) -> tuple[list[float], dict[str, int | str]]:
     """Pad to a power of two without inventing an artificial low/high value."""
     encrypted_count = _next_power_of_two(len(values))
-    if encrypted_count > 4096:
-        raise ValueError("padded candidate count exceeds 4096 CKKS slots")
+    if encrypted_count > candidate_capacity:
+        raise ValueError(f"padded candidate count exceeds {candidate_capacity} CKKS slots")
     padded = list(values)
     # Repeating one genuine candidate cannot change either min or max. This
     # avoids a sentinel whose value might accidentally become the reduction.
@@ -268,6 +270,7 @@ value.
 | Parent column | `{result["input_source"]["column"]}` |
 | Real candidates | {result["packing"]["real_candidate_count"]} |
 | Encrypted candidates | {result["packing"]["encrypted_candidate_count"]} (power of two) |
+| Ring dimension | {execution["ring_dimension"]} |
 | Duplicate padding lanes | {result["packing"]["padding_count"]} |
 | Public input scale | {execution["input_scale"]} |
 | Scale policy | {result["input_scale_policy"]} |
@@ -320,6 +323,7 @@ def main() -> None:
     source.add_argument("--input-csv", type=Path, help="optional one-column real-data CSV with header 'value'")
     parser.add_argument("--column", default="AMT_PAYMENT", choices=("AMT_PAYMENT", "AMT_INSTALMENT"), help="prepared installments parent column")
     parser.add_argument("--value-count", type=int, default=DEFAULT_VALUE_COUNT, help="real values selected from the source; e.g. 100 or 1000")
+    parser.add_argument("--ring-dimension", type=int, default=16384, help="CKKS ring dimension; 16384 permits up to 8192 padded candidates")
     parser.add_argument("--input-scale", type=float, default=0.0, help="public encoding scale; 0 selects a power-of-two scale from loaded values")
     args = parser.parse_args()
     root = args.output_dir.resolve()
@@ -335,9 +339,12 @@ def main() -> None:
         prepared_batch = args.prepared_batch.resolve()
         values = _read_prepared_values(prepared_batch, args.column, args.value_count)
         source_info = {"kind": "prepared installments batch", "path": str(prepared_batch), "column": args.column, "requested_real_rows": args.value_count}
+    if args.ring_dimension < 4 or args.ring_dimension & (args.ring_dimension - 1):
+        raise ValueError("--ring-dimension must be a power of two of at least 4")
+    candidate_capacity = args.ring_dimension // 2
     input_scale, scale_policy = _resolve_input_scale(values, args.input_scale)
-    _validate(values, input_scale)
-    padded_values, packing = _pad_with_real_candidate(values)
+    _validate(values, input_scale, candidate_capacity)
+    padded_values, packing = _pad_with_real_candidate(values, candidate_capacity)
     inputs = root / "plaintext_inputs"
     write_values(inputs / "raw_values.csv", values)
     write_values(inputs / "padded_values.csv", padded_values)
@@ -359,7 +366,7 @@ def main() -> None:
     metrics_path = root / "execution.json"
     run([
         str((build / "minmax_runner").resolve()), str((inputs / "padded_values.csv").resolve()), str(input_scale), str(packing["encrypted_candidate_count"]),
-        str((ciphertexts / "encrypted_min.ct").resolve()), str((ciphertexts / "encrypted_max.ct").resolve()), str(metrics_path.resolve()),
+        str((ciphertexts / "encrypted_min.ct").resolve()), str((ciphertexts / "encrypted_max.ct").resolve()), str(metrics_path.resolve()), str(args.ring_dimension),
     ], work)
     execution = json.loads(metrics_path.read_text(encoding="utf-8"))
     results = [
