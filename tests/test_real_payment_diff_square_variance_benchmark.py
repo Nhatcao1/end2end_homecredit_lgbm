@@ -1,4 +1,5 @@
 import unittest
+import inspect
 
 from code.heir.scripts import run_real_payment_diff_square_variance_benchmark as benchmark
 
@@ -22,6 +23,10 @@ class RealPaymentDiffSquareVarianceBenchmarkTest(unittest.TestCase):
         error, status = benchmark.tolerance_status(105.0, 100.0, 1e-3)
         self.assertEqual(error, 5.0)
         self.assertTrue(status.startswith("FAIL"))
+
+    def test_report_passes_its_declared_tolerance_to_each_audit(self):
+        source = inspect.getsource(benchmark.report)
+        self.assertIn("float(reference[pandas_field]), relative_tolerance", source)
 
 
 if __name__ == "__main__":

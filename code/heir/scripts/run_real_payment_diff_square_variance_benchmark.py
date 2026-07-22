@@ -190,7 +190,7 @@ def report(root: Path, value_count: int, scale: float, requested_depth: int, ori
     ]
     for label, pandas_field, he_seconds, he_field in outputs:
         python_seconds = median(pandas, pandas_field + "_seconds" if pandas_field != "sample_variance" else "variance_seconds")
-        errors_and_status = [tolerance_status(float(row[he_field]), float(reference[pandas_field])) for row, reference in zip(he, pandas)]
+        errors_and_status = [tolerance_status(float(row[he_field]), float(reference[pandas_field]), relative_tolerance) for row, reference in zip(he, pandas)]
         max_error = max(item[0] for item in errors_and_status); status = "PASS" if all(item[1] == "PASS" for item in errors_and_status) else next(item[1] for item in errors_and_status if item[1] != "PASS")
         lines.append(f"| {label} | {python_seconds:.9f} | {he_seconds:.9f} | {he_seconds / python_seconds:.2f}× | {max_error:.12g} | {status} |")
     online = median(he, "online_seconds"); pandas_workload = median(pandas, "workload_seconds")
