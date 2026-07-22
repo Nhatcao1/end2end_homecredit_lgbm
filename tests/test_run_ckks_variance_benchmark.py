@@ -15,6 +15,7 @@ class RunCkksVarianceBenchmarkTest(unittest.TestCase):
         self.assertIn("SetFirstModSize", source)
         self.assertIn("SetScalingModSize", source)
         self.assertIn("FLEXIBLEAUTOEXT", source)
+        self.assertIn("default=65_536", source)
         self.assertIn("CKKS-SQSUM-01", source)
         self.assertIn("CKKS-VAR-01", source)
 

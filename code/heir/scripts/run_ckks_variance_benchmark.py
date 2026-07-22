@@ -167,7 +167,9 @@ def main() -> None:
     parser.add_argument("--ckks-mul-depth", type=int, default=12)
     parser.add_argument("--first-mod-size", type=int, default=60)
     parser.add_argument("--scaling-mod-size", type=int, default=50)
-    parser.add_argument("--ring-dimension", type=int, default=32_768)
+    # OpenFHE requires 65536 for the depth-12 / 60-bit-first / 50-bit-scale
+    # parameter set at its default 128-bit security recommendation.
+    parser.add_argument("--ring-dimension", type=int, default=65_536)
     parser.add_argument("--openfhe-dir", default="/usr/local/lib/OpenFHE")
     parser.add_argument("--overwrite", action="store_true")
     args = parser.parse_args()
