@@ -3,13 +3,14 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
+from code.heir.kernels.fixed_count_statistics import fixed_count_sum_squares_mlir
 from code.heir.scripts.run_ckks_variance_benchmark import RUNNER
 
 class RunCkksVarianceBenchmarkTest(unittest.TestCase):
     def test_variance_uses_generated_square_sum_and_coherent_deep_context(self) -> None:
         source = (Path(__file__).resolve().parents[1] / "code" / "heir" / "scripts" / "run_ckks_variance_benchmark.py").read_text(encoding="utf-8")
-        self.assertIn("encrypted_multiply(context", source)
-        self.assertIn("encrypted_sum(context, squares)", source)
+        self.assertIn("fixed_count_sum_squares(context", source)
+        self.assertIn("fixed_count_sum_squares__encrypt__arg0", source)
         self.assertIn("EvalMult(mean, mean)", source)
         self.assertIn("--ckks-mul-depth", source)
         self.assertIn("SetFirstModSize", source)
@@ -26,6 +27,11 @@ class RunCkksVarianceBenchmarkTest(unittest.TestCase):
                     .replace("@RING_DIMENSION@", "32768"))
         self.assertIn('<< ",\\"multiplicative_depth\\":12,\\"first_mod_size\\":60"', rendered)
         self.assertIn('<< ",\\"scaling_mod_size\\":50"', rendered)
+
+    def test_square_sum_multiplies_the_packed_tensor_before_reduction(self) -> None:
+        source = fixed_count_sum_squares_mlir(8, 8)
+        self.assertIn("arith.mulf %values, %values : tensor<8xf64>", source)
+        self.assertNotIn("arith.mulf %square_0", source)
 
 if __name__ == "__main__":
     unittest.main()

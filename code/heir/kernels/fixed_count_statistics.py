@@ -132,20 +132,41 @@ def fixed_count_sum_mlir(vector_size: int, valid_count: int) -> str:
 
 
 def fixed_count_sum_squares_mlir(vector_size: int, valid_count: int) -> str:
-    """Return encrypted ``sum(values ** 2)`` for a public lane count.
+    """Return encrypted packed ``sum(values ** 2)`` for a public lane count.
 
-    This single-output moment is the batch-safe building block for global
-    variance: batches can add encrypted sums and encrypted square-sums before
-    the one full-data finalization. It avoids averaging per-batch variances.
+    The tensor multiplication is deliberately applied before extracting lanes.
+    This uses the same packed CT×CT representation as the standalone primitive
+    benchmark rather than emitting one scalar multiplication per lane.
     """
     _validate(vector_size, valid_count)
-    return f"""func.func @fixed_count_sum_squares(
-    %values: tensor<{vector_size}xf64> {{secret.secret}}
-) -> f64 {{
-{_balanced_reduction(vector_size, valid_count, include_squares=True)}
-  return %squares_result : f64
-}}
-"""
+    tensor = f"tensor<{vector_size}xf64>"
+    current: list[str] = []
+    lines = [
+        "func.func @fixed_count_sum_squares(",
+        f"    %values: {tensor} {{secret.secret}}",
+        ") -> f64 {",
+        f"  %squares = arith.mulf %values, %values : {tensor}",
+    ]
+    for index in range(valid_count):
+        index_name = f"%index_{index}"
+        value_name = f"%square_{index}"
+        lines.append(f"  {index_name} = arith.constant {index} : index")
+        lines.append(f"  {value_name} = tensor.extract %squares[{index_name}] : {tensor}")
+        current.append(value_name)
+    operation = 0
+    while len(current) > 1:
+        next_level: list[str] = []
+        for index in range(0, len(current), 2):
+            if index + 1 == len(current):
+                next_level.append(current[index])
+                continue
+            name = "%squares_result" if len(current) == 2 else f"%squares_tree_{operation}"
+            lines.append(f"  {name} = arith.addf {current[index]}, {current[index + 1]} : f64")
+            next_level.append(name)
+            operation += 1
+        current = next_level
+    lines.extend(["  return %squares_result : f64", "}"])
+    return "\n".join(lines) + "\n"
 
 
 def fixed_count_mean_mlir(vector_size: int, valid_count: int) -> str:

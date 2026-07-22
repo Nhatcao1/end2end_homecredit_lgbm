@@ -31,7 +31,7 @@ find_package(OpenFHE CONFIG REQUIRED)
 set(HEIR_FLAGS "${OpenFHE_CXX_FLAGS}")
 string(REPLACE "-Werror" "" HEIR_FLAGS "${HEIR_FLAGS}")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${HEIR_FLAGS}")
-add_executable(variance_runner sum_output.cpp multiply_output.cpp variance_runner.cpp)
+add_executable(variance_runner sum_output.cpp square_output.cpp variance_runner.cpp)
 target_include_directories(variance_runner PRIVATE "${OpenFHE_INCLUDE}" "${OpenFHE_INCLUDE}/third-party/include" "${OpenFHE_INCLUDE}/core" "${OpenFHE_INCLUDE}/pke" "${OpenFHE_INCLUDE}/binfhe")
 target_link_directories(variance_runner PRIVATE "${OpenFHE_LIBDIR}")
 target_link_libraries(variance_runner PRIVATE ${OpenFHE_SHARED_LIBRARIES})
@@ -51,7 +51,7 @@ RUNNER = r'''
 #include <vector>
 #include "openfhe.h"
 #include "sum_output.h"
-#include "multiply_output.h"
+#include "square_output.h"
 using namespace lbcrypto;
 
 double seconds(std::chrono::steady_clock::time_point started) {
@@ -83,7 +83,7 @@ int main(int argc, char** argv) {
     context->Enable(PKE); context->Enable(KEYSWITCH); context->Enable(LEVELEDSHE);
     auto keys = context->KeyGen(); if (!keys.good()) throw std::runtime_error("key generation failed");
     context->EvalMultKeyGen(keys.secretKey);
-    context = encrypted_multiply__configure_crypto_context(context, keys.secretKey);
+    context = fixed_count_sum_squares__configure_crypto_context(context, keys.secretKey);
     context = encrypted_sum__configure_crypto_context(context, keys.secretKey);
     std::ofstream meta(argv[5]);
     meta << std::setprecision(17) << "{\"setup_seconds\":" << seconds(setup)
@@ -106,11 +106,13 @@ int main(int argc, char** argv) {
         for (size_t start = 0; start < values.size(); start += slots, ++chunks) {
           std::vector<double> block(slots, 0.0); const size_t take = std::min(slots, values.size() - start);
           std::copy(values.begin() + start, values.begin() + start + take, block.begin());
-          auto started = std::chrono::steady_clock::now(); auto encrypted = encrypted_multiply__encrypt__arg0(context, block, keys.publicKey); encryption += seconds(started);
-          // Two immutable branches of the same encrypted input; no re-encryption.
-          auto sumInput = encrypted; auto squareLeft = encrypted; auto squareRight = encrypted;
+          // The two generated kernels may have distinct compiler-level input
+          // layouts. Encrypt the same public block with each kernel's own
+          // wrapper; no ciphertext from one wrapper is passed as another
+          // wrapper's input.
+          auto started = std::chrono::steady_clock::now(); auto sumInput = encrypted_sum__encrypt__arg0(context, block, keys.publicKey); auto squareInput = fixed_count_sum_squares__encrypt__arg0(context, block, keys.publicKey); encryption += seconds(started);
           started = std::chrono::steady_clock::now(); auto partialSum = encrypted_sum(context, sumInput); sumEvaluation += seconds(started);
-          started = std::chrono::steady_clock::now(); auto squares = encrypted_multiply(context, squareLeft, squareRight); auto partialSquares = encrypted_sum(context, squares); squareEvaluation += seconds(started);
+          started = std::chrono::steady_clock::now(); auto partialSquares = fixed_count_sum_squares(context, squareInput); squareEvaluation += seconds(started);
           started = std::chrono::steady_clock::now();
           if (first) { totalSum = partialSum; totalSquares = partialSquares; first = false; }
           else for (size_t index = 0; index < totalSum.size(); ++index) { totalSum[index] = context->EvalAdd(totalSum[index], partialSum[index]); totalSquares[index] = context->EvalAdd(totalSquares[index], partialSquares[index]); }
@@ -126,9 +128,9 @@ int main(int argc, char** argv) {
         auto sampleVariance = context->EvalMult(populationVariance, static_cast<double>(count) / static_cast<double>(count - 1));
         decltype(totalSum) variance{sampleVariance}; const double finalization = seconds(started);
         std::cerr << "audit=square_sum count=" << count << " decimals=" << decimals << " repetition=" << repetition << '\n';
-        started = std::chrono::steady_clock::now(); double squareValue = encrypted_sum__decrypt__result0(context, totalSquares, keys.secretKey) * inputScale * inputScale; const double squareDecrypt = seconds(started);
+        started = std::chrono::steady_clock::now(); double squareValue = fixed_count_sum_squares__decrypt__result0(context, totalSquares, keys.secretKey) * inputScale * inputScale; const double squareDecrypt = seconds(started);
         std::cerr << "audit=variance count=" << count << " decimals=" << decimals << " repetition=" << repetition << '\n';
-        started = std::chrono::steady_clock::now(); double varianceValue = encrypted_sum__decrypt__result0(context, variance, keys.secretKey) * inputScale * inputScale; const double varianceDecrypt = seconds(started);
+        started = std::chrono::steady_clock::now(); double varianceValue = fixed_count_sum_squares__decrypt__result0(context, variance, keys.secretKey) * inputScale * inputScale; const double varianceDecrypt = seconds(started);
         out << count << ',' << decimals << ',' << repetition << ',' << chunks << ',' << inputScale << ',' << encryption << ',' << sumEvaluation << ',' << squareEvaluation << ',' << merge << ',' << finalization << ',' << squareDecrypt << ',' << varianceDecrypt << ',' << encryption + sumEvaluation + squareEvaluation + merge + finalization + squareDecrypt + varianceDecrypt << ',' << squareValue << ',' << std::abs(squareValue - rawSquares) << ',' << varianceValue << ',' << std::abs(varianceValue - rawVariance) << '\n';
       }
     }
@@ -182,13 +184,13 @@ def main() -> None:
     root.mkdir(parents=True)
     manifest = json.loads((args.generated_dir / "generation_manifest.json").read_text(encoding="utf-8"))
     sum_kernel = next(item for item in manifest["kernels"] if item["entry_function"] == "encrypted_sum")
-    multiply_kernel = next(item for item in manifest["kernels"] if item["entry_function"] == "encrypted_multiply")
+    square_kernel = next(item for item in manifest["kernels"] if item["entry_function"] == "fixed_count_sum_squares")
     slots = int(sum_kernel["logical_value_count"])
-    if int(multiply_kernel["logical_value_count"]) != slots:
-        raise ValueError("SUM and packed multiplication must use the same CKKS lane count")
+    if int(square_kernel["logical_value_count"]) != slots:
+        raise ValueError("SUM and packed square-sum must use the same CKKS lane count")
     work = root / "runner"; work.mkdir()
     copy_generated_sources((args.generated_dir / sum_kernel["source"]).parent, work, "sum")
-    copy_generated_sources((args.generated_dir / multiply_kernel["source"]).parent, work, "multiply")
+    copy_generated_sources((args.generated_dir / square_kernel["source"]).parent, work, "square")
     runner_source = RUNNER.replace("@SIZE@", str(slots)).replace("@DEPTH@", str(args.ckks_mul_depth)).replace("@FIRST_MOD_SIZE@", str(args.first_mod_size)).replace("@SCALING_MOD_SIZE@", str(args.scaling_mod_size)).replace("@RING_DIMENSION@", str(args.ring_dimension))
     (work / "variance_runner.cpp").write_text(runner_source, encoding="utf-8")
     (work / "CMakeLists.txt").write_text(CMAKE, encoding="utf-8")
@@ -207,7 +209,7 @@ def main() -> None:
     with pandas.open(newline="", encoding="utf-8") as handle: pandas_rows = list(csv.DictReader(handle))
     lines = [
         "# CKKS-SQSUM-01 and CKKS-VAR-01", "",
-        "Both workloads use the same normalized encrypted input `x / scale`. `CKKS-SQSUM-01` first evaluates HEIR packed `CT×CT` (`x × x`) and then the HEIR SUM reduction. `CKKS-VAR-01` uses encrypted SUM and SUM-OF-SQUARES branches, then computes sample variance without an intermediate decrypt.", "",
+        "Both workloads use the same normalized encrypted input `x / scale`. `CKKS-SQSUM-01` is one HEIR packed tensor-square-plus-reduction kernel. `CKKS-VAR-01` combines its encrypted SUM and SUM-OF-SQUARES outputs without an intermediate decrypt.", "",
         f"Input scale: `{args.input_scale:g}`. Shared custom CKKS context: ring `{args.ring_dimension}`, capacity `{args.ring_dimension // 2}` slots, depth `{args.ckks_mul_depth}`, first modulus `{args.first_mod_size}` bits, scaling modulus `{args.scaling_mod_size}` bits. The HEIR kernels operate on their first 8192 logical lanes; remaining CKKS slots are unused.", "",
         "## CKKS-SQSUM-01 — packed encrypted square, then encrypted sum", "",
         "| Values | Decimals | Pandas square sum (s) | HE encrypt (s) | HE square reduction (s) | HE merge (s) | Audit decrypt (s) | Square-sum max error |", "|---:|---:|---:|---:|---:|---:|---:|---:|",
