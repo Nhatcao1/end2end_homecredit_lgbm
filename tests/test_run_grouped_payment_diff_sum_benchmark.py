@@ -38,6 +38,24 @@ class GroupedPaymentDiffSumBenchmarkTest(unittest.TestCase):
             self.assertEqual(bucket, 4); self.assertEqual(set(groups), {0, 1}); self.assertEqual(module._scale(groups), 1024.0)
             self.assertEqual(sum(int(row["validity_mask"]) for row in groups[0]), 2)
 
+    def test_python_baseline_excludes_padding_from_count_and_sum(self) -> None:
+        module = load_module()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            groups = {
+                7: [
+                    {"AMT_PAYMENT": "640", "AMT_INSTALMENT": "800", "validity_mask": "1"},
+                    {"AMT_PAYMENT": "600", "AMT_INSTALMENT": "500", "validity_mask": "1"},
+                    {"AMT_PAYMENT": "0", "AMT_INSTALMENT": "0", "validity_mask": "0"},
+                ]
+            }
+            output = root / "python_results.csv"
+            module._python_baseline(groups, repetitions=1, output=output)
+            with output.open("r", encoding="utf-8", newline="") as handle:
+                row = next(csv.DictReader(handle))
+            self.assertEqual(int(row["count"]), 2)
+            self.assertEqual(float(row["payment_diff_sum"]), 60.0)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -143,17 +143,34 @@ def _read_reference(path: Path) -> dict[int, dict[str, float]]:
     }
 
 
-def _python_sum_seconds(groups: dict[int, list[dict[str, str]]], repetitions: int) -> dict[int, list[float]]:
-    timings: dict[int, list[float]] = defaultdict(list)
-    for _ in range(repetitions):
-        for group_id, rows in groups.items():
-            started = time.perf_counter()
-            math.fsum(
-                float(row["AMT_INSTALMENT"]) - float(row["AMT_PAYMENT"])
-                for row in rows if int(row["validity_mask"])
-            )
-            timings[group_id].append(time.perf_counter() - started)
-    return timings
+def _python_baseline(groups: dict[int, list[dict[str, str]]], repetitions: int, output: Path) -> None:
+    """Time the matching in-memory Python group workload, excluding preparation."""
+    with output.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(
+            [
+                "repetition", "opaque_group_id", "feature_seconds", "count_seconds",
+                "sum_seconds", "workload_seconds", "count", "payment_diff_sum",
+            ]
+        )
+        for repetition in range(1, repetitions + 1):
+            for group_id, rows in groups.items():
+                real = [row for row in rows if int(row["validity_mask"])]
+                started = time.perf_counter()
+                differences = [float(row["AMT_INSTALMENT"]) - float(row["AMT_PAYMENT"]) for row in real]
+                feature_seconds = time.perf_counter() - started
+                started = time.perf_counter()
+                count = len(real)
+                count_seconds = time.perf_counter() - started
+                started = time.perf_counter()
+                total = math.fsum(differences)
+                sum_seconds = time.perf_counter() - started
+                writer.writerow(
+                    [
+                        repetition, group_id, feature_seconds, count_seconds, sum_seconds,
+                        feature_seconds + count_seconds + sum_seconds, count, total,
+                    ]
+                )
 
 
 def _relative_error(actual: float, expected: float) -> float:
@@ -165,6 +182,8 @@ def _report(root: Path, *, groups: dict[int, list[dict[str, str]]], scale: float
         he_rows = list(csv.DictReader(handle))
     with (root / "audited_results.csv").open("r", encoding="utf-8", newline="") as handle:
         audit_rows = list(csv.DictReader(handle))
+    with (root / "python_results.csv").open("r", encoding="utf-8", newline="") as handle:
+        python_rows = list(csv.DictReader(handle))
     execution = json.loads((root / "execution.json").read_text(encoding="utf-8"))
     by_group: dict[int, list[dict[str, str]]] = defaultdict(list)
     for row in he_rows:
@@ -197,6 +216,8 @@ def _report(root: Path, *, groups: dict[int, list[dict[str, str]]], scale: float
     reduction = statistics.median(float(row["sum_reduce_seconds"]) for row in he_rows)
     decrypt = statistics.median(float(row["audit_decrypt_seconds"]) for row in he_rows)
     online = statistics.median(float(row["online_seconds"]) for row in he_rows)
+    python_workload = statistics.median(float(row["workload_seconds"]) for row in python_rows)
+    he_calculation = feature + count + reduction
     lines += [
         "",
         "## Median latency per applicant block",
@@ -204,6 +225,14 @@ def _report(root: Path, *, groups: dict[int, list[dict[str, str]]], scale: float
         "| Parent encrypt | Mask encrypt | PAYMENT_DIFF | Encrypted COUNT | Encrypted SUM | Audit decrypt | HE online |",
         "|---:|---:|---:|---:|---:|---:|---:|",
         f"| {parent_encrypt:.9f} | {mask_encrypt:.9f} | {feature:.9f} | {count:.9f} | {reduction:.9f} | {decrypt:.9f} | {online:.9f} |",
+        "",
+        "## Python baseline comparison",
+        "",
+        "Python timing is the matching in-memory per-group operation: calculate `PAYMENT_DIFF`, count valid rows, and sum the differences. CSV read, client grouping/padding, and DataFrame construction are excluded from both Python and HE timing.",
+        "",
+        "| Python workload median (s) | HE calculation median (s) | HE calc ÷ Python | HE online median (s) | HE online ÷ Python |",
+        "|---:|---:|---:|---:|---:|",
+        f"| {python_workload:.9f} | {he_calculation:.9f} | {he_calculation / python_workload:.2f}× | {online:.9f} | {online / python_workload:.2f}× |",
         "",
         f"Acceptance uses relative tolerance `{tolerance:g}` for the sum and absolute tolerance `{tolerance:g}` for count. Raw result rows: `heir_results.csv`, `audited_results.csv`, `execution.json`.",
     ]
@@ -237,6 +266,7 @@ def main() -> None:
             raise FileExistsError(f"refusing to overwrite: {root}; pass --overwrite")
         shutil.rmtree(root)
     root.mkdir(parents=True)
+    _python_baseline(groups, args.repetitions, root / "python_results.csv")
     manifest = json.loads((args.generated_dir.resolve() / "generation_manifest.json").read_text(encoding="utf-8"))
     entries = {str(item["entry_function"]): item for item in manifest["kernels"]}
     needed = {"encrypted_subtract": "sub", "encrypted_sum": "sum"}
