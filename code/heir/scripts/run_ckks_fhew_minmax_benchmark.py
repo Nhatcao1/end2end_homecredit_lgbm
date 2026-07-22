@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import argparse
 import json
-import random
+import math
 import shutil
 import sys
 import time
@@ -30,7 +30,8 @@ from code.heir.scripts.run_ckks_fhew_comparison_benchmark import CMAKE
 from code.heir.scripts.run_payment_features_ciphertext_demo import run
 
 
-DEFAULT_VALUE_COUNT = 128
+DEFAULT_PREPARED_BATCH = Path("data/prepared/installments_columns/batches/batch_000000.csv")
+DEFAULT_VALUE_COUNT = 100
 
 
 RUNNER = r'''
@@ -211,13 +212,38 @@ def _pad_with_real_candidate(values: list[float]) -> tuple[list[float], dict[str
     }
 
 
-def _generated_values(count: int, low: float, high: float, seed: int) -> list[float]:
+def _read_prepared_values(path: Path, column: str, count: int) -> list[float]:
+    """Load a real sanitized parent column from a prepared installments batch."""
     if count < 1:
         raise ValueError("value count must be positive")
-    if not low < high:
-        raise ValueError("value-low must be smaller than value-high")
-    generator = random.Random(seed)
-    return [generator.uniform(low, high) for _ in range(count)]
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"prepared installments batch is missing: {path}; run "
+            "prepare_full_installments_columns.py first or pass --prepared-batch"
+        )
+    values: list[float] = []
+    for row in read_csv(path):
+        if column not in row:
+            raise ValueError(f"prepared batch does not contain requested column {column!r}")
+        if "valid" in row and float(row["valid"]) != 1.0:
+            continue
+        values.append(float(row[column]))
+        if len(values) == count:
+            break
+    if len(values) != count:
+        raise ValueError(f"prepared batch contains only {len(values)} valid values; requested {count}")
+    return values
+
+
+def _resolve_input_scale(values: list[float], requested_scale: float) -> tuple[float, str]:
+    if requested_scale > 0:
+        return requested_scale, "caller-supplied public encoding scale"
+    if requested_scale < 0:
+        raise ValueError("input scale must be zero (auto) or positive")
+    max_abs = max(abs(value) for value in values)
+    # Power-of-two scale strictly larger than twice the observed magnitude.
+    # This is client-side representation calibration, not a min/max result.
+    return float(1 << max(1, math.ceil(math.log2(max(1.0, 2.0 * max_abs + 1.0))))), "auto-selected public encoding scale from loaded input range"
 
 
 def _report(result: dict[str, object]) -> str:
@@ -235,10 +261,13 @@ value.
 
 | Rule | Value |
 |---|---:|
+| Data source | `{result["input_source"]["kind"]}` — `{result["input_source"]["path"]}` |
+| Parent column | `{result["input_source"]["column"]}` |
 | Real candidates | {result["packing"]["real_candidate_count"]} |
 | Encrypted candidates | {result["packing"]["encrypted_candidate_count"]} (power of two) |
 | Duplicate padding lanes | {result["packing"]["padding_count"]} |
 | Public input scale | {execution["input_scale"]} |
+| Scale policy | {result["input_scale_policy"]} |
 | Encoded interval | `(-0.5, 0.5]` |
 
 The owner divides raw values by the public scale **only while encoding the
@@ -281,12 +310,12 @@ def main() -> None:
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--openfhe-dir", default="/usr/local/lib/OpenFHE")
-    parser.add_argument("--input-csv", type=Path, help="optional one-column CSV with header 'value'; replaces generated values")
-    parser.add_argument("--value-count", type=int, default=DEFAULT_VALUE_COUNT, help="generated raw candidate count; e.g. 100 or 1000")
-    parser.add_argument("--value-low", type=float, default=-100.0, help="inclusive synthetic-data lower bound")
-    parser.add_argument("--value-high", type=float, default=100.0, help="exclusive synthetic-data upper bound")
-    parser.add_argument("--seed", type=int, default=20260722, help="deterministic synthetic-data seed")
-    parser.add_argument("--input-scale", type=float, default=1024.0)
+    source = parser.add_mutually_exclusive_group()
+    source.add_argument("--prepared-batch", type=Path, default=DEFAULT_PREPARED_BATCH, help="sanitized installments batch created by prepare_full_installments_columns.py")
+    source.add_argument("--input-csv", type=Path, help="optional one-column real-data CSV with header 'value'")
+    parser.add_argument("--column", default="AMT_PAYMENT", choices=("AMT_PAYMENT", "AMT_INSTALMENT"), help="prepared installments parent column")
+    parser.add_argument("--value-count", type=int, default=DEFAULT_VALUE_COUNT, help="real values selected from the source; e.g. 100 or 1000")
+    parser.add_argument("--input-scale", type=float, default=0.0, help="public encoding scale; 0 selects a power-of-two scale from loaded values")
     args = parser.parse_args()
     root = args.output_dir.resolve()
     if root.exists():
@@ -294,8 +323,15 @@ def main() -> None:
             raise FileExistsError(f"refusing to overwrite: {root}; pass --overwrite")
         shutil.rmtree(root)
     root.mkdir(parents=True)
-    values = _read_values(args.input_csv) if args.input_csv else _generated_values(args.value_count, args.value_low, args.value_high, args.seed)
-    _validate(values, args.input_scale)
+    if args.input_csv:
+        values = _read_values(args.input_csv)
+        source_info: dict[str, object] = {"kind": "one-column real-data CSV", "path": str(args.input_csv.resolve()), "column": "value"}
+    else:
+        prepared_batch = args.prepared_batch.resolve()
+        values = _read_prepared_values(prepared_batch, args.column, args.value_count)
+        source_info = {"kind": "prepared installments batch", "path": str(prepared_batch), "column": args.column, "requested_real_rows": args.value_count}
+    input_scale, scale_policy = _resolve_input_scale(values, args.input_scale)
+    _validate(values, input_scale)
     padded_values, packing = _pad_with_real_candidate(values)
     inputs = root / "plaintext_inputs"
     write_values(inputs / "raw_values.csv", values)
@@ -314,22 +350,22 @@ def main() -> None:
     ciphertexts.mkdir()
     metrics_path = root / "execution.json"
     run([
-        str((build / "minmax_runner").resolve()), str((inputs / "padded_values.csv").resolve()), str(args.input_scale), str(packing["encrypted_candidate_count"]),
+        str((build / "minmax_runner").resolve()), str((inputs / "padded_values.csv").resolve()), str(input_scale), str(packing["encrypted_candidate_count"]),
         str((ciphertexts / "encrypted_min.ct").resolve()), str((ciphertexts / "encrypted_max.ct").resolve()), str(metrics_path.resolve()),
     ], work)
     execution = json.loads(metrics_path.read_text(encoding="utf-8"))
     results = [
-        {"aggregate": "min", "python": python_min, "he": execution["min_normalized"] * args.input_scale,
-         "absolute_error": abs(python_min - execution["min_normalized"] * args.input_scale), "status": "encrypted CKKS↔FHEW reduction"},
-        {"aggregate": "max", "python": python_max, "he": execution["max_normalized"] * args.input_scale,
-         "absolute_error": abs(python_max - execution["max_normalized"] * args.input_scale), "status": "encrypted CKKS↔FHEW reduction"},
+        {"aggregate": "min", "python": python_min, "he": execution["min_normalized"] * input_scale,
+         "absolute_error": abs(python_min - execution["min_normalized"] * input_scale), "status": "encrypted CKKS↔FHEW reduction"},
+        {"aggregate": "max", "python": python_max, "he": execution["max_normalized"] * input_scale,
+         "absolute_error": abs(python_max - execution["max_normalized"] * input_scale), "status": "encrypted CKKS↔FHEW reduction"},
     ]
     write_csv(root / "minmax_audit.csv", list(results[0]), results)
     result: dict[str, object] = {
         "status": "openfhe_ckks_fhew_minmax_executed",
         "scope": "literal packed encrypted minimum and maximum reductions",
-        "input_source": str(args.input_csv.resolve()) if args.input_csv else "deterministic generated values",
-        "synthetic_generation": None if args.input_csv else {"count": args.value_count, "low": args.value_low, "high": args.value_high, "seed": args.seed},
+        "input_source": source_info,
+        "input_scale_policy": scale_policy,
         "packing": packing,
         "python_seconds": python_seconds,
         "build_seconds": {"configure": configure_seconds, "build": build_seconds},

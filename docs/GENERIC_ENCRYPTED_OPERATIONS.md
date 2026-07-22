@@ -83,25 +83,40 @@ ciphertexts.
 ## Literal encrypted min/max: separate reduction benchmark
 
 Min/max is not a threshold predicate. It reduces one encrypted vector through
-an encrypted comparison-and-selection tree. The benchmark takes a raw column
-chunk—for example 100 or 1,000 values—and normalizes it into the OpenFHE
+an encrypted comparison-and-selection tree. The benchmark loads a **real
+sanitized parent column** from the prepared installments batches—for example
+100 or 1,000 `AMT_PAYMENT` values—and normalizes it into the OpenFHE
 unit-circle contract during CKKS encoding. A non-power-of-two count is padded
 by repeating a genuine candidate: 100 values become 128 encrypted lanes; 1,000
 become 1,024. It produces encrypted minimum and maximum ciphertexts, then
 decrypts them solely for the Python accuracy report.
+
+Create the prepared source once if it is not already present:
+
+```bash
+python3 code/heir/scripts/prepare_full_installments_columns.py \
+  --input-csv data/home_credit/installments_payments.csv \
+  --output-dir data/prepared/installments_columns \
+  --vector-size 8192 \
+  --overwrite
+```
 
 ```bash
 python3 code/heir/scripts/run_ckks_fhew_minmax_benchmark.py \
   --output-dir benchmark_runs/ckks_fhew_minmax_01 \
   --overwrite \
   --value-count 100 \
-  --input-scale 1024 \
   --openfhe-dir /usr/local/lib/OpenFHE
 ```
 
 For the 1,000-candidate run, change only `--value-count 1000`; it encrypts
-1,024 lanes. To use real data, pass `--input-csv /path/to/column.csv`; it must
-have a `value` column. The report is
+1,024 lanes. By default it reads
+`data/prepared/installments_columns/batches/batch_000000.csv` and the
+`AMT_PAYMENT` column. Use `--column AMT_INSTALMENT` to select the other prepared
+parent column, or pass `--input-csv /path/to/column.csv` for a different real
+one-column source. `--input-scale 0` (the default) records an auto-selected
+public power-of-two encoding scale based on the loaded values; provide a
+positive scale when using a fixed public schema range. The report is
 `benchmark_runs/ckks_fhew_minmax_01/REPORT.md`. Ties are valid for min/max;
 only the discarded argmin/argmax identity is non-unique. This is a
 single-encrypted-vector capability/accuracy benchmark, not a claim that min/max

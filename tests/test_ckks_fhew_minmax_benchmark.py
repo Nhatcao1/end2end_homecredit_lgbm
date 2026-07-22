@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from code.heir.scripts.run_ckks_fhew_minmax_benchmark import (
     RUNNER,
-    _generated_values,
     _pad_with_real_candidate,
+    _read_prepared_values,
+    _resolve_input_scale,
     _validate,
 )
 
@@ -19,8 +22,16 @@ class CkksFhewMinMaxBenchmarkTest(unittest.TestCase):
         self.assertIn("if (argc != 7)", RUNNER)
         self.assertIn("numValues <= 4096", RUNNER)
 
-    def test_100_real_values_are_padded_to_128_by_repeating_a_real_candidate(self) -> None:
-        values = _generated_values(100, -100.0, 100.0, 7)
+    def test_100_prepared_real_values_are_padded_to_128_by_repeating_a_real_candidate(self) -> None:
+        with TemporaryDirectory() as temporary:
+            path = Path(temporary) / "batch.csv"
+            path.write_text(
+                "AMT_PAYMENT,AMT_INSTALMENT,valid\n"
+                + "\n".join(f"{index + 0.5},{index + 1.0},1" for index in range(100))
+                + "\n0,0,0\n",
+                encoding="utf-8",
+            )
+            values = _read_prepared_values(path, "AMT_PAYMENT", 100)
         _validate(values, 1024.0)
         padded, packing = _pad_with_real_candidate(values)
         self.assertEqual(len(padded), 128)
@@ -28,6 +39,11 @@ class CkksFhewMinMaxBenchmarkTest(unittest.TestCase):
         self.assertEqual(padded[-1], values[0])
         self.assertEqual(min(padded), min(values))
         self.assertEqual(max(padded), max(values))
+
+    def test_auto_scale_is_public_power_of_two_that_fits_loaded_values(self) -> None:
+        scale, policy = _resolve_input_scale([-10.0, 1000.0], 0.0)
+        self.assertEqual(scale, 2048.0)
+        self.assertIn("auto-selected", policy)
 
     def test_ties_are_valid_but_out_of_range_inputs_are_rejected(self) -> None:
         _validate([1.0, 1.0, 2.0, 3.0], 1024.0)
