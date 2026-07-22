@@ -47,6 +47,11 @@ class ValidateInstallmentsPsiLeftJoinTest(unittest.TestCase):
             self.assertEqual(result["status"], "PASS")
             self.assertEqual(result["checks"]["plaintext_left_join_matched_applicants"], 1)
             self.assertEqual(result["checks"]["psi_bridge_blank_sender_slots"], 2)
+            self.assertEqual(result["checks"]["true_positives"], 1)
+            self.assertEqual(result["checks"]["false_positives"], 0)
+            self.assertEqual(result["checks"]["false_negatives"], 0)
+            self.assertEqual(result["checks"]["precision"], 1.0)
+            self.assertEqual(result["checks"]["recall"], 1.0)
 
 
 if __name__ == "__main__":

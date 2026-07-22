@@ -113,6 +113,11 @@ def validate(
     receiver_keys = set(receiver.values())
     bridge_matches = {key for key in sender.values() if key}
     bridge_blank_slots = sum(not key for key in sender.values())
+    true_positives = len(expected_matches.intersection(bridge_matches))
+    false_positives = len(bridge_matches.difference(expected_matches))
+    false_negatives = len(expected_matches.difference(bridge_matches))
+    precision = true_positives / (true_positives + false_positives) if (true_positives + false_positives) else 1.0
+    recall = true_positives / (true_positives + false_negatives) if (true_positives + false_negatives) else 1.0
     receiver_layout_matches_source = receiver_keys == set(application_keys) and len(receiver) == len(application_keys)
     sender_slot_alignment = (
         set(receiver) == set(sender)
@@ -134,6 +139,11 @@ def validate(
             "psi_bridge_matched_applicants": len(bridge_matches),
             "plaintext_left_join_unmatched_applicants": len(application_keys) - len(expected_matches),
             "psi_bridge_blank_sender_slots": bridge_blank_slots,
+            "true_positives": true_positives,
+            "false_positives": false_positives,
+            "false_negatives": false_negatives,
+            "precision": precision,
+            "recall": recall,
             "receiver_layout_matches_train_test_union": receiver_layout_matches_source,
             "sender_slots_match_receiver_positions": sender_slot_alignment,
             "matched_applicant_set_matches_plaintext": expected_matches == bridge_matches,
@@ -165,6 +175,19 @@ membership/slot check must pass.
 | Unmatched / blank sender slots | {checks['plaintext_left_join_unmatched_applicants']} | {checks['psi_bridge_blank_sender_slots']} | {'PASS' if checks['plaintext_left_join_unmatched_applicants'] == checks['psi_bridge_blank_sender_slots'] else 'FAIL'} |
 | Sender slot points to the same receiver applicant | — | — | {'PASS' if checks['sender_slots_match_receiver_positions'] else 'FAIL'} |
 | TARGET excluded from sender exchange | — | — | {'PASS' if checks['target_excluded_from_sender_exchange'] else 'FAIL'} |
+
+## Exact PSI join accuracy
+
+| Metric | Value |
+|---|---:|
+| True positives | {checks['true_positives']} |
+| False positives | {checks['false_positives']} |
+| False negatives | {checks['false_negatives']} |
+| Precision | {checks['precision']:.6f} |
+| Recall | {checks['recall']:.6f} |
+
+For this exact key join, acceptance requires `false positives = 0`, `false
+negatives = 0`, precision `= 1.0`, and recall `= 1.0`.
 
 Overall result: **{result['status']}**.
 
