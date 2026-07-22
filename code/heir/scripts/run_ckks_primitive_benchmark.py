@@ -126,13 +126,14 @@ def report(he_csv: Path, python_csv: Path, execution_json: Path, output: Path) -
     he = grouped(he_csv, "evaluate_seconds"); py = grouped(python_csv, "python_seconds")
     encryption = grouped(he_csv, "encrypt_seconds"); decrypt = grouped(he_csv, "decrypt_seconds"); online = grouped(he_csv, "online_seconds")
     execution = json.loads(execution_json.read_text(encoding="utf-8"))
-    lines = ["# CKKS primitive benchmark", "", f"One CKKS context/key set setup: `{execution['setup_seconds']:.9f}` s. Runtime ring dimension: `{execution['ring_dimension']}`. Requested slots: `{execution['requested_slot_count']}`. `OMP_NUM_THREADS=1`.", "", "| Calculation | Values | Decimals | Python calculation (median s) | HE evaluation (median s) | HE encryption (median s) | HE decryption (median s) | HE online: encrypt + evaluate + decrypt (median s) |", "|---|---:|---:|---:|---:|---:|---:|---:|"]
+    lines = ["# CKKS primitive benchmark", "", f"One CKKS context/key set setup: `{execution['setup_seconds']:.9f}` s. Runtime ring dimension: `{execution['ring_dimension']}`. Requested slots: `{execution['requested_slot_count']}`. `OMP_NUM_THREADS=1`. Setup is a shared one-time cost and is excluded from the operation slowdown columns.", "", "| Calculation | Values | Decimals | Python calculation (median s) | HE evaluation (median s) | HE encryption (median s) | HE decryption (median s) | HE online: encrypt + evaluate + decrypt (median s) | Eval ÷ Python | Online ÷ Python |", "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|"]
     for key in sorted(he):
         label = "CT×CT" if key[0] == "CTxCT" else key[0]
-        lines.append(f"| {label} | {key[1]} | {key[2]} | {statistics.median(py[key]):.9f} | {statistics.median(he[key]):.9f} | {statistics.median(encryption[key]):.9f} | {statistics.median(decrypt[key]):.9f} | {statistics.median(online[key]):.9f} |")
+        python_seconds = statistics.median(py[key]); evaluation_seconds = statistics.median(he[key]); online_seconds = statistics.median(online[key])
+        lines.append(f"| {label} | {key[1]} | {key[2]} | {python_seconds:.9f} | {evaluation_seconds:.9f} | {statistics.median(encryption[key]):.9f} | {statistics.median(decrypt[key]):.9f} | {online_seconds:.9f} | {evaluation_seconds / python_seconds:.2f}× | {online_seconds / python_seconds:.2f}× |")
     with he_csv.open(newline="", encoding="utf-8") as handle:
         errors = [float(row["max_abs_error"]) for row in csv.DictReader(handle)]
-    lines += ["", "Python calculation is compared only with HE evaluation. HE setup, encryption, and decryption are reported separately and are included in HE online latency; they are not treated as Python-calculation slowdown.", "", f"Acceptance: max absolute error ≤ 1e-6. Observed maximum: `{max(errors):.12g}`.", "", "Raw timing and accuracy rows: `heir_results.csv`, `python_results.csv`."]
+    lines += ["", "`Eval ÷ Python` compares only the encrypted arithmetic with the Python arithmetic. `Online ÷ Python` includes encryption and audit decryption. The shared setup cost is reported above but not amortized into either ratio.", "", f"Acceptance: max absolute error ≤ 1e-6. Observed maximum: `{max(errors):.12g}`.", "", "Raw timing and accuracy rows: `heir_results.csv`, `python_results.csv`."]
     output.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
