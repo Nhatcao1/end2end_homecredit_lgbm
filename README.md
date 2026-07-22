@@ -51,3 +51,5 @@ single-owner runs should continue to join identifiers directly and skip PSI.
 The server workflow is documented in `deploy/secretflow_psi/README.md`. Its
 security boundary and current acceptance status are recorded in
 `docs/PSI_THREAT_MODEL.md` and `docs/PSI_BENCHMARK_CRITERIA.md`.
+For the exact `installments_payments` receiver-left join, use
+`docs/INSTALLMENTS_PSI_RUNBOOK.md`.
