@@ -53,3 +53,5 @@ security boundary and current acceptance status are recorded in
 `docs/PSI_THREAT_MODEL.md` and `docs/PSI_BENCHMARK_CRITERIA.md`.
 For the exact `installments_payments` receiver-left join, use
 `docs/INSTALLMENTS_PSI_RUNBOOK.md`.
+For the small complete post-PSI `PAYMENT_DIFF_{MAX,MEAN,SUM,VAR}` proof, use
+`docs/PAYMENT_DIFF_POST_PSI_E2E.md`.
