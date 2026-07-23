@@ -129,9 +129,14 @@ int main(int argc, char** argv) {
     context = encrypted_multiply__configure_crypto_context(context, keys.secretKey);
     context = encrypted_sum__configure_crypto_context(context, keys.secretKey);
     context = encrypted_subtract__configure_crypto_context(context, keys.secretKey);
-    SchSwchParams switchParameters; switchParameters.SetSecurityLevelCKKS(HEStd_NotSet); switchParameters.SetSecurityLevelFHEW(TOY); switchParameters.SetCtxtModSizeFHEWLargePrec(25); switchParameters.SetNumSlotsCKKS(slots); switchParameters.SetNumValues(slots); switchParameters.SetComputeArgmin(false);
+    // OpenFHE's MAX reduction needs the comparison-tree rotation keys. Its
+    // key generator emits those only when ComputeArgmin is enabled. The
+    // returned argmax ciphertext is deliberately discarded below; no index is
+    // decrypted or retained by this workload.
+    SchSwchParams switchParameters; switchParameters.SetSecurityLevelCKKS(HEStd_NotSet); switchParameters.SetSecurityLevelFHEW(TOY); switchParameters.SetCtxtModSizeFHEWLargePrec(25); switchParameters.SetNumSlotsCKKS(slots); switchParameters.SetNumValues(slots); switchParameters.SetComputeArgmin(true);
     auto lweSecretKey = context->EvalSchemeSwitchingSetup(switchParameters);
-    context->EvalSchemeSwitchingKeyGen(keys, lweSecretKey); context->EvalCompareSwitchPrecompute(1, 1, true);
+    context->EvalSchemeSwitchingKeyGen(keys, lweSecretKey);
+    context->EvalCompareSwitchPrecompute(1, 1, true);
     const double setupSeconds = seconds(setupStart);
     std::vector<Final> final; final.reserve(groups.size());
     for (const auto& item : groups) {
@@ -152,7 +157,7 @@ int main(int argc, char** argv) {
       const double online = item.encrypt + item.feature + item.square + item.sum + item.variance + item.maximum;
       output << item.id << ',' << item.count << ',' << item.encrypt << ',' << item.feature << ',' << item.square << ',' << item.sum << ',' << item.variance << ',' << item.maximum << ',' << audit << ',' << online << ',' << maximum << ',' << mean << ',' << total << ',' << variance << '\n';
     }
-    std::ofstream meta(argv[4]); meta << std::setprecision(17) << "{\"setup_seconds\":" << setupSeconds << ",\"groups\":" << groups.size() << ",\"logical_slots\":" << slots << ",\"ring_dimension\":" << context->GetRingDimension() << ",\"one_crypto_context\":true,\"context_origin\":\"HEIR generated CKKS multiply context; subtract and sum configured on the same instance\",\"maximum_route\":\"FHEW switching keys attached to that same CryptoContext; no second CKKS encryption\",\"pipeline\":\"CKKS HEIR subtract/multiply/sum plus same-context CKKS-to-FHEW maximum; audit decrypt only at end\"}\n";
+    std::ofstream meta(argv[4]); meta << std::setprecision(17) << "{\"setup_seconds\":" << setupSeconds << ",\"groups\":" << groups.size() << ",\"logical_slots\":" << slots << ",\"ring_dimension\":" << context->GetRingDimension() << ",\"one_crypto_context\":true,\"compute_argmin_keys_generated\":true,\"argmax_artifact_retained\":false,\"context_origin\":\"HEIR generated CKKS multiply context; subtract and sum configured on the same instance\",\"maximum_route\":\"FHEW switching comparison-tree keys attached to that same CryptoContext; no second CKKS encryption\",\"pipeline\":\"CKKS HEIR subtract/multiply/sum plus same-context CKKS-to-FHEW maximum; audit decrypt only at end\"}\n";
     return 0;
   } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }

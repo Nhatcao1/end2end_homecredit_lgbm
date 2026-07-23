@@ -19,6 +19,13 @@ def load_module():
 
 
 class PaymentDiffEndToEndPreparationTest(unittest.TestCase):
+    def test_same_context_max_route_generates_comparison_tree_keys(self) -> None:
+        module = load_module()
+        self.assertIn("switchParameters.SetComputeArgmin(true)", module.RUNNER)
+        self.assertIn("argmax_artifact_retained", module.RUNNER)
+        self.assertIn("EvalMaxSchemeSwitching(maxDiff[0]", module.RUNNER)
+        self.assertIn("one_crypto_context", module.RUNNER)
+
     def test_uses_only_matched_psi_groups_and_keeps_parent_columns(self) -> None:
         module = load_module()
         with tempfile.TemporaryDirectory() as temporary:

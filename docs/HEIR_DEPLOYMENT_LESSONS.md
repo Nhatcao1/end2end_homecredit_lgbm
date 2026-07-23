@@ -19,6 +19,7 @@ HEIR/OpenFHE version.
 | `EvalBootstrapSetup operation has not been enabled` | HEIR inserted bootstrap in the deep finalizer, but the shared context was created by a shallow kernel without FHE/bootstrap setup. | If bootstrap is present, create/configure the shared context from the bootstrap/deepest stage first. Treat it as a separate expensive deployment lane. |
 | Generated runner exits with `-9` and no output | The OS/container sent `SIGKILL`, normally because bootstrap setup/key generation exhausted the server memory limit. | Do not retry the same bootstrap run blindly. Check memory/OOM logs, then move the bootstrap experiment to a larger machine or keep encrypted sufficient statistics (`count`, `sum`, `sum_squares`) as the terminal server-side output. |
 | CKKS serialization-registration errors | Required OpenFHE serialization headers/types were not registered in the runner. | Include the CKKS serialization headers in runners that write ciphertext artifacts and verify serialization before full execution. |
+| `EvalFastRotationExt(): EvalKey for index [...] is not found` during CKKS↔FHEW MIN/MAX | `SchSwchParams.SetComputeArgmin(false)` suppresses the comparison-tree rotation keys, although `EvalMaxSchemeSwitching` still needs them internally. | Set `ComputeArgmin(true)` before `EvalSchemeSwitchingKeyGen`; keep only result `[0]` (encrypted MAX) and discard the returned encrypted argmax. This stays in the same context and does not decrypt/re-encrypt the feature. |
 
 ## Full deployment preflight
 
