@@ -22,10 +22,11 @@ from typing import Any, Literal
 from code.heir.kernels.fixed_count_statistics import (
     fixed_count_mean_mlir,
     fixed_count_sum_mlir,
+    fixed_count_variance_mlir,
 )
 
 
-Operation = Literal["sum", "mean"]
+Operation = Literal["sum", "mean", "variance"]
 
 
 def _load_official_heir_compile() -> Any:
@@ -93,6 +94,8 @@ class OfficialCkksAggregate:
             source = fixed_count_sum_mlir(self.width, self.valid_count)
         elif self.operation == "mean":
             source = fixed_count_mean_mlir(self.width, self.valid_count)
+        elif self.operation == "variance":
+            source = fixed_count_variance_mlir(self.width, self.valid_count)
         else:
             raise ValueError(f"unsupported aggregate: {self.operation}")
 
@@ -108,7 +111,9 @@ class OfficialCkksAggregate:
         """Return the exact source compiled by official HEIR."""
         if self.operation == "sum":
             return fixed_count_sum_mlir(self.width, self.valid_count)
-        return fixed_count_mean_mlir(self.width, self.valid_count)
+        if self.operation == "mean":
+            return fixed_count_mean_mlir(self.width, self.valid_count)
+        return fixed_count_variance_mlir(self.width, self.valid_count)
 
     def setup(self) -> None:
         """Create the OpenFHE context and key material once."""
@@ -177,6 +182,16 @@ def compile_mean(
 ) -> OfficialCkksAggregate:
     """Compile a reusable official HEIR CKKS MEAN program."""
     return OfficialCkksAggregate("mean", width, valid_count, debug)
+
+
+def compile_variance(
+    *,
+    width: int,
+    valid_count: int,
+    debug: bool = False,
+) -> OfficialCkksAggregate:
+    """Compile a reusable official HEIR CKKS sample-variance program."""
+    return OfficialCkksAggregate("variance", width, valid_count, debug)
 
 
 def compile_max(*, width: int, valid_count: int, debug: bool = False) -> None:

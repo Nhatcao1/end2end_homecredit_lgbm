@@ -13,6 +13,7 @@ from code.heir.python_api.official_ckks_aggregates import (
     compile_max,
     compile_mean,
     compile_sum,
+    compile_variance,
 )
 
 
@@ -42,11 +43,24 @@ class HeirPyCkksAggregateApiTest(unittest.TestCase):
         with patch(target, return_value=fake_compile):
             sum_program = compile_sum(width=8, valid_count=3)
             mean_program = compile_mean(width=8, valid_count=3)
+            variance_program = compile_variance(width=8, valid_count=3)
 
-        self.assertEqual(["ckks", "ckks"], [call["scheme"] for call in calls])
+        self.assertEqual(
+            ["ckks", "ckks", "ckks"],
+            [call["scheme"] for call in calls],
+        )
         self.assertIn("func.func @fixed_count_sum", sum_program.mlir)
         self.assertIn("func.func @fixed_count_mean", mean_program.mlir)
-        self.assertNotIn("-> (f64, f64)", sum_program.mlir + mean_program.mlir)
+        self.assertIn(
+            "func.func @fixed_count_variance",
+            variance_program.mlir,
+        )
+        self.assertIn("return %sum_result : f64", sum_program.mlir)
+        self.assertIn("return %mean : f64", mean_program.mlir)
+        self.assertIn(
+            "return %sample_variance : f64",
+            variance_program.mlir,
+        )
 
     def test_exact_max_is_not_faked_as_ckks_arithmetic(self) -> None:
         with self.assertRaisesRegex(NotImplementedError, "CKKS-to-FHEW"):

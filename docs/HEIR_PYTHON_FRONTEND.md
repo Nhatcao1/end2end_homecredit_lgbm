@@ -53,9 +53,10 @@ Inputs are zero-padded to the width before encryption.
 |---|---|---|
 | SUM | official `compile(mlir_str=..., scheme="ckks")` | implemented |
 | MEAN | official compiled SUM × public `1/N` | implemented |
+| VAR | official encrypted SUM/SQSUM sample-variance circuit | implemented |
 | Multiple encrypted outputs | frontend issue `#1162` | not supported in HEIR 2026.7.1 |
 | Ciphertext serialization | backend issue `#1119` | not exposed in HEIR 2026.7.1 |
-| Exact MAX/MIN | OpenFHE CKKS↔FHEW switching | not expressible as a normal HEIR Python CKKS function |
+| Exact MAX/MIN | official OpenFHE Python CKKS↔FHEW switching | separate Python context implemented |
 
 SUM and MEAN are therefore separate official compiled objects. Their `eval`
 methods return live ciphertexts, but one object's ciphertext must not be passed
@@ -63,3 +64,27 @@ to the other object's context. If one shared context must return SUM, MEAN,
 VAR, and MAX together, keep the generated OpenFHE C++ runtime and expose it to
 Python through a dedicated binding; the official frontend cannot represent
 that interface yet.
+
+## VAR/MIN/MAX trial
+
+Install the official OpenFHE Python wrapper in addition to `heir_py`:
+
+```bash
+python3 -m pip install "openfhe==1.5.1.0"
+```
+
+Then run a small trial:
+
+```bash
+python3 code/heir/scripts/run_official_python_var_minmax_trial.py \
+  --values 160 -100 0 60 250 \
+  --width 8 \
+  --repetitions 1 \
+  --ring-dimension 16384 \
+  --output-dir benchmark_runs/official_python_var_minmax_trial \
+  --overwrite
+```
+
+`VAR` and `MIN/MAX` are deliberately reported as separate contexts. The
+official HEIR Python runtime and official OpenFHE Python wrapper do not expose
+a cross-runtime ciphertext interchange contract.
