@@ -13,7 +13,7 @@ class RealPaymentDiffSumMeanBenchmarkTest(unittest.TestCase):
         self.assertIn('#include "group_statistics.h"', benchmark.RUNNER)
         self.assertIn("heir::runtime::add_bundles", benchmark.RUNNER)
         self.assertIn("heir::runtime::mean_from_sum(context, totalSum, count)", benchmark.RUNNER)
-        self.assertIn("auto encryptedValid = encrypted_sum__encrypt__arg0", benchmark.RUNNER)
+        self.assertNotIn("encryptedValid", benchmark.RUNNER)
 
     def test_mean_context_depth_patch_is_explicit(self):
         patched, original = benchmark.patch_mean_depth("parameters.SetMultiplicativeDepth(1);", 4)

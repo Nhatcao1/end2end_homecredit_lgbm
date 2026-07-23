@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Benchmark encrypted PAYMENT_DIFF count, sum, and mean on real inputs.
+"""Benchmark encrypted PAYMENT_DIFF sum and mean on real inputs.
 
 The client supplies sanitized ``AMT_INSTALMENT`` and ``AMT_PAYMENT`` only.
 The runner derives PAYMENT_DIFF after encrypting those parents.  It then uses
 the encrypted feature once for SUM and derives MEAN from that encrypted SUM.
-COUNT is an independent encrypted reduction of the padded 0/1 validity mask.
+The sanitized input row count is public metadata used for the final ``1/N``.
 """
 from __future__ import annotations
 
@@ -87,31 +87,29 @@ int main(int argc, char** argv) {
     std::ofstream meta(argv[5]); meta << std::setprecision(17) << "{\"setup_seconds\":" << seconds(setup)
       << ",\"input_scale\":" << scale << ",\"logical_slots\":" << slots << ",\"ckks_slot_capacity\":" << context->GetRingDimension() / 2 << "}\n";
     std::ofstream out(argv[4]); out << std::setprecision(17)
-      << "repetition,ciphertext_chunks,parent_encrypt_seconds,mask_encrypt_seconds,feature_seconds,branch_copy_seconds,count_reduce_seconds,sum_reduce_seconds,merge_seconds,mean_scale_seconds,audit_decrypt_seconds,online_seconds,he_count,count_abs_error,he_sum,sum_abs_error,he_mean,mean_abs_error\n";
+      << "repetition,ciphertext_chunks,parent_encrypt_seconds,feature_seconds,branch_copy_seconds,sum_reduce_seconds,merge_seconds,mean_scale_seconds,audit_decrypt_seconds,online_seconds,he_sum,sum_abs_error,he_mean,mean_abs_error\n";
     for (int repetition = 1; repetition <= repetitions; ++repetition) {
-      double parentEncrypt = 0.0, maskEncrypt = 0.0, feature = 0.0, copies = 0.0, countReduce = 0.0, sumReduce = 0.0, merge = 0.0;
-      bool first = true; Bundle totalCount, totalSum; size_t chunks = 0;
+      double parentEncrypt = 0.0, feature = 0.0, copies = 0.0, sumReduce = 0.0, merge = 0.0;
+      bool first = true; Bundle totalSum; size_t chunks = 0;
       for (size_t start = 0; start < count; start += slots, ++chunks) {
-        auto installment = chunk(parents.installment, start, slots), payment = chunk(parents.payment, start, slots); std::vector<double> valid(slots, 0.0);
-        const size_t used = std::min(slots, static_cast<size_t>(count - start)); for (size_t i = 0; i < used; ++i) { installment[i] /= scale; payment[i] /= scale; valid[i] = 1.0; }
+        auto installment = chunk(parents.installment, start, slots), payment = chunk(parents.payment, start, slots);
+        const size_t used = std::min(slots, static_cast<size_t>(count - start)); for (size_t i = 0; i < used; ++i) { installment[i] /= scale; payment[i] /= scale; }
         auto started = std::chrono::steady_clock::now(); auto encryptedInstallment = encrypted_subtract__encrypt__arg0(context, installment, keys.publicKey); auto encryptedPayment = encrypted_subtract__encrypt__arg1(context, payment, keys.publicKey); parentEncrypt += seconds(started);
-        started = std::chrono::steady_clock::now(); auto encryptedValid = encrypted_sum__encrypt__arg0(context, valid, keys.publicKey); maskEncrypt += seconds(started);
         started = std::chrono::steady_clock::now(); auto paymentDiff = encrypted_subtract(context, encryptedInstallment, encryptedPayment); feature += seconds(started);
         // PAYMENT_DIFF is copied into its SUM branch. MEAN deliberately uses
         // the final encrypted SUM below; it never recomputes the feature.
         started = std::chrono::steady_clock::now(); auto diffForSum = paymentDiff; copies += seconds(started);
-        started = std::chrono::steady_clock::now(); auto partialCount = encrypted_sum(context, encryptedValid); countReduce += seconds(started);
         started = std::chrono::steady_clock::now(); auto partialSum = encrypted_sum(context, diffForSum); sumReduce += seconds(started);
         started = std::chrono::steady_clock::now();
-        if (first) { totalCount = std::move(partialCount); totalSum = std::move(partialSum); first = false; }
-        else { totalCount = heir::runtime::add_bundles(context, totalCount, partialCount); totalSum = heir::runtime::add_bundles(context, totalSum, partialSum); }
+        if (first) { totalSum = std::move(partialSum); first = false; }
+        else { totalSum = heir::runtime::add_bundles(context, totalSum, partialSum); }
         merge += seconds(started);
       }
-      require(totalCount.size() == 1 && totalSum.size() == 1, "expected scalar encrypted reductions");
+      require(totalSum.size() == 1, "expected one encrypted scalar sum");
       auto started = std::chrono::steady_clock::now(); auto mean = heir::runtime::mean_from_sum(context, totalSum, count); const double meanScale = seconds(started);
-      started = std::chrono::steady_clock::now(); const double heCount = encrypted_sum__decrypt__result0(context, totalCount, keys.secretKey); const double heSum = encrypted_sum__decrypt__result0(context, totalSum, keys.secretKey) * scale; const double heMean = encrypted_sum__decrypt__result0(context, mean, keys.secretKey) * scale; const double decrypt = seconds(started);
-      const double online = parentEncrypt + maskEncrypt + feature + copies + countReduce + sumReduce + merge + meanScale + decrypt;
-      out << repetition << ',' << chunks << ',' << parentEncrypt << ',' << maskEncrypt << ',' << feature << ',' << copies << ',' << countReduce << ',' << sumReduce << ',' << merge << ',' << meanScale << ',' << decrypt << ',' << online << ',' << heCount << ',' << std::abs(heCount - static_cast<double>(count)) << ',' << heSum << ',' << "0," << heMean << ",0\n";
+      started = std::chrono::steady_clock::now(); const double heSum = encrypted_sum__decrypt__result0(context, totalSum, keys.secretKey) * scale; const double heMean = encrypted_sum__decrypt__result0(context, mean, keys.secretKey) * scale; const double decrypt = seconds(started);
+      const double online = parentEncrypt + feature + copies + sumReduce + merge + meanScale + decrypt;
+      out << repetition << ',' << chunks << ',' << parentEncrypt << ',' << feature << ',' << copies << ',' << sumReduce << ',' << merge << ',' << meanScale << ',' << decrypt << ',' << online << ',' << heSum << ",0," << heMean << ",0\n";
     }
     return 0;
   } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
@@ -147,13 +145,12 @@ def pandas_reference(installment: list[float], payment: list[float], repetitions
     frame = pd.DataFrame({"AMT_INSTALMENT": installment, "AMT_PAYMENT": payment})
     with output.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
-        writer.writerow(["repetition", "feature_seconds", "count_seconds", "sum_seconds", "mean_seconds", "workload_seconds", "count", "sum", "mean"])
+        writer.writerow(["repetition", "feature_seconds", "sum_seconds", "mean_seconds", "workload_seconds", "sum", "mean"])
         for repetition in range(1, repetitions + 1):
             started = time.perf_counter(); diff = frame["AMT_INSTALMENT"] - frame["AMT_PAYMENT"]; feature_seconds = time.perf_counter() - started
-            started = time.perf_counter(); count = diff.count(); count_seconds = time.perf_counter() - started
             started = time.perf_counter(); total = diff.sum(); sum_seconds = time.perf_counter() - started
             started = time.perf_counter(); mean = diff.mean(); mean_seconds = time.perf_counter() - started
-            writer.writerow([repetition, feature_seconds, count_seconds, sum_seconds, mean_seconds, feature_seconds + count_seconds + sum_seconds + mean_seconds, count, total, mean])
+            writer.writerow([repetition, feature_seconds, sum_seconds, mean_seconds, feature_seconds + sum_seconds + mean_seconds, total, mean])
 
 
 def median(rows: list[dict[str, str]], field: str) -> float:
@@ -167,22 +164,20 @@ def report(root: Path, value_count: int, scale: float, mean_depth: int, original
         pandas = list(csv.DictReader(handle))
     execution = json.loads((root / "execution.json").read_text(encoding="utf-8"))
     feature_he = median(he, "feature_seconds")
-    count_he = feature_he + median(he, "count_reduce_seconds") + median(he, "merge_seconds")
     sum_he = feature_he + median(he, "sum_reduce_seconds") + median(he, "merge_seconds")
     mean_he = sum_he + median(he, "mean_scale_seconds")
-    all_he = median(he, "feature_seconds") + median(he, "count_reduce_seconds") + median(he, "sum_reduce_seconds") + median(he, "merge_seconds") + median(he, "mean_scale_seconds")
+    all_he = median(he, "feature_seconds") + median(he, "sum_reduce_seconds") + median(he, "merge_seconds") + median(he, "mean_scale_seconds")
     all_python = median(pandas, "workload_seconds")
     rows = [
         ("PAYMENT_DIFF feature", median(pandas, "feature_seconds"), feature_he, "feature_seconds"),
-        ("Encrypted COUNT(valid mask)", median(pandas, "feature_seconds") + median(pandas, "count_seconds"), count_he, "count_abs_error"),
         ("PAYMENT_DIFF SUM", median(pandas, "feature_seconds") + median(pandas, "sum_seconds"), sum_he, "sum_abs_error"),
         ("PAYMENT_DIFF MEAN", median(pandas, "feature_seconds") + median(pandas, "mean_seconds"), mean_he, "mean_abs_error"),
     ]
     lines = [
-        "# Real installments PAYMENT_DIFF: encrypted count, sum, and mean",
+        "# Real installments PAYMENT_DIFF: encrypted subtract, sum, and mean",
         "",
         "The client supplies only sanitized raw parent columns. `PAYMENT_DIFF = AMT_INSTALMENT - AMT_PAYMENT` is calculated after parent encryption. "
-        "Its encrypted SUM is calculated once and reused by encrypted MEAN through a public `1/N` scalar. COUNT is a separate encrypted SUM of the padded 0/1 validity mask.",
+        "Its encrypted SUM is calculated once and reused by encrypted MEAN through a public `1/N` scalar. The row count is public client-prepared metadata; this smoke benchmark does not run an encrypted COUNT branch.",
         "",
         f"| Real rows | Logical lanes / CT | CKKS representation scale | Shared setup | Mean context depth |",
         "|---:|---:|---:|---:|---:|",
@@ -204,13 +199,13 @@ def report(root: Path, value_count: int, scale: float, mean_depth: int, original
     ]
     for label, python_seconds, he_seconds, error_field in rows:
         lines.append(f"| {label} | {python_seconds:.9f} | {he_seconds:.9f} | {he_seconds / python_seconds:.2f}× | {max(float(row[error_field]) for row in he):.12g} |")
-    encryption = median(he, "parent_encrypt_seconds") + median(he, "mask_encrypt_seconds")
+    encryption = median(he, "parent_encrypt_seconds")
     online = median(he, "online_seconds")
     lines += [
         "",
         "## Shared end-to-end workload",
         "",
-        "| Pandas feature + count + sum + mean (median s) | HE parent + mask encryption (median s) | HE calculation once (median s) | Audit decrypt (median s) | HE online (median s) | HE online ÷ Pandas |",
+        "| Pandas feature + sum + mean (median s) | HE parent encryption (median s) | HE calculation once (median s) | Audit decrypt (median s) | HE online (median s) | HE online ÷ Pandas |",
         "|---:|---:|---:|---:|---:|---:|",
         f"| {all_python:.9f} | {encryption:.9f} | {all_he:.9f} | {median(he, 'audit_decrypt_seconds'):.9f} | {online:.9f} | {online / all_python:.2f}× |",
         "",
@@ -274,7 +269,7 @@ def one_run(args: argparse.Namespace, root: Path, value_count: int) -> None:
     with he.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=he_rows[0].keys()); writer.writeheader(); writer.writerows(he_rows)
     report(root, value_count, scale, args.ckks_mul_depth, original_depth)
-    write_json(root / "result.json", {"status": "real_payment_diff_count_sum_mean_executed", "real_rows": value_count, "source_batches": parents.files_used, "report": "REPORT.md", "execution": "execution.json"})
+    write_json(root / "result.json", {"status": "real_payment_diff_subtract_sum_mean_executed", "real_rows": value_count, "source_batches": parents.files_used, "report": "REPORT.md", "execution": "execution.json"})
 
 
 def main() -> None:
@@ -304,7 +299,7 @@ def main() -> None:
     for count in args.value_counts:
         child = root / f"rows_{count}"
         one_run(args, child, count); runs.append({"value_count": count, "directory": child.name})
-    write_json(root / "batch_result.json", {"status": "real_payment_diff_count_sum_mean_batch_executed", "runs": runs})
+    write_json(root / "batch_result.json", {"status": "real_payment_diff_subtract_sum_mean_batch_executed", "runs": runs})
     (root / "REPORT.md").write_text("# Real PAYMENT_DIFF encrypted aggregations\n\n" + "\n".join(f"- `{item['value_count']}` rows: `{item['directory']}/REPORT.md`" for item in runs) + "\n", encoding="utf-8")
     print((root / "batch_result.json").read_text(encoding="utf-8"))
 
