@@ -81,6 +81,7 @@ class OfficialCkksAggregate:
     width: int
     valid_count: int
     debug: bool = False
+    backend: Any | None = field(default=None, repr=False)
     _program: Any = field(init=False, repr=False)
     _is_setup: bool = field(init=False, default=False, repr=False)
 
@@ -100,11 +101,14 @@ class OfficialCkksAggregate:
             raise ValueError(f"unsupported aggregate: {self.operation}")
 
         heir_compile = _load_official_heir_compile()
-        self._program = heir_compile(
-            mlir_str=source,
-            scheme="ckks",
-            debug=self.debug,
-        )
+        compile_options = {
+            "mlir_str": source,
+            "scheme": "ckks",
+            "debug": self.debug,
+        }
+        if self.backend is not None:
+            compile_options["backend"] = self.backend
+        self._program = heir_compile(**compile_options)
 
     @property
     def mlir(self) -> str:
