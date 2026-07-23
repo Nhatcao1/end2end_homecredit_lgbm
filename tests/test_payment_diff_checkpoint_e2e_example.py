@@ -9,14 +9,27 @@ SCRIPT = ROOT / "code/heir/examples/payment_diff_checkpoint_e2e.py"
 
 
 class PaymentDiffCheckpointE2EExampleTest(unittest.TestCase):
-    def test_example_shows_checkpoint_lifecycle_without_statistics(self):
+    def test_example_runs_full_aggregate_lifecycle_without_benchmark_report(self):
         source = SCRIPT.read_text(encoding="utf-8")
         self.assertIn("prepare_post_psi_groups(", source)
-        self.assertIn("compile_checkpointable_binary_column(", source)
+        self.assertIn(
+            "compile_checkpointable_binary_column_statistics(",
+            source,
+        )
         self.assertIn('operation="subtract"', source)
-        self.assertIn("save_binary_column_checkpoint(", source)
-        self.assertIn("load_binary_column_checkpoint(", source)
-        self.assertNotIn("ColumnStatistics", source)
+        self.assertIn(
+            "save_binary_column_statistics_checkpoint(",
+            source,
+        )
+        self.assertIn(
+            "load_binary_column_statistics_checkpoint(",
+            source,
+        )
+        self.assertIn("OfficialOpenFheColumnOps(", source)
+        self.assertIn("maximum.maximum(", source)
+        self.assertIn("PAYMENT_DIFF_MEAN", source)
+        self.assertIn("PAYMENT_DIFF_SUM", source)
+        self.assertIn("PAYMENT_DIFF_VAR", source)
         self.assertNotIn("REPORT.md", source)
         self.assertNotIn("perf_counter", source)
 

@@ -26,12 +26,16 @@ from code.heir.python_api.official_groupby import (
 )
 from code.heir.python_api.checkpoint import (
     LoadedBinaryColumnCheckpoint,
+    LoadedBinaryColumnStatisticsCheckpoint,
     LoadedSumCheckpoint,
     compile_checkpointable_binary_column,
+    compile_checkpointable_binary_column_statistics,
     compile_checkpointable_sum,
     load_binary_column_checkpoint,
+    load_binary_column_statistics_checkpoint,
     load_sum_checkpoint,
     save_binary_column_checkpoint,
+    save_binary_column_statistics_checkpoint,
     save_sum_checkpoint,
 )
 
@@ -39,6 +43,7 @@ __all__ = [
     "EncryptedMinMax",
     "EncryptedOpenFheColumn",
     "LoadedBinaryColumnCheckpoint",
+    "LoadedBinaryColumnStatisticsCheckpoint",
     "LoadedSumCheckpoint",
     "OfficialCkksAggregate",
     "OfficialCkksBinaryColumn",
@@ -51,13 +56,16 @@ __all__ = [
     "binary_column_statistics_mlir",
     "compile_mean",
     "compile_checkpointable_binary_column",
+    "compile_checkpointable_binary_column_statistics",
     "compile_checkpointable_sum",
     "compile_sum",
     "compile_variance",
     "prepare_post_psi_groups",
     "public_power_of_two_scale",
     "load_binary_column_checkpoint",
+    "load_binary_column_statistics_checkpoint",
     "load_sum_checkpoint",
     "save_binary_column_checkpoint",
+    "save_binary_column_statistics_checkpoint",
     "save_sum_checkpoint",
 ]

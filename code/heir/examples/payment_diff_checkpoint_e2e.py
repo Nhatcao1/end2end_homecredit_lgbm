@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Conceptual CSV → PSI join → HE subtract → checkpoint → reload example."""
+"""Runnable post-PSI PAYMENT_DIFF aggregates with an encrypted checkpoint.
+
+This is application flow, not a benchmark/report generator:
+
+``CSV -> post-PSI group -> encrypt parents -> PAYMENT_DIFF ->
+encrypted SUM/MEAN/VAR -> save/reload -> encrypted MAX -> final decrypt``.
+"""
 
 from __future__ import annotations
 
@@ -13,11 +19,12 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from code.heir.python_api import (
-    compile_checkpointable_binary_column,
-    load_binary_column_checkpoint,
+    OfficialOpenFheColumnOps,
+    compile_checkpointable_binary_column_statistics,
+    load_binary_column_statistics_checkpoint,
     prepare_post_psi_groups,
     public_power_of_two_scale,
-    save_binary_column_checkpoint,
+    save_binary_column_statistics_checkpoint,
 )
 
 
@@ -30,6 +37,7 @@ def main() -> None:
     )
     parser.add_argument("--bridge-dir", type=Path, required=True)
     parser.add_argument("--bucket-size", type=int, default=128)
+    parser.add_argument("--max-ring-dimension", type=int, default=16384)
     parser.add_argument(
         "--checkpoint-dir",
         type=Path,
@@ -63,58 +71,95 @@ def main() -> None:
         ]
     )
 
-    # Generic equivalent of:
-    # df["derived"] = df["left"] - df["right"]
-    subtract = compile_checkpointable_binary_column(
+    # One official HEIR circuit performs the original feature expression and
+    # returns an encrypted [SUM, MEAN, sample VAR] tensor. There is no
+    # PAYMENT_DIFF plaintext between these operations.
+    statistics = compile_checkpointable_binary_column_statistics(
         operation="subtract",
         width=args.bucket_size,
         input_scale=scale,
     )
-    subtract.setup()
-    parent_ciphertexts = subtract.encrypt(
+    statistics.setup()
+    statistics_parents = statistics.encrypt(
         group.installment,
         group.payment,
     )
-    derived_ciphertext = subtract.eval(parent_ciphertexts)
+    statistics_ciphertext = statistics.eval(
+        statistics_parents,
+        valid_count=group.real_count,
+    )
 
-    # This writes context, public key, encrypted parents and encrypted result.
-    # The secret key is written separately under client_private/.
-    save_binary_column_checkpoint(
-        subtract,
-        encrypted_columns=parent_ciphertexts,
-        result_ciphertext=derived_ciphertext,
+    # Persist the context, evaluation keys, encrypted parents, and encrypted
+    # aggregate tensor. The audit key remains client-private.
+    save_binary_column_statistics_checkpoint(
+        statistics,
+        encrypted_columns=statistics_parents,
+        result_ciphertext=statistics_ciphertext,
         valid_count=group.real_count,
         checkpoint_dir=args.checkpoint_dir,
         overwrite=args.overwrite,
     )
 
     # Conceptual restart boundary: reconstruct the program only from files.
-    del subtract, parent_ciphertexts, derived_ciphertext
-    restored = load_binary_column_checkpoint(
+    del statistics, statistics_parents, statistics_ciphertext
+    restored = load_binary_column_statistics_checkpoint(
         args.checkpoint_dir,
         for_audit=True,
     )
 
-    # Final client boundary. No plaintext derived column existed before here.
-    payment_diff = restored.program.decrypt(
-        restored.result_ciphertext,
-        valid_count=int(restored.manifest["valid_count"]),
+    # Exact MAX needs CKKS-to-FHEW switching. The current HEIR Python module
+    # cannot attach switching to its module-local ciphertexts, so this follows
+    # the benchmark's separate OpenFHE context without decrypting either path.
+    maximum = OfficialOpenFheColumnOps(
+        width=args.bucket_size,
+        input_scale=scale,
+        ring_dimension=args.max_ring_dimension,
     )
+    maximum.setup()
+    max_installment = maximum.encrypt(
+        group.installment,
+        padding="duplicate",
+    )
+    max_payment = maximum.encrypt(
+        group.payment,
+        padding="duplicate",
+    )
+    max_payment_diff = maximum.subtract(max_installment, max_payment)
+    maximum_ciphertext = maximum.maximum(max_payment_diff)
+
+    # Final client boundary only. All four values were encrypted until here.
+    payment_diff_sum, payment_diff_mean, payment_diff_var = (
+        restored.program.decrypt(restored.result_ciphertext)
+    )
+    payment_diff_max = maximum.decrypt_scalar(maximum_ciphertext)
     audit_csv = (
         args.checkpoint_dir.resolve()
         / "client_private"
-        / "payment_diff_audit.csv"
+        / "payment_diff_features.csv"
     )
     with audit_csv.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.writer(handle)
         writer.writerow(
-            ["SK_ID_CURR", "lane", "PAYMENT_DIFF"]
+            [
+                "SK_ID_CURR",
+                "PAYMENT_DIFF_MAX",
+                "PAYMENT_DIFF_MEAN",
+                "PAYMENT_DIFF_SUM",
+                "PAYMENT_DIFF_VAR",
+            ]
         )
-        for lane, value in enumerate(payment_diff):
-            writer.writerow([raw_applicant_id, lane, value])
+        writer.writerow(
+            [
+                raw_applicant_id,
+                payment_diff_max,
+                payment_diff_mean,
+                payment_diff_sum,
+                payment_diff_var,
+            ]
+        )
 
     print(f"public checkpoint: {args.checkpoint_dir.resolve() / 'public'}")
-    print(f"client audit: {audit_csv}")
+    print(f"final client features: {audit_csv}")
 
 
 if __name__ == "__main__":

@@ -10,6 +10,7 @@ from code.heir.python_api.checkpoint import (
     _SerializationTranslateProxy,
     patch_generated_pybind,
     save_binary_column_checkpoint,
+    save_binary_column_statistics_checkpoint,
 )
 from types import SimpleNamespace
 
@@ -113,6 +114,76 @@ class OfficialHeirCheckpointTest(unittest.TestCase):
             public_names,
         )
         self.assertNotIn("PAYMENT_DIFF", str(manifest))
+
+    def test_binary_statistics_checkpoint_saves_evaluation_keys(self):
+        class FakeModule:
+            @staticmethod
+            def _write(path):
+                Path(path).write_bytes(b"artifact")
+
+        for name in (
+            "__checkpoint_save_context",
+            "__checkpoint_save_public_key",
+            "__checkpoint_save_private_key",
+            "__checkpoint_save_ciphertexts",
+            "__checkpoint_save_eval_sum_keys",
+            "__checkpoint_save_eval_mult_keys",
+        ):
+            setattr(
+                FakeModule,
+                name,
+                staticmethod(lambda value, path: FakeModule._write(path)),
+            )
+
+        program = SimpleNamespace(
+            operation="subtract",
+            width=4,
+            input_scale=8.0,
+            derived_scale=8.0,
+            mlir="func.func @generic_statistics",
+            _is_setup=True,
+            _program=SimpleNamespace(
+                crypto_context="context",
+                keypair=SimpleNamespace(
+                    publicKey="public",
+                    secretKey="secret",
+                ),
+                compilation_result=SimpleNamespace(module=FakeModule()),
+            ),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            manifest = save_binary_column_statistics_checkpoint(
+                program,
+                encrypted_columns=(["left"], ["right"]),
+                result_ciphertext=["statistics"],
+                valid_count=2,
+                checkpoint_dir=Path(directory),
+            )
+            public_names = {
+                path.name
+                for path in (Path(directory) / "public").iterdir()
+            }
+
+        self.assertEqual(
+            "binary_column_statistics",
+            manifest["operation"],
+        )
+        self.assertEqual(
+            ["sum", "mean", "sample_variance"],
+            manifest["outputs"],
+        )
+        self.assertEqual(
+            {
+                "context.bin",
+                "public.key",
+                "eval_sum.keys",
+                "eval_mult.keys",
+                "left.ct",
+                "right.ct",
+                "statistics.ct",
+            },
+            public_names,
+        )
 
 
 if __name__ == "__main__":
