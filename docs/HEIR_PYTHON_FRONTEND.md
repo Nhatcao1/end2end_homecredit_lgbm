@@ -19,6 +19,18 @@ Run real encrypted fixed-width SUM and MEAN:
 python3 code/heir/examples/heir_py_ckks_sum_mean.py
 ```
 
+Or run the small timed trial, which writes raw rows, JSON, MLIR sources, and a
+Markdown report:
+
+```bash
+python3 code/heir/scripts/run_official_heir_py_sum_mean_trial.py \
+  --values 160 -100 0 60 250 \
+  --width 8 \
+  --repetitions 3 \
+  --output-dir benchmark_runs/official_heir_py_sum_mean_trial \
+  --overwrite
+```
+
 Application usage is explicit:
 
 ```python
