@@ -48,15 +48,20 @@ fixture. It creates one shared CKKS context, then processes each prepared
 block independently:
 
 ```text
-encrypt AMT_INSTALMENT + AMT_PAYMENT + validity mask
+encrypt AMT_INSTALMENT + AMT_PAYMENT
+  -> persist/reload parent ciphertexts
   -> HEIR encrypted_subtract(PAYMENT_DIFF)
-  -> HEIR encrypted_sum(PAYMENT_DIFF)  = one encrypted group sum
-  -> decrypt only for the audit table
+  -> persist/reload PAYMENT_DIFF ciphertext
+  -> HEIR encrypted_sum(PAYMENT_DIFF) = one encrypted group sum
+  -> persist encrypted group sum
+  -> decrypt only after every group path has completed, for the audit table
 ```
 
 The validity mask remains part of the prepared layout and establishes which
 lanes are real; because padded parent values are zero, it is not evaluated in
 this SUM-only benchmark. This proves the group layout, the after-encryption
-feature calculation, and one aggregate per group. It is intentionally not yet an efficient many-group
-packing implementation: every 128-lane applicant block occupies one 8192-lane
-CKKS ciphertext. The report makes this explicit.
+feature calculation, ciphertext continuity, and one aggregate per group. It
+is intentionally not yet an efficient many-group packing implementation:
+every 128-lane applicant block occupies one 8192-lane CKKS ciphertext. The
+runner writes `ciphertext_manifest.json` with hashes and sizes for the retained
+parent, feature, and sum ciphertext files; it never writes decrypted features.

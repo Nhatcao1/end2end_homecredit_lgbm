@@ -55,6 +55,23 @@ class GroupedPaymentDiffSumBenchmarkTest(unittest.TestCase):
                 row = next(csv.DictReader(handle))
             self.assertEqual(float(row["payment_diff_sum"]), 60.0)
 
+    def test_ciphertext_manifest_records_only_ciphertext_files(self) -> None:
+        module = load_module()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            parent = root / "ciphertexts" / "parents"
+            feature = root / "ciphertexts" / "payment_diff"
+            parent.mkdir(parents=True); feature.mkdir(parents=True)
+            (parent / "amt_payment_r1_g0.ct").write_bytes(b"parent")
+            (feature / "payment_diff_r1_g0.ct").write_bytes(b"feature")
+            (feature / "not_a_ciphertext.txt").write_text("ignore", encoding="utf-8")
+            manifest = module._ciphertext_manifest(root)
+            self.assertEqual(manifest["artifact_count"], 2)
+            self.assertEqual(
+                {item["role"] for item in manifest["artifacts"]},
+                {"encrypted AMT_PAYMENT parent", "encrypted PAYMENT_DIFF feature"},
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
