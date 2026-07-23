@@ -31,6 +31,10 @@ class PaymentDiffCheckpointE2EExampleTest(unittest.TestCase):
         self.assertIn("PAYMENT_DIFF_MEAN", source)
         self.assertIn("PAYMENT_DIFF_SUM", source)
         self.assertIn("PAYMENT_DIFF_VAR", source)
+        self.assertIn(
+            "audit_csv.parent.mkdir(parents=True, exist_ok=True)",
+            source,
+        )
         self.assertIn("subprocess.run(", source)
         self.assertIn("--openfhe-dir", source)
         self.assertNotIn("import openfhe", source)

@@ -242,6 +242,7 @@ def main() -> None:
         / "client_private"
         / "payment_diff_features.csv"
     )
+    audit_csv.parent.mkdir(parents=True, exist_ok=True)
     with audit_csv.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.writer(handle)
         writer.writerow(
