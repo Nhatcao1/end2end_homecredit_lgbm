@@ -17,6 +17,10 @@ from types import SimpleNamespace
 from typing import Any
 
 from code.heir.python_api.official_ckks_aggregates import OfficialCkksAggregate
+from code.heir.python_api.official_columns import (
+    BinaryOperation,
+    OfficialCkksBinaryColumn,
+)
 
 
 SERIALIZATION_INCLUDES = r'''
@@ -117,6 +121,26 @@ void checkpoint_load_eval_sum_keys(
           input, SerType::BINARY),
       "cannot deserialize rotation/evaluation keys");
 }
+
+void checkpoint_save_eval_mult_keys(
+    const CryptoContextT& context, const std::string& path) {
+  std::ofstream output(path, std::ios::binary);
+  checkpoint_require(output.good(), "cannot create multiplication-key file");
+  checkpoint_require(
+      CryptoContextImpl<DCRTPoly>::SerializeEvalMultKey(
+          output, SerType::BINARY, context),
+      "cannot serialize multiplication evaluation keys");
+}
+
+void checkpoint_load_eval_mult_keys(
+    const CryptoContextT&, const std::string& path) {
+  std::ifstream input(path, std::ios::binary);
+  checkpoint_require(input.good(), "cannot open multiplication-key file");
+  checkpoint_require(
+      CryptoContextImpl<DCRTPoly>::DeserializeEvalMultKey(
+          input, SerType::BINARY),
+      "cannot deserialize multiplication evaluation keys");
+}
 }  // namespace
 '''
 
@@ -132,6 +156,8 @@ SERIALIZATION_BINDINGS = r'''
   m.def("__checkpoint_load_ciphertexts", &checkpoint_load_ciphertexts);
   m.def("__checkpoint_save_eval_sum_keys", &checkpoint_save_eval_sum_keys);
   m.def("__checkpoint_load_eval_sum_keys", &checkpoint_load_eval_sum_keys);
+  m.def("__checkpoint_save_eval_mult_keys", &checkpoint_save_eval_mult_keys);
+  m.def("__checkpoint_load_eval_mult_keys", &checkpoint_load_eval_mult_keys);
 '''
 
 
@@ -239,6 +265,23 @@ def compile_checkpointable_sum(
     )
 
 
+def compile_checkpointable_binary_column(
+    *,
+    operation: BinaryOperation,
+    width: int,
+    input_scale: float = 1.0,
+    debug: bool = False,
+) -> OfficialCkksBinaryColumn:
+    """Compile a generic +, -, or × column with checkpoint bindings."""
+    return OfficialCkksBinaryColumn(
+        operation,
+        width,
+        input_scale,
+        debug,
+        backend=_checkpoint_backend(debug=debug),
+    )
+
+
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -251,7 +294,7 @@ def _source_sha256(source: str) -> str:
     return hashlib.sha256(source.encode("utf-8")).hexdigest()
 
 
-def _module(program: OfficialCkksAggregate) -> Any:
+def _module(program: Any) -> Any:
     return program._program.compilation_result.module
 
 
@@ -296,6 +339,17 @@ class LoadedSumCheckpoint:
 
     program: OfficialCkksAggregate
     input_ciphertext: Any
+    result_ciphertext: Any
+    manifest: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class LoadedBinaryColumnCheckpoint:
+    """Restored binary-column program, parents, and derived ciphertext."""
+
+    program: OfficialCkksBinaryColumn
+    left_ciphertext: Any
+    right_ciphertext: Any
     result_ciphertext: Any
     manifest: dict[str, Any]
 
@@ -389,6 +443,129 @@ def save_sum_checkpoint(
     return manifest
 
 
+def _wrap_binary_inputs(
+    program: OfficialCkksBinaryColumn,
+    left: Any,
+    right: Any,
+) -> tuple[Any, Any]:
+    try:
+        from heir.interfaces import EncValue
+    except ImportError as error:
+        raise RuntimeError("the official HEIR Python package is required") from error
+    encryptors = program._program.compilation_result.arg_enc_funcs or {}
+    if len(encryptors) != 2:
+        raise RuntimeError("restored binary circuit must have two inputs")
+    names = list(encryptors)
+    return EncValue(names[0], left), EncValue(names[1], right)
+
+
+def save_binary_column_checkpoint(
+    program: OfficialCkksBinaryColumn,
+    *,
+    encrypted_columns: tuple[Any, Any],
+    result_ciphertext: Any,
+    valid_count: int,
+    checkpoint_dir: Path,
+    overwrite: bool = False,
+) -> dict[str, Any]:
+    """Save generic parent columns and their still-encrypted derived column."""
+    if not program._is_setup:
+        raise RuntimeError("binary column program must be setup before saving")
+    if not 1 <= valid_count <= program.width:
+        raise ValueError("valid_count must be in [1, width]")
+
+    root = checkpoint_dir.resolve()
+    public = root / "public"
+    private = root / "client_private"
+    paths = {
+        "context": public / "context.bin",
+        "public_key": public / "public.key",
+        "left_ciphertext": public / "left.ct",
+        "right_ciphertext": public / "right.ct",
+        "result_ciphertext": public / "result.ct",
+        "secret_key": private / "audit_secret.key",
+        "manifest": root / "manifest.json",
+    }
+    if program.operation == "multiply":
+        paths["eval_mult_keys"] = public / "eval_mult.keys"
+    existing = [path for path in paths.values() if path.exists()]
+    if existing and not overwrite:
+        raise FileExistsError(
+            f"refusing to overwrite {existing[0]}; pass overwrite=True"
+        )
+    public.mkdir(parents=True, exist_ok=True)
+    private.mkdir(parents=True, exist_ok=True)
+
+    client = program._program
+    module = _module(program)
+    module.__checkpoint_save_context(
+        client.crypto_context,
+        str(paths["context"]),
+    )
+    module.__checkpoint_save_public_key(
+        client.keypair.publicKey,
+        str(paths["public_key"]),
+    )
+    module.__checkpoint_save_private_key(
+        client.keypair.secretKey,
+        str(paths["secret_key"]),
+    )
+    paths["secret_key"].chmod(0o600)
+    if "eval_mult_keys" in paths:
+        module.__checkpoint_save_eval_mult_keys(
+            client.crypto_context,
+            str(paths["eval_mult_keys"]),
+        )
+    left, right = encrypted_columns
+    module.__checkpoint_save_ciphertexts(
+        _raw_ciphertext(left),
+        str(paths["left_ciphertext"]),
+    )
+    module.__checkpoint_save_ciphertexts(
+        _raw_ciphertext(right),
+        str(paths["right_ciphertext"]),
+    )
+    module.__checkpoint_save_ciphertexts(
+        _raw_ciphertext(result_ciphertext),
+        str(paths["result_ciphertext"]),
+    )
+
+    public_records = {
+        name: _artifact_record(path, root=root, visibility="evaluator")
+        for name, path in paths.items()
+        if name not in {"secret_key", "manifest"}
+    }
+    try:
+        heir_version = importlib.metadata.version("heir_py")
+    except importlib.metadata.PackageNotFoundError:
+        heir_version = "unknown"
+    manifest = {
+        "format": "heir-openfhe-checkpoint-v1",
+        "scheme": "CKKS",
+        "operation": "binary_column",
+        "binary_operation": program.operation,
+        "width": program.width,
+        "valid_count": valid_count,
+        "input_scale": program.input_scale,
+        "output_scale": program.output_scale,
+        "mlir_sha256": _source_sha256(program.mlir),
+        "heir_py_version": heir_version,
+        "no_intermediate_decryption": True,
+        "public_artifacts": public_records,
+        "audit_secret": {
+            "path": str(paths["secret_key"].relative_to(root)),
+            "visibility": "client-only",
+            "required_for_evaluation": False,
+            "required_for_audit_decryption": True,
+        },
+    }
+    paths["manifest"].write_text(
+        json.dumps(manifest, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return manifest
+
+
 def _validate_artifacts(root: Path, manifest: dict[str, Any]) -> None:
     for name, record in manifest["public_artifacts"].items():
         path = Path(record["path"])
@@ -460,6 +637,81 @@ def load_sum_checkpoint(
     return LoadedSumCheckpoint(
         program=program,
         input_ciphertext=_wrap_input_ciphertext(program, raw_input),
+        result_ciphertext=module.__checkpoint_load_ciphertexts(
+            public_path("result_ciphertext")
+        ),
+        manifest=manifest,
+    )
+
+
+def load_binary_column_checkpoint(
+    checkpoint_dir: Path,
+    *,
+    for_audit: bool = True,
+    debug: bool = False,
+) -> LoadedBinaryColumnCheckpoint:
+    """Restore a generic binary-column circuit and all saved ciphertexts."""
+    root = checkpoint_dir.resolve()
+    manifest = json.loads(
+        (root / "manifest.json").read_text(encoding="utf-8")
+    )
+    if manifest.get("format") != "heir-openfhe-checkpoint-v1":
+        raise RuntimeError("unsupported HEIR/OpenFHE checkpoint format")
+    if manifest.get("operation") != "binary_column":
+        raise RuntimeError("this loader accepts binary-column checkpoints only")
+    _validate_artifacts(root, manifest)
+
+    program = compile_checkpointable_binary_column(
+        operation=manifest["binary_operation"],
+        width=int(manifest["width"]),
+        input_scale=float(manifest["input_scale"]),
+        debug=debug,
+    )
+    if _source_sha256(program.mlir) != manifest["mlir_sha256"]:
+        raise RuntimeError("checkpoint circuit does not match compiled column")
+
+    module = _module(program)
+    records = manifest["public_artifacts"]
+
+    def public_path(name: str) -> str:
+        path = Path(records[name]["path"])
+        return str(path if path.is_absolute() else root / path)
+
+    context = module.__checkpoint_load_context(public_path("context"))
+    public_key = module.__checkpoint_load_public_key(public_path("public_key"))
+    if "eval_mult_keys" in records:
+        module.__checkpoint_load_eval_mult_keys(
+            context,
+            public_path("eval_mult_keys"),
+        )
+    secret_key = None
+    if for_audit:
+        secret_path = Path(manifest["audit_secret"]["path"])
+        if not secret_path.is_absolute():
+            secret_path = root / secret_path
+        if not secret_path.is_file():
+            raise FileNotFoundError(
+                f"client audit secret is missing: {secret_path}"
+            )
+        secret_key = module.__checkpoint_load_private_key(str(secret_path))
+
+    program._program.crypto_context = context
+    program._program.keypair = SimpleNamespace(
+        publicKey=public_key,
+        secretKey=secret_key,
+    )
+    program._is_setup = True
+    raw_left = module.__checkpoint_load_ciphertexts(
+        public_path("left_ciphertext")
+    )
+    raw_right = module.__checkpoint_load_ciphertexts(
+        public_path("right_ciphertext")
+    )
+    left, right = _wrap_binary_inputs(program, raw_left, raw_right)
+    return LoadedBinaryColumnCheckpoint(
+        program=program,
+        left_ciphertext=left,
+        right_ciphertext=right,
         result_ciphertext=module.__checkpoint_load_ciphertexts(
             public_path("result_ciphertext")
         ),

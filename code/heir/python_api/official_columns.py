@@ -159,6 +159,7 @@ class OfficialCkksBinaryColumn:
     width: int
     input_scale: float = 1.0
     debug: bool = False
+    backend: Any | None = field(default=None, repr=False)
     _program: Any = field(init=False, repr=False)
     _is_setup: bool = field(init=False, default=False, repr=False)
 
@@ -166,11 +167,14 @@ class OfficialCkksBinaryColumn:
         self.operation = _validate_operation(self.operation)
         if self.input_scale <= 0 or not math.isfinite(self.input_scale):
             raise ValueError("input_scale must be finite and positive")
-        self._program = _load_official_heir_compile()(
-            mlir_str=binary_column_mlir(self.width, self.operation),
-            scheme="ckks",
-            debug=self.debug,
-        )
+        options = {
+            "mlir_str": binary_column_mlir(self.width, self.operation),
+            "scheme": "ckks",
+            "debug": self.debug,
+        }
+        if self.backend is not None:
+            options["backend"] = self.backend
+        self._program = _load_official_heir_compile()(**options)
 
     @property
     def mlir(self) -> str:

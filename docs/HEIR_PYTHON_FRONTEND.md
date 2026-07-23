@@ -181,3 +181,32 @@ maximum_ct = ops.maximum(payment_diff_ct)
 The same APIs accept any numeric columns. `OfficialCkksBinaryColumn` exposes
 element-wise `add`, `subtract`, and `multiply` HEIR circuits; no kernel knows
 the names `PAYMENT_DIFF`, `AMT_PAYMENT`, or `AMT_INSTALMENT`.
+
+### Conceptual E2E with a checkpoint
+
+This smaller example deliberately stops before aggregation. It demonstrates
+one derived column from CSV through persistence and reload:
+
+```bash
+python3 code/heir/examples/payment_diff_checkpoint_e2e.py \
+  --installments data/home_credit/installments_payments.csv \
+  --bridge-dir benchmark_runs/psi/installments_application/rr22_train_test_01 \
+  --bucket-size 128 \
+  --checkpoint-dir benchmark_runs/payment_diff_checkpoint_example \
+  --overwrite
+```
+
+Its code path is:
+
+```text
+installments CSV
+  → post-PSI private semi-join
+  → generic encrypted column subtraction
+  → save context/public key/parent CTs/result CT
+  → reload matching HEIR program and artifacts
+  → final client-only PAYMENT_DIFF audit CSV
+```
+
+There is no SUM/MEAN/VAR/MAX or benchmark report in this example. Public
+artifacts are under `public/`; the secret key, raw applicant mapping, and
+decrypted audit remain under `client_private/`.
