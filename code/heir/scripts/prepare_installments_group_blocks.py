@@ -22,6 +22,7 @@ import itertools
 import json
 import shutil
 import sys
+import time
 from collections.abc import Iterable
 from pathlib import Path
 
@@ -157,6 +158,7 @@ def prepare(
     keep_staging: bool = False,
 ) -> dict[str, object]:
     """Create compact customer blocks without deriving any HE feature values."""
+    total_started = time.perf_counter()
     if not input_csv.is_file():
         raise FileNotFoundError(f"installments CSV is missing: {input_csv}")
     if bucket_size < 1:
@@ -176,9 +178,14 @@ def prepare(
     parent_rows.mkdir(parents=True)
     public_layout.mkdir(parents=True)
 
+    eligible_started = time.perf_counter()
     eligible_ids = (
-        _read_eligible_ids(eligible_ids_csv, eligible_id_column) if eligible_ids_csv is not None else None
+        _read_eligible_ids(eligible_ids_csv, eligible_id_column)
+        if eligible_ids_csv is not None
+        else None
     )
+    eligible_seconds = time.perf_counter() - eligible_started
+    partition_started = time.perf_counter()
     partition_info = _partition_source(
         input_csv,
         staging,
@@ -186,12 +193,14 @@ def prepare(
         max_rows=max_rows,
         eligible_ids=eligible_ids,
     )
+    partition_seconds = time.perf_counter() - partition_started
 
     group_mapping_path = client_private / "group_mapping.csv"
     block_layout_path = public_layout / "block_layout.csv"
     blocks_per_ciphertext = vector_size // bucket_size
     group_count = block_count = padding_rows = largest_group_rows = 0
     parent_writer = _ParentRowShards(parent_rows, blocks_per_shard)
+    grouping_started = time.perf_counter()
     try:
         with group_mapping_path.open("w", encoding="utf-8", newline="") as mapping_handle, block_layout_path.open(
             "w", encoding="utf-8", newline=""
@@ -242,9 +251,19 @@ def prepare(
                         padding_rows += block_padding
     finally:
         parent_files = parent_writer.close()
+    grouping_seconds = time.perf_counter() - grouping_started
 
+    cleanup_started = time.perf_counter()
     if not keep_staging:
         shutil.rmtree(staging)
+    cleanup_seconds = time.perf_counter() - cleanup_started
+    total_seconds = time.perf_counter() - total_started
+    artifact_paths = [
+        group_mapping_path,
+        block_layout_path,
+        *(parent_rows / name for name in parent_files),
+    ]
+    artifact_bytes = sum(path.stat().st_size for path in artifact_paths)
 
     report = {
         "status": "client_only_installments_group_blocks_prepared",
@@ -277,9 +296,74 @@ def prepare(
             "client_private_parent_rows": [f"client_private/parent_rows/{name}" for name in parent_files],
             "staging_retained": keep_staging,
         },
+        "benchmark": {
+            "scope": (
+                "client-only post-PSI grouping, opaque-ID mapping, and fixed-block "
+                "layout; no HEIR/OpenFHE operation"
+            ),
+            "timings_seconds": {
+                "read_eligible_psi_ids": eligible_seconds,
+                "partition_source_rows": partition_seconds,
+                "sort_group_and_write_blocks": grouping_seconds,
+                "remove_temporary_partitions": cleanup_seconds,
+                "total": total_seconds,
+            },
+            "throughput_rows_per_second": {
+                "source_scan": (
+                    partition_info["raw_rows"] / partition_seconds
+                    if partition_seconds
+                    else 0.0
+                ),
+                "selected_rows_grouped": (
+                    partition_info["selected_rows"] / grouping_seconds
+                    if grouping_seconds
+                    else 0.0
+                ),
+                "end_to_end_source_rows": (
+                    partition_info["raw_rows"] / total_seconds
+                    if total_seconds
+                    else 0.0
+                ),
+            },
+            "output_artifact_bytes": artifact_bytes,
+            "padding_ratio": (
+                padding_rows / (block_count * bucket_size) if block_count else 0.0
+            ),
+        },
         "scope_note": "No derived feature, numeric sanitation, validity mask, aggregate, ciphertext, or HE operation was created.",
     }
     write_json(output_dir / "group_preparation_report.json", report)
+    timings = report["benchmark"]["timings_seconds"]
+    throughput = report["benchmark"]["throughput_rows_per_second"]
+    (output_dir / "GROUP_PREPARATION_BENCHMARK.md").write_text(
+        f"""# Installments group preparation benchmark
+
+This is a client-only preparation benchmark. It optionally consumes a completed
+PSI intersection, groups installment rows by `SK_ID_CURR`, replaces identifiers
+with private opaque ordinals, and writes fixed-size block metadata. It does
+**not** calculate `PAYMENT_DIFF`, encrypt anything, or invoke HEIR/OpenFHE.
+
+| Source rows scanned | Rows selected after PSI | Groups | Blocks | Padding lanes | Padding ratio |
+|---:|---:|---:|---:|---:|---:|
+| {partition_info['raw_rows']} | {partition_info['selected_rows']} | {group_count} | {block_count} | {padding_rows} | {report['benchmark']['padding_ratio']:.6f} |
+
+| Stage | Seconds |
+|---|---:|
+| Read completed PSI identifiers | {timings['read_eligible_psi_ids']:.9f} |
+| Partition source rows | {timings['partition_source_rows']:.9f} |
+| Sort, group, and write fixed blocks | {timings['sort_group_and_write_blocks']:.9f} |
+| Remove temporary partitions | {timings['remove_temporary_partitions']:.9f} |
+| **Total preparation** | **{timings['total']:.9f}** |
+
+| Source scan rows/s | Selected rows grouped/s | End-to-end source rows/s | Output artifact bytes |
+|---:|---:|---:|---:|
+| {throughput['source_scan']:.2f} | {throughput['selected_rows_grouped']:.2f} | {throughput['end_to_end_source_rows']:.2f} | {artifact_bytes} |
+
+Raw `SK_ID_CURR` values and parent columns remain under `client_private/`.
+Only `layout/block_layout.csv` is non-identifying layout metadata.
+""",
+        encoding="utf-8",
+    )
     return report
 
 

@@ -68,7 +68,11 @@ class PrepareInstallmentsGroupBlocksTest(unittest.TestCase):
             self.assertEqual(report["group_layout"]["blocks_per_ciphertext"], 2)
             self.assertEqual(report["group_layout"]["planned_packed_ciphertext_batches"], 2)
             self.assertEqual(report["group_layout"]["implicit_zero_padding_rows"], 7)
+            self.assertGreaterEqual(report["benchmark"]["timings_seconds"]["total"], 0)
+            self.assertEqual(report["benchmark"]["padding_ratio"], 7 / 16)
+            self.assertGreater(report["benchmark"]["output_artifact_bytes"], 0)
             self.assertFalse((output / "client_private" / "staging").exists())
+            self.assertTrue((output / "GROUP_PREPARATION_BENCHMARK.md").is_file())
 
             layout_text = (output / "layout" / "block_layout.csv").read_text(encoding="utf-8")
             self.assertNotIn("SK_ID_CURR", layout_text)

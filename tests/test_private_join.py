@@ -102,6 +102,14 @@ class PrivateJoinTest(unittest.TestCase):
             self.assertEqual(manifest["receiver"]["unique_keys"], 3)
             self.assertEqual(manifest["sender"]["unique_keys"], 3)
             self.assertEqual(manifest["sender"]["duplicate_rows_removed"], 1)
+            self.assertGreaterEqual(
+                manifest["benchmark"]["timings_seconds"]["total"], 0
+            )
+            self.assertEqual(
+                manifest["benchmark"]["output_bytes"]["total_key_files"],
+                (root / "receiver" / "psi_input.csv").stat().st_size
+                + (root / "sender" / "psi_input.csv").stat().st_size,
+            )
             self.assertEqual(
                 [row["SK_ID_CURR"] for row in read_csv(root / "sender" / "psi_input.csv")],
                 ["102", "103", "999"],
