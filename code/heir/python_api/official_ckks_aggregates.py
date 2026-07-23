@@ -123,7 +123,20 @@ class OfficialCkksAggregate:
             width=self.width,
             valid_count=self.valid_count,
         )
-        return self._program.encrypt_values(packed)
+        # For raw MLIR, HEIR's function-info pass may canonicalize ``%values``
+        # to a generated name such as ``arg0``. The official client interface
+        # registers encryptors by that compiled name, so discover it instead
+        # of assuming the source-level SSA name survives.
+        compilation_result = self._program.compilation_result
+        encryptors = compilation_result.arg_enc_funcs or {}
+        if len(encryptors) != 1:
+            raise RuntimeError(
+                "expected exactly one encrypted HEIR input; compiled encryptor "
+                f"names are {sorted(encryptors)}"
+            )
+        argument_name = next(iter(encryptors))
+        encryptor = getattr(self._program, f"encrypt_{argument_name}")
+        return encryptor(packed)
 
     def eval(self, encrypted_values: Any) -> Any:
         """Evaluate SUM or MEAN and return the encrypted scalar."""

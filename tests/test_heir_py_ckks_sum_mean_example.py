@@ -1,6 +1,7 @@
 import importlib.util
 from pathlib import Path
 import sys
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -50,6 +51,35 @@ class HeirPyCkksAggregateApiTest(unittest.TestCase):
     def test_exact_max_is_not_faked_as_ckks_arithmetic(self) -> None:
         with self.assertRaisesRegex(NotImplementedError, "CKKS-to-FHEW"):
             compile_max(width=8, valid_count=3)
+
+    def test_encrypt_uses_compiled_argument_name_not_source_ssa_name(self) -> None:
+        encrypted = object()
+
+        class FakeOfficialProgram:
+            compilation_result = SimpleNamespace(
+                arg_enc_funcs={"arg0": object()},
+            )
+
+            def setup(self):
+                return None
+
+            def encrypt_arg0(self, packed):
+                self.packed = packed
+                return encrypted
+
+        target = (
+            "code.heir.python_api.official_ckks_aggregates."
+            "_load_official_heir_compile"
+        )
+        pack_target = "code.heir.python_api.official_ckks_aggregates._pack"
+        with patch(target, return_value=lambda **_: FakeOfficialProgram()):
+            program = compile_sum(width=8, valid_count=3)
+        program.setup()
+        with patch(pack_target, return_value="packed-values"):
+            result = program.encrypt([1.0, 2.0, 3.0])
+
+        self.assertIs(encrypted, result)
+        self.assertEqual("packed-values", program._program.packed)
 
     def test_example_uses_application_api_and_explicit_ciphertexts(self) -> None:
         source = (
