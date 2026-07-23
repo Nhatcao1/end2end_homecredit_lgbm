@@ -88,3 +88,33 @@ python3 code/heir/scripts/run_official_python_var_minmax_trial.py \
 `VAR` and `MIN/MAX` are deliberately reported as separate contexts. The
 official HEIR Python runtime and official OpenFHE Python wrapper do not expose
 a cross-runtime ciphertext interchange contract.
+
+## Post-PSI grouped PAYMENT_DIFF SUM trial
+
+This trial consumes an existing validated PSI bridge. PSI is not reimplemented
+by HEIR: SecretFlow determines the intersection first, then the client replaces
+approved `SK_ID_CURR` values with opaque group ordinals and fixed zero-padded
+blocks. One official HEIR Python program is reused for every selected group:
+
+```text
+Enc(AMT_INSTALMENT), Enc(AMT_PAYMENT)
+  -> CT - CT
+  -> encrypted fixed-width SUM
+  -> final audit decrypt
+```
+
+Run five groups:
+
+```bash
+python3 code/heir/scripts/run_official_python_post_psi_groupby_trial.py \
+  --installments data/home_credit/installments_payments.csv \
+  --bridge-dir benchmark_runs/psi/installments_application/rr22_train_test_01 \
+  --group-count 5 \
+  --bucket-size 128 \
+  --output-dir benchmark_runs/official_python_post_psi_groupby_5 \
+  --overwrite
+```
+
+The raw identifier mapping is written only under `client_private/`.
+`he_ready/group_blocks.csv` contains parent columns and padding, never a
+plaintext `PAYMENT_DIFF`.
