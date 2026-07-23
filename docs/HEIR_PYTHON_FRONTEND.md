@@ -138,3 +138,22 @@ an explicit second OpenFHE scheme-switching context and re-encrypts only the
 two parent columns; it never receives a plaintext `PAYMENT_DIFF`. Parent
 amounts are normalized before encryption to keep the squared variance branch
 inside the CKKS numerical range.
+
+## Minimal application example
+
+For code review, use the short example instead of the report-producing
+benchmark:
+
+```bash
+python3 code/heir/examples/payment_diff_post_psi.py \
+  --installments data/home_credit/installments_payments.csv \
+  --bridge-dir benchmark_runs/psi/installments_application/rr22_train_test_01 \
+  --group-count 2 \
+  --bucket-size 128 \
+  --output-csv benchmark_runs/payment_diff_features.csv \
+  --overwrite
+```
+
+It performs only the application flow: post-PSI semi-join, opaque grouping,
+parent encryption, encrypted PAYMENT_DIFF statistics/MAX, final decryption,
+and one output feature CSV. It contains no benchmark timing or report code.
