@@ -1,16 +1,65 @@
+import importlib.util
 from pathlib import Path
+import sys
 import unittest
+from unittest.mock import patch
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from code.heir.python_api.official_ckks_aggregates import (
+    _pack,
+    compile_max,
+    compile_mean,
+    compile_sum,
+)
 
 
-class HeirPyCkksSumMeanExampleTest(unittest.TestCase):
-    def test_example_uses_python_frontend_for_encrypted_sum_and_mean(self) -> None:
-        source = (Path(__file__).resolve().parents[1] / "code/heir/examples/heir_py_ckks_sum_mean.py").read_text(encoding="utf-8")
-        self.assertIn("from heir import compile", source)
-        self.assertIn('@compile(scheme="ckks", debug=True)', source)
-        self.assertIn("encrypted_mean = encrypted_sum * (1.0 / WIDTH)", source)
-        self.assertIn("encrypted_sum_and_mean.setup()", source)
-        self.assertIn("encrypted_sum_and_mean.eval(*encrypted_values)", source)
-        self.assertIn("encrypted_sum_and_mean.decrypt_result(encrypted_result)", source)
+class HeirPyCkksAggregateApiTest(unittest.TestCase):
+    @unittest.skipUnless(importlib.util.find_spec("numpy"), "NumPy not installed")
+    def test_packing_keeps_real_values_and_zero_pads(self) -> None:
+        self.assertEqual(
+            [160.0, -100.0, 0.0, 0.0],
+            _pack([160.0, -100.0, 0.0], width=4, valid_count=3).tolist(),
+        )
+
+    def test_packing_rejects_wrong_public_count(self) -> None:
+        with self.assertRaisesRegex(ValueError, "compiled for 3 real values"):
+            _pack([1.0, 2.0], width=4, valid_count=3)
+
+    def test_factories_call_official_compile_with_single_result_mlir(self) -> None:
+        calls = []
+
+        def fake_compile(**kwargs):
+            calls.append(kwargs)
+            return object()
+
+        target = (
+            "code.heir.python_api.official_ckks_aggregates."
+            "_load_official_heir_compile"
+        )
+        with patch(target, return_value=fake_compile):
+            sum_program = compile_sum(width=8, valid_count=3)
+            mean_program = compile_mean(width=8, valid_count=3)
+
+        self.assertEqual(["ckks", "ckks"], [call["scheme"] for call in calls])
+        self.assertIn("func.func @fixed_count_sum", sum_program.mlir)
+        self.assertIn("func.func @fixed_count_mean", mean_program.mlir)
+        self.assertNotIn("-> (f64, f64)", sum_program.mlir + mean_program.mlir)
+
+    def test_exact_max_is_not_faked_as_ckks_arithmetic(self) -> None:
+        with self.assertRaisesRegex(NotImplementedError, "CKKS-to-FHEW"):
+            compile_max(width=8, valid_count=3)
+
+    def test_example_uses_application_api_and_explicit_ciphertexts(self) -> None:
+        source = (
+            ROOT / "code/heir/examples/heir_py_ckks_sum_mean.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("from code.heir.python_api import compile_mean, compile_sum", source)
+        self.assertIn("encrypted_sum = sum_program.eval(encrypted_sum_input)", source)
+        self.assertIn("encrypted_mean = mean_program.eval(encrypted_mean_input)", source)
+        self.assertIn("sum_program.decrypt(encrypted_sum)", source)
+        self.assertNotIn("return encrypted_sum, encrypted_mean", source)
         self.assertNotIn("subprocess.", source)
 
 

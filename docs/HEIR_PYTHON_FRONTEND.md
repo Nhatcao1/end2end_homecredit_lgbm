@@ -1,54 +1,53 @@
-# Python-facing HEIR operations
+# Official Python-facing HEIR operations
 
-This project originally used HEIR's command-line compiler and an OpenFHE C++
-harness. That is appropriate for reproducible benchmarks, but it is not the
-API an application developer should start from.
+The application API is
+`code/heir/python_api/official_ckks_aggregates.py`. It calls the official
+HEIR package's documented `compile(mlir_str=..., scheme="ckks")` entry point;
+it does not invoke a benchmark subprocess or CMake runner.
 
-For a Python user API, install the official frontend in a dedicated virtual
-environment:
+Use the server's Python 3.12 environment:
 
 ```bash
 python3 -m venv .venv-heir-py
 source .venv-heir-py/bin/activate
-python3 -m pip install "heir_py[python,openfhe]"
+python3 -m pip install "heir_py[python,openfhe]==2026.7.1"
 ```
 
-Then run the smallest real encrypted operation:
+Run real encrypted fixed-width SUM and MEAN:
 
 ```bash
 python3 code/heir/examples/heir_py_ckks_sum_mean.py
 ```
 
-The example uses the intended application-facing sequence:
+Application usage is explicit:
 
-```text
-@compile(scheme="ckks")
-    -> setup()
-    -> encrypt_input(...)
-    -> eval(encrypted inputs)
-    -> decrypt_result(...)     # audit/client boundary only
+```python
+from code.heir.python_api import compile_sum
+
+values = [160.0, -100.0, 0.0]
+program = compile_sum(width=8, valid_count=len(values))
+program.setup()
+input_ct = program.encrypt(values)
+sum_ct = program.eval(input_ct)       # still encrypted
+sum_value = program.decrypt(sum_ct)   # final client/audit boundary
 ```
 
-## Capability order
+The circuit width and real lane count are public compile-time contracts.
+Inputs are zero-padded to the width before encryption.
 
-| Operation | Python API route | Next action |
+## Current official capability boundary
+
+| Operation | Official Python route | Status |
 |---|---|---|
-| CT+CT / CT-CT / CTxCT | native HEIR CKKS arithmetic | ready |
-| SUM | native HEIR additions | ready as fixed public-width circuit |
-| MEAN | encrypted SUM × public `1/N` | ready when `N` is public and fixed by packing |
-| VAR | SUM, square/SUM, and two scalar multiplications | add only after the SUM/MEAN frontend example passes on the target HEIR version |
-| MAX / MIN | OpenFHE CKKS↔FHEW comparison tree | separate Python wrapper; not a normal `@compile(scheme="ckks")` expression |
+| SUM | official `compile(mlir_str=..., scheme="ckks")` | implemented |
+| MEAN | official compiled SUM × public `1/N` | implemented |
+| Multiple encrypted outputs | frontend issue `#1162` | not supported in HEIR 2026.7.1 |
+| Ciphertext serialization | backend issue `#1119` | not exposed in HEIR 2026.7.1 |
+| Exact MAX/MIN | OpenFHE CKKS↔FHEW switching | not expressible as a normal HEIR Python CKKS function |
 
-## What changes from benchmark code
-
-1. Keep MLIR/CMake only as compiler-level regression tests.
-2. Put user-visible feature functions in Python decorator modules.
-3. Fix each circuit's packed width and public count before compilation.
-4. Return ciphertexts from feature functions; do not decrypt between feature
-   and aggregate stages.
-5. Add a separate Python OpenFHE scheme-switching adapter for exact MIN/MAX.
-   Do not pretend `max(a, b)` is ordinary CKKS arithmetic.
-
-The benchmark scripts remain useful to validate latency and accuracy, but
-application code should call the frontend functions rather than reproduce the
-CMake harness.
+SUM and MEAN are therefore separate official compiled objects. Their `eval`
+methods return live ciphertexts, but one object's ciphertext must not be passed
+to the other object's context. If one shared context must return SUM, MEAN,
+VAR, and MAX together, keep the generated OpenFHE C++ runtime and expose it to
+Python through a dedicated binding; the official frontend cannot represent
+that interface yet.
