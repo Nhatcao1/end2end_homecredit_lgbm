@@ -184,8 +184,9 @@ the names `PAYMENT_DIFF`, `AMT_PAYMENT`, or `AMT_INSTALMENT`.
 
 ### Conceptual E2E with a checkpoint
 
-This smaller example deliberately stops before aggregation. It demonstrates
-one derived column from CSV through persistence and reload:
+This smaller runnable application follows one post-PSI applicant group through
+the complete `PAYMENT_DIFF` feature family without benchmark timing/report
+machinery:
 
 ```bash
 python3 code/heir/examples/payment_diff_checkpoint_e2e.py \
@@ -201,12 +202,21 @@ Its code path is:
 ```text
 installments CSV
   → post-PSI private semi-join
-  → generic encrypted column subtraction
-  → save context/public key/parent CTs/result CT
-  → reload matching HEIR program and artifacts
-  → final client-only PAYMENT_DIFF audit CSV
+  → HEIR SUM branch: encrypted parents → subtract → encrypted SUM → checkpoint
+  → HEIR MEAN branch: encrypted parents → subtract → encrypted MEAN → checkpoint
+  → HEIR VAR branch: encrypted parents → subtract → encrypted VAR → checkpoint
+  → OpenFHE branch: encrypted parents → subtract → CKKS↔FHEW encrypted MAX
+  → isolated checkpoint reloads
+  → final client-only MAX/MEAN/SUM/VAR CSV
 ```
 
-There is no SUM/MEAN/VAR/MAX or benchmark report in this example. Public
-artifacts are under `public/`; the secret key, raw applicant mapping, and
-decrypted audit remain under `client_private/`.
+HEIR 2026.7.1 is more reliable with one encrypted scalar result per compiled
+program than with one packed three-result tensor, so SUM, MEAN, and VAR use
+separate contexts. No branch receives plaintext `PAYMENT_DIFF`. Exact MAX uses
+the same separate OpenFHE scheme-switching route as the benchmark.
+
+OpenFHE evaluation-key maps are process-global. The example therefore reloads
+and audits each saved aggregate in a fresh child process, matching a real
+restart and avoiding duplicate-key-tag insertion. Use `--resume-checkpoints`
+to reuse successfully written SUM/MEAN/VAR checkpoints after a later-stage
+failure. There is no benchmark report or timing collection in this example.
