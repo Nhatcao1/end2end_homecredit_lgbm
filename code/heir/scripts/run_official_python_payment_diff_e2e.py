@@ -16,8 +16,8 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from code.heir.python_api import (
-    OfficialOpenFhePaymentDiffMax,
-    OfficialPaymentDiffGroupStatistics,
+    OfficialCkksBinaryColumnStatistics,
+    OfficialOpenFheColumnOps,
     prepare_post_psi_groups,
     public_power_of_two_scale,
 )
@@ -333,18 +333,19 @@ def main() -> None:
     input_scale = _input_scale(layout.groups)
 
     statistics, compile_seconds = _timed(
-        OfficialPaymentDiffGroupStatistics,
+        OfficialCkksBinaryColumnStatistics,
+        operation="subtract",
         width=args.bucket_size,
         input_scale=input_scale,
         debug=args.debug,
     )
     _, statistics_setup_seconds = _timed(statistics.setup)
-    maximum = OfficialOpenFhePaymentDiffMax(
+    comparison_ops = OfficialOpenFheColumnOps(
         width=args.bucket_size,
         input_scale=input_scale,
         ring_dimension=args.max_ring_dimension,
     )
-    _, maximum_setup_seconds = _timed(maximum.setup)
+    _, maximum_setup_seconds = _timed(comparison_ops.setup)
     (root / "payment_diff_statistics.mlir").write_text(
         statistics.mlir,
         encoding="utf-8",
@@ -354,22 +355,31 @@ def main() -> None:
     for group in layout.groups:
         statistics_parents, statistics_encrypt = _timed(
             statistics.encrypt,
-            group,
+            group.installment,
+            group.payment,
         )
         statistics_ct, statistics_evaluation = _timed(
             statistics.eval,
             statistics_parents,
             valid_count=group.real_count,
         )
-        maximum_parents, maximum_encrypt = _timed(
-            maximum.encrypt,
-            group.payment,
+        started = time.perf_counter()
+        max_installment_ct = comparison_ops.encrypt(
             group.installment,
+            padding="duplicate",
         )
-        maximum_ct, maximum_evaluation = _timed(
-            maximum.eval,
-            maximum_parents,
+        max_payment_ct = comparison_ops.encrypt(
+            group.payment,
+            padding="duplicate",
         )
+        maximum_encrypt = time.perf_counter() - started
+        started = time.perf_counter()
+        max_difference_ct = comparison_ops.subtract(
+            max_installment_ct,
+            max_payment_ct,
+        )
+        maximum_ct = comparison_ops.maximum(max_difference_ct)
+        maximum_evaluation = time.perf_counter() - started
         pending.append(
             {
                 "group": group,
@@ -389,7 +399,7 @@ def main() -> None:
         he_sum, he_mean, he_var = statistics.decrypt(
             item["statistics_ct"]
         )
-        he_max = maximum.decrypt(item["maximum_ct"])
+        he_max = comparison_ops.decrypt_scalar(item["maximum_ct"])
         audit_seconds = time.perf_counter() - started
         expected = reference[group.opaque_group_id]
         row: dict[str, Any] = {

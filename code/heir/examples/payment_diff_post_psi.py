@@ -13,8 +13,8 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from code.heir.python_api import (
-    OfficialOpenFhePaymentDiffMax,
-    OfficialPaymentDiffGroupStatistics,
+    OfficialCkksBinaryColumnStatistics,
+    OfficialOpenFheColumnOps,
     prepare_post_psi_groups,
     public_power_of_two_scale,
 )
@@ -66,7 +66,8 @@ def main() -> None:
     scale = public_power_of_two_scale(parent_bounds)
 
     # SUM, MEAN and sample VAR share one official HEIR-generated CKKS context.
-    statistics = OfficialPaymentDiffGroupStatistics(
+    statistics = OfficialCkksBinaryColumnStatistics(
+        operation="subtract",
         width=args.bucket_size,
         input_scale=scale,
     )
@@ -74,26 +75,37 @@ def main() -> None:
 
     # Exact MAX needs OpenFHE CKKS-to-FHEW scheme switching, so it has a
     # separate context. PAYMENT_DIFF is still calculated after encryption.
-    maximum = OfficialOpenFhePaymentDiffMax(
+    comparison_ops = OfficialOpenFheColumnOps(
         width=args.bucket_size,
         input_scale=scale,
         ring_dimension=args.max_ring_dimension,
     )
-    maximum.setup()
+    comparison_ops.setup()
 
     # Evaluate every group first. Nothing is decrypted inside this loop.
     encrypted_outputs = []
     for group in layout.groups:
-        statistics_parents = statistics.encrypt(group)
+        statistics_parents = statistics.encrypt(
+            group.installment,
+            group.payment,
+        )
         statistics_ct = statistics.eval(
             statistics_parents,
             valid_count=group.real_count,
         )
-        maximum_parents = maximum.encrypt(
-            group.payment,
+        installment_ct = comparison_ops.encrypt(
             group.installment,
+            padding="duplicate",
         )
-        maximum_ct = maximum.eval(maximum_parents)
+        payment_ct = comparison_ops.encrypt(
+            group.payment,
+            padding="duplicate",
+        )
+        payment_diff_ct = comparison_ops.subtract(
+            installment_ct,
+            payment_ct,
+        )
+        maximum_ct = comparison_ops.maximum(payment_diff_ct)
         encrypted_outputs.append(
             (group.opaque_group_id, statistics_ct, maximum_ct)
         )
@@ -102,7 +114,7 @@ def main() -> None:
     features = []
     for opaque_group_id, statistics_ct, maximum_ct in encrypted_outputs:
         total, mean, variance = statistics.decrypt(statistics_ct)
-        max_value = maximum.decrypt(maximum_ct)
+        max_value = comparison_ops.decrypt_scalar(maximum_ct)
         features.append(
             {
                 "opaque_group_id": opaque_group_id,

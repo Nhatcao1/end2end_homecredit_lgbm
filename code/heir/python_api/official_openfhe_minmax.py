@@ -16,7 +16,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 import math
-from typing import Any
+from typing import Any, Literal
 
 
 def _load_openfhe() -> Any:
@@ -55,6 +55,15 @@ class EncryptedMinMax:
 
     minimum: Any
     maximum: Any
+
+
+@dataclass(frozen=True)
+class EncryptedOpenFheColumn:
+    """One encrypted column plus the public scale needed at decryption."""
+
+    ciphertext: Any
+    scale: float
+    valid_count: int
 
 
 class OfficialOpenFheMinMax:
@@ -208,8 +217,8 @@ class OfficialOpenFheMinMax:
             raise RuntimeError("call setup() before encrypt/eval/decrypt")
 
 
-class OfficialOpenFhePaymentDiffMax:
-    """Exact MAX where PAYMENT_DIFF is derived after parent encryption."""
+class OfficialOpenFheColumnOps:
+    """Generic encrypted-column arithmetic and exact MIN/MAX in one context."""
 
     def __init__(
         self,
@@ -229,62 +238,144 @@ class OfficialOpenFhePaymentDiffMax:
             input_scale=input_scale,
             ring_dimension=ring_dimension,
         )
+        self._multiplication_ready = False
 
     def setup(self) -> None:
         self._engine.setup()
 
     def encrypt(
         self,
-        payment: Sequence[float],
-        installment: Sequence[float],
-    ) -> tuple[Any, Any]:
-        """Duplicate-pad genuine parent pairs, then encrypt both columns."""
+        values: Sequence[float],
+        *,
+        padding: Literal["zero", "duplicate"] = "zero",
+    ) -> EncryptedOpenFheColumn:
+        """Encrypt a numeric column using zero or genuine-value padding."""
         self._engine._require_setup()
-        paid = [float(value) for value in payment]
-        due = [float(value) for value in installment]
-        if len(paid) != len(due) or not 2 <= len(paid) <= self.width:
-            raise ValueError("parent columns must have equal length in [2, width]")
-        if not all(math.isfinite(value) for value in [*paid, *due]):
-            raise ValueError("parent columns must not contain NaN or infinity")
-        paid.extend([paid[0]] * (self.width - len(paid)))
-        due.extend([due[0]] * (self.width - len(due)))
-        normalized_paid = [value / self.input_scale for value in paid]
-        normalized_due = [value / self.input_scale for value in due]
-        if not all(
-            -0.5 < value <= 0.5
-            for value in [*normalized_paid, *normalized_due]
-        ):
-            raise ValueError(
-                "parent input violates (-0.5, 0.5]; increase input_scale"
-            )
-        context = self._engine._context
-        key = self._engine._keys.publicKey
-        return (
-            context.Encrypt(
-                key,
-                context.MakeCKKSPackedPlaintext(normalized_due),
-            ),
-            context.Encrypt(
-                key,
-                context.MakeCKKSPackedPlaintext(normalized_paid),
-            ),
+        materialized = [float(value) for value in values]
+        if not 2 <= len(materialized) <= self.width:
+            raise ValueError("column length must be in [2, width]")
+        if not all(math.isfinite(value) for value in materialized):
+            raise ValueError("column must not contain NaN or infinity")
+        if padding == "zero":
+            pad_value = 0.0
+        elif padding == "duplicate":
+            pad_value = materialized[0]
+        else:
+            raise ValueError("padding must be zero or duplicate")
+        padded = materialized + [pad_value] * (
+            self.width - len(materialized)
+        )
+        return EncryptedOpenFheColumn(
+            ciphertext=self._engine.encrypt(padded),
+            scale=self.input_scale,
+            valid_count=len(materialized),
         )
 
-    def eval(self, encrypted_parents: tuple[Any, Any]) -> Any:
-        """Calculate PAYMENT_DIFF as CT-CT, then exact scheme-switched MAX."""
-        self._engine._require_setup()
-        installment, payment = encrypted_parents
-        difference = self._engine._context.EvalSub(installment, payment)
-        return self._engine.eval_max(difference)
+    def add(
+        self,
+        left: EncryptedOpenFheColumn,
+        right: EncryptedOpenFheColumn,
+    ) -> EncryptedOpenFheColumn:
+        """Element-wise encrypted column addition."""
+        self._validate_pair(left, right)
+        return EncryptedOpenFheColumn(
+            self._engine._context.EvalAdd(
+                left.ciphertext,
+                right.ciphertext,
+            ),
+            left.scale,
+            left.valid_count,
+        )
 
-    def decrypt(self, encrypted_maximum: Any) -> float:
-        """Decrypt only the final maximum at the audit boundary."""
+    def subtract(
+        self,
+        left: EncryptedOpenFheColumn,
+        right: EncryptedOpenFheColumn,
+    ) -> EncryptedOpenFheColumn:
+        """Element-wise encrypted column subtraction."""
+        self._validate_pair(left, right)
+        return EncryptedOpenFheColumn(
+            self._engine._context.EvalSub(
+                left.ciphertext,
+                right.ciphertext,
+            ),
+            left.scale,
+            left.valid_count,
+        )
+
+    def multiply(
+        self,
+        left: EncryptedOpenFheColumn,
+        right: EncryptedOpenFheColumn,
+    ) -> EncryptedOpenFheColumn:
+        """Element-wise encrypted column multiplication."""
+        self._validate_pair(left, right)
+        if not self._multiplication_ready:
+            self._engine._context.EvalMultKeyGen(
+                self._engine._keys.secretKey
+            )
+            self._multiplication_ready = True
+        return EncryptedOpenFheColumn(
+            self._engine._context.EvalMult(
+                left.ciphertext,
+                right.ciphertext,
+            ),
+            left.scale * right.scale,
+            left.valid_count,
+        )
+
+    def minimum(
+        self,
+        column: EncryptedOpenFheColumn,
+    ) -> EncryptedOpenFheColumn:
+        """Return one encrypted exact minimum value."""
+        return EncryptedOpenFheColumn(
+            self._engine.eval_min(column.ciphertext),
+            column.scale,
+            1,
+        )
+
+    def maximum(
+        self,
+        column: EncryptedOpenFheColumn,
+    ) -> EncryptedOpenFheColumn:
+        """Return one encrypted exact maximum value."""
+        return EncryptedOpenFheColumn(
+            self._engine.eval_max(column.ciphertext),
+            column.scale,
+            1,
+        )
+
+    def decrypt(
+        self,
+        column: EncryptedOpenFheColumn,
+    ) -> tuple[float, ...]:
+        """Decrypt a finished column only at the key-owner boundary."""
         self._engine._require_setup()
         plaintext = self._engine._context.Decrypt(
             self._engine._keys.secretKey,
-            encrypted_maximum,
+            column.ciphertext,
         )
-        plaintext.SetLength(1)
-        return (
-            float(plaintext.GetRealPackedValue()[0]) * self.input_scale
+        plaintext.SetLength(column.valid_count)
+        return tuple(
+            float(value) * column.scale
+            for value in plaintext.GetRealPackedValue()[
+                : column.valid_count
+            ]
         )
+
+    def decrypt_scalar(self, column: EncryptedOpenFheColumn) -> float:
+        """Decrypt a one-value reduction result."""
+        if column.valid_count != 1:
+            raise ValueError("decrypt_scalar requires a reduced column")
+        return self.decrypt(column)[0]
+
+    @staticmethod
+    def _validate_pair(
+        left: EncryptedOpenFheColumn,
+        right: EncryptedOpenFheColumn,
+    ) -> None:
+        if left.valid_count != right.valid_count:
+            raise ValueError("encrypted columns have different valid counts")
+        if left.scale != right.scale:
+            raise ValueError("encrypted columns have different scales")

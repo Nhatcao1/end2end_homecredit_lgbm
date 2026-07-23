@@ -15,9 +15,9 @@ ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from code.heir.python_api import (
+from code.heir.python_api import prepare_post_psi_groups
+from code.heir.python_api.official_groupby import (
     OfficialPaymentDiffGroupSum,
-    prepare_post_psi_groups,
 )
 
 

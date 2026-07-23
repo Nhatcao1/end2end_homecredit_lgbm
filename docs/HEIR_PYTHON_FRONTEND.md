@@ -157,3 +157,27 @@ python3 code/heir/examples/payment_diff_post_psi.py \
 It performs only the application flow: post-PSI semi-join, opaque grouping,
 parent encryption, encrypted PAYMENT_DIFF statistics/MAX, final decryption,
 and one output feature CSV. It contains no benchmark timing or report code.
+
+The public cryptographic API is feature-agnostic. Business code composes
+column operations explicitly:
+
+```python
+statistics = OfficialCkksBinaryColumnStatistics(
+    operation="subtract",
+    width=128,
+    input_scale=scale,
+)
+
+ops = OfficialOpenFheColumnOps(
+    width=128,
+    input_scale=scale,
+)
+installment_ct = ops.encrypt(installment, padding="duplicate")
+payment_ct = ops.encrypt(payment, padding="duplicate")
+payment_diff_ct = ops.subtract(installment_ct, payment_ct)
+maximum_ct = ops.maximum(payment_diff_ct)
+```
+
+The same APIs accept any numeric columns. `OfficialCkksBinaryColumn` exposes
+element-wise `add`, `subtract`, and `multiply` HEIR circuits; no kernel knows
+the names `PAYMENT_DIFF`, `AMT_PAYMENT`, or `AMT_INSTALMENT`.

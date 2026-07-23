@@ -7,14 +7,19 @@ from code.heir.python_api.official_ckks_aggregates import (
     compile_variance,
 )
 from code.heir.python_api.official_openfhe_minmax import (
+    EncryptedOpenFheColumn,
     EncryptedMinMax,
+    OfficialOpenFheColumnOps,
     OfficialOpenFheMinMax,
-    OfficialOpenFhePaymentDiffMax,
     public_power_of_two_scale,
 )
+from code.heir.python_api.official_columns import (
+    OfficialCkksBinaryColumn,
+    OfficialCkksBinaryColumnStatistics,
+    binary_column_mlir,
+    binary_column_statistics_mlir,
+)
 from code.heir.python_api.official_groupby import (
-    OfficialPaymentDiffGroupStatistics,
-    OfficialPaymentDiffGroupSum,
     OpaquePaymentGroup,
     PostPsiGroupLayout,
     prepare_post_psi_groups,
@@ -28,14 +33,17 @@ from code.heir.python_api.checkpoint import (
 
 __all__ = [
     "EncryptedMinMax",
+    "EncryptedOpenFheColumn",
     "LoadedSumCheckpoint",
     "OfficialCkksAggregate",
+    "OfficialCkksBinaryColumn",
+    "OfficialCkksBinaryColumnStatistics",
+    "OfficialOpenFheColumnOps",
     "OfficialOpenFheMinMax",
-    "OfficialOpenFhePaymentDiffMax",
-    "OfficialPaymentDiffGroupStatistics",
-    "OfficialPaymentDiffGroupSum",
     "OpaquePaymentGroup",
     "PostPsiGroupLayout",
+    "binary_column_mlir",
+    "binary_column_statistics_mlir",
     "compile_mean",
     "compile_checkpointable_sum",
     "compile_sum",

@@ -26,8 +26,8 @@ class OfficialPythonPaymentDiffE2ETest(unittest.TestCase):
         self.assertFalse(hasattr(module, "CMAKE"))
         self.assertFalse(hasattr(module, "RUNNER"))
         source = SCRIPT.read_text(encoding="utf-8")
-        self.assertIn("OfficialPaymentDiffGroupStatistics", source)
-        self.assertIn("OfficialOpenFhePaymentDiffMax", source)
+        self.assertIn("OfficialCkksBinaryColumnStatistics", source)
+        self.assertIn("OfficialOpenFheColumnOps", source)
         self.assertNotIn("subprocess", source)
 
     def test_scale_strictly_contains_both_parent_columns(self) -> None:

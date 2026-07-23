@@ -8,9 +8,10 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from code.heir.python_api.official_openfhe_minmax import (
+    EncryptedOpenFheColumn,
     EncryptedMinMax,
+    OfficialOpenFheColumnOps,
     OfficialOpenFheMinMax,
-    OfficialOpenFhePaymentDiffMax,
     public_power_of_two_scale,
 )
 
@@ -51,6 +52,9 @@ class FakeContext:
     def EvalCompareSwitchPrecompute(self, *args):
         self.precompute = args
 
+    def EvalMultKeyGen(self, secret_key):
+        self.eval_mult_key = secret_key
+
     def MakeCKKSPackedPlaintext(self, values):
         self.encoded = values
         return values
@@ -67,6 +71,14 @@ class FakeContext:
     def EvalSub(self, left, right):
         self.subtracted = (left, right)
         return "difference-ct"
+
+    def EvalAdd(self, left, right):
+        self.added = (left, right)
+        return "sum-ct"
+
+    def EvalMult(self, left, right):
+        self.multiplied = (left, right)
+        return "product-ct"
 
     def Decrypt(self, secret_key, ciphertext):
         value = -0.25 if ciphertext == "minimum-ct" else 0.25
@@ -129,29 +141,50 @@ class OfficialOpenFheMinMaxTest(unittest.TestCase):
         self.assertEqual((-128.0, 128.0), program.decrypt(encrypted))
         self.assertEqual((1, 1, True), fake.context.precompute)
 
-    def test_payment_diff_is_subtracted_after_parent_encryption(self):
+    def test_generic_columns_support_add_subtract_multiply_and_max(self):
         fake = FakeOpenFhe()
         target = "code.heir.python_api.official_openfhe_minmax._load_openfhe"
         with patch(target, return_value=fake):
-            program = OfficialOpenFhePaymentDiffMax(
+            program = OfficialOpenFheColumnOps(
                 width=4,
                 input_scale=512.0,
                 ring_dimension=16,
             )
             program.setup()
-        parents = program.encrypt(
-            payment=[60.0, 40.0],
-            installment=[100.0, 50.0],
+        installment = program.encrypt(
+            [100.0, 50.0],
+            padding="duplicate",
         )
-        encrypted_maximum = program.eval(parents)
+        payment = program.encrypt(
+            [60.0, 40.0],
+            padding="duplicate",
+        )
+        added = program.add(installment, payment)
+        difference = program.subtract(installment, payment)
+        product = program.multiply(installment, payment)
+        encrypted_maximum = program.maximum(difference)
 
-        self.assertEqual("maximum-ct", encrypted_maximum)
-        self.assertEqual(parents, fake.context.subtracted)
-        self.assertEqual(128.0, program.decrypt(encrypted_maximum))
+        self.assertEqual("sum-ct", added.ciphertext)
+        self.assertEqual("difference-ct", difference.ciphertext)
+        self.assertEqual("product-ct", product.ciphertext)
+        self.assertEqual(512.0 * 512.0, product.scale)
+        self.assertEqual(
+            EncryptedOpenFheColumn("maximum-ct", 512.0, 1),
+            encrypted_maximum,
+        )
+        self.assertEqual(
+            (installment.ciphertext, payment.ciphertext),
+            fake.context.subtracted,
+        )
+        self.assertEqual(
+            128.0,
+            program.decrypt_scalar(encrypted_maximum),
+        )
+        self.assertEqual("secret", fake.context.eval_mult_key)
 
-    def test_payment_diff_max_requires_power_of_two_width(self):
+    def test_column_ops_require_power_of_two_width(self):
         with self.assertRaisesRegex(ValueError, "power of two"):
-            OfficialOpenFhePaymentDiffMax(
+            OfficialOpenFheColumnOps(
                 width=3,
                 input_scale=512.0,
                 ring_dimension=16,
