@@ -36,6 +36,7 @@ set_target_properties(column_max_runner PROPERTIES BUILD_RPATH "${OpenFHE_LIBDIR
 
 
 RUNNER = r"""
+#include <chrono>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -51,6 +52,11 @@ RUNNER = r"""
 #include "openfhe.h"
 #include "scheme/ckksrns/ckksrns-ser.h"
 using namespace lbcrypto;
+using Clock = std::chrono::steady_clock;
+
+double seconds(Clock::time_point started) {
+  return std::chrono::duration<double>(Clock::now() - started).count();
+}
 
 void require(bool value, const std::string& message) {
   if (!value) throw std::runtime_error(message);
@@ -99,6 +105,7 @@ int main(int argc, char** argv) {
 
     const uint32_t depth =
         13 + static_cast<uint32_t>(std::log2(candidates));
+    const auto setupStarted = Clock::now();
     CCParams<CryptoContextCKKSRNS> parameters;
     parameters.SetMultiplicativeDepth(depth);
     parameters.SetFirstModSize(60);
@@ -132,16 +139,24 @@ int main(int argc, char** argv) {
     auto lweSecretKey = context->EvalSchemeSwitchingSetup(switching);
     context->EvalSchemeSwitchingKeyGen(keys, lweSecretKey);
     context->EvalCompareSwitchPrecompute(1, 1, true);
+    const double setupSeconds = seconds(setupStarted);
 
+    const auto encryptStarted = Clock::now();
     auto leftCt = context->Encrypt(
         keys.publicKey, context->MakeCKKSPackedPlaintext(left));
     auto rightCt = context->Encrypt(
         keys.publicKey, context->MakeCKKSPackedPlaintext(right));
+    const double encryptSeconds = seconds(encryptStarted);
+    const auto subtractStarted = Clock::now();
     auto derivedCt = context->EvalSub(leftCt, rightCt);
+    const double subtractSeconds = seconds(subtractStarted);
+    const auto maximumStarted = Clock::now();
     auto maxAndArgmax = context->EvalMaxSchemeSwitching(
         derivedCt, keys.publicKey, candidates, candidates);
+    const double maximumSeconds = seconds(maximumStarted);
     require(!maxAndArgmax.empty(), "encrypted MAX result is missing");
 
+    const auto serializeStarted = Clock::now();
     require(Serial::SerializeToFile(argv[5], leftCt, SerType::BINARY),
             "cannot save encrypted left parent");
     require(Serial::SerializeToFile(argv[6], rightCt, SerType::BINARY),
@@ -150,12 +165,15 @@ int main(int argc, char** argv) {
             "cannot save encrypted derived column");
     require(Serial::SerializeToFile(argv[8], maxAndArgmax[0], SerType::BINARY),
             "cannot save encrypted MAX");
+    const double serializeSeconds = seconds(serializeStarted);
 
     // The runner reaches the final client audit boundary only after max.ct
     // exists. No decrypted value is consumed by another encrypted operation.
+    const auto auditStarted = Clock::now();
     Plaintext audit;
     context->Decrypt(keys.secretKey, maxAndArgmax[0], &audit);
     audit->SetLength(1);
+    const double auditSeconds = seconds(auditStarted);
     std::ofstream result(argv[9]);
     result << std::setprecision(17)
            << "{\"maximum_normalized\":"
@@ -163,6 +181,13 @@ int main(int argc, char** argv) {
            << ",\"candidate_count\":" << candidates
            << ",\"ring_dimension\":" << context->GetRingDimension()
            << ",\"multiplicative_depth\":" << depth
+           << ",\"context_and_switching_key_setup_seconds\":"
+           << setupSeconds
+           << ",\"parent_encrypt_seconds\":" << encryptSeconds
+           << ",\"derived_subtraction_seconds\":" << subtractSeconds
+           << ",\"maximum_switch_seconds\":" << maximumSeconds
+           << ",\"ciphertext_serialize_seconds\":" << serializeSeconds
+           << ",\"audit_decrypt_seconds\":" << auditSeconds
            << ",\"argmax_retained\":false}\n";
     return 0;
   } catch (const OpenFHEException& error) {
@@ -224,6 +249,9 @@ class SourceBuiltOpenFheColumnMax:
         output_dir: Path,
         overwrite: bool = False,
     ) -> dict[str, object]:
+        import time
+
+        branch_started = time.perf_counter()
         left_values = [float(value) for value in left]
         right_values = [float(value) for value in right]
         if not left_values or len(left_values) != len(right_values):
@@ -255,13 +283,15 @@ class SourceBuiltOpenFheColumnMax:
         right_values.extend([right_values[0]] * padding)
         left_path = inputs / "left_parent.csv"
         right_path = inputs / "right_parent.csv"
+        started = time.perf_counter()
         write_values(left_path, left_values)
         write_values(right_path, right_values)
+        input_write_seconds = time.perf_counter() - started
 
         (work / "CMakeLists.txt").write_text(CMAKE, encoding="utf-8")
         (work / "column_max_runner.cpp").write_text(RUNNER, encoding="utf-8")
         build = work / "build"
-        run(
+        configure_seconds, _ = run(
             [
                 "cmake",
                 "-S",
@@ -272,7 +302,7 @@ class SourceBuiltOpenFheColumnMax:
             ],
             work,
         )
-        run(
+        build_seconds, _ = run(
             [
                 "cmake",
                 "--build",
@@ -283,7 +313,7 @@ class SourceBuiltOpenFheColumnMax:
             work,
         )
         result_path = inputs / "maximum_audit.json"
-        run(
+        runner_wall_seconds, _ = run(
             [
                 str((build / "column_max_runner").resolve()),
                 str(left_path),
@@ -300,6 +330,23 @@ class SourceBuiltOpenFheColumnMax:
             work,
         )
         result = json.loads(result_path.read_text(encoding="utf-8"))
+        result["timings_seconds"] = {
+            "input_write": input_write_seconds,
+            "cmake_configure": configure_seconds,
+            "cmake_build": build_seconds,
+            "runner_wall": runner_wall_seconds,
+            "context_and_switching_key_setup": result[
+                "context_and_switching_key_setup_seconds"
+            ],
+            "parent_encrypt": result["parent_encrypt_seconds"],
+            "derived_subtraction": result["derived_subtraction_seconds"],
+            "maximum_switch": result["maximum_switch_seconds"],
+            "ciphertext_serialize": result[
+                "ciphertext_serialize_seconds"
+            ],
+            "audit_decrypt": result["audit_decrypt_seconds"],
+            "branch_total": time.perf_counter() - branch_started,
+        }
         result.update(
             {
                 "maximum": float(result["maximum_normalized"])

@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -32,7 +33,18 @@ class SourceBuiltOpenFheColumnMaxTest(unittest.TestCase):
                 if str(command[0]).endswith("column_max_runner"):
                     Path(command[8]).write_bytes(b"encrypted-max")
                     Path(command[9]).write_text(
-                        '{"maximum_normalized":0.25}\n',
+                        json.dumps(
+                            {
+                                "maximum_normalized": 0.25,
+                                "context_and_switching_key_setup_seconds": 1.0,
+                                "parent_encrypt_seconds": 2.0,
+                                "derived_subtraction_seconds": 3.0,
+                                "maximum_switch_seconds": 4.0,
+                                "ciphertext_serialize_seconds": 5.0,
+                                "audit_decrypt_seconds": 6.0,
+                            }
+                        )
+                        + "\n",
                         encoding="utf-8",
                     )
                 return 0.0, ""
