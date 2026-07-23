@@ -60,6 +60,21 @@ inline void require_scalar_bundle(const Bundle& values, const char* operation) {
     throw std::runtime_error(std::string(operation) + " must return one encrypted scalar");
 }
 
+// Add corresponding encrypted scalar/vector outputs. This is needed when a
+// logical column spans multiple packed ciphertexts: HEIR SUM reduces each
+// ciphertext locally, then this function combines those encrypted partials.
+// It never decrypts or repacks either input bundle.
+inline Bundle add_bundles(const Context& context, const Bundle& left,
+                          const Bundle& right) {
+  if (left.size() != right.size())
+    throw std::runtime_error("ciphertext bundle shape mismatch");
+  Bundle result;
+  result.reserve(left.size());
+  for (std::size_t index = 0; index < left.size(); ++index)
+    result.push_back(context->EvalAdd(left[index], right[index]));
+  return result;
+}
+
 // Generic CKKS mean where the group count is intentionally public metadata.
 inline Bundle mean_from_sum(const Context& context, const Bundle& sum,
                             std::size_t public_valid_count) {

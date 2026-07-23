@@ -54,6 +54,7 @@ RUNNER = r'''
 #include "sub_output.h"
 #include "sum_output.h"
 #include "mean_output.h"
+#include "group_statistics.h"
 using namespace lbcrypto;
 using Bundle = std::vector<Ciphertext<DCRTPoly>>;
 struct Parents { std::vector<double> installment, payment; };
@@ -73,11 +74,6 @@ Parents readParents(const std::string& path) {
 std::vector<double> chunk(const std::vector<double>& values, size_t start, size_t slots) {
   std::vector<double> output(slots, 0.0); const size_t take = std::min(slots, values.size() - start);
   std::copy(values.begin() + start, values.begin() + start + take, output.begin()); return output;
-}
-Bundle addBundles(const CryptoContext<DCRTPoly>& context, const Bundle& left, const Bundle& right) {
-  require(left.size() == right.size(), "ciphertext bundle shape mismatch"); Bundle output; output.reserve(left.size());
-  for (size_t index = 0; index < left.size(); ++index) output.push_back(context->EvalAdd(left[index], right[index]));
-  return output;
 }
 int main(int argc, char** argv) {
   // executable + input CSV + scale + repetitions + HE CSV + execution JSON
@@ -108,11 +104,11 @@ int main(int argc, char** argv) {
         started = std::chrono::steady_clock::now(); auto partialSum = encrypted_sum(context, diffForSum); sumReduce += seconds(started);
         started = std::chrono::steady_clock::now();
         if (first) { totalCount = std::move(partialCount); totalSum = std::move(partialSum); first = false; }
-        else { totalCount = addBundles(context, totalCount, partialCount); totalSum = addBundles(context, totalSum, partialSum); }
+        else { totalCount = heir::runtime::add_bundles(context, totalCount, partialCount); totalSum = heir::runtime::add_bundles(context, totalSum, partialSum); }
         merge += seconds(started);
       }
       require(totalCount.size() == 1 && totalSum.size() == 1, "expected scalar encrypted reductions");
-      auto started = std::chrono::steady_clock::now(); auto meanScalar = context->EvalMult(totalSum[0], 1.0 / static_cast<double>(count)); Bundle mean{meanScalar}; const double meanScale = seconds(started);
+      auto started = std::chrono::steady_clock::now(); auto mean = heir::runtime::mean_from_sum(context, totalSum, count); const double meanScale = seconds(started);
       started = std::chrono::steady_clock::now(); const double heCount = encrypted_sum__decrypt__result0(context, totalCount, keys.secretKey); const double heSum = encrypted_sum__decrypt__result0(context, totalSum, keys.secretKey) * scale; const double heMean = encrypted_sum__decrypt__result0(context, mean, keys.secretKey) * scale; const double decrypt = seconds(started);
       const double online = parentEncrypt + maskEncrypt + feature + copies + countReduce + sumReduce + merge + meanScale + decrypt;
       out << repetition << ',' << chunks << ',' << parentEncrypt << ',' << maskEncrypt << ',' << feature << ',' << copies << ',' << countReduce << ',' << sumReduce << ',' << merge << ',' << meanScale << ',' << decrypt << ',' << online << ',' << heCount << ',' << std::abs(heCount - static_cast<double>(count)) << ',' << heSum << ',' << "0," << heMean << ",0\n";
@@ -247,6 +243,7 @@ def one_run(args: argparse.Namespace, root: Path, value_count: int) -> None:
     if any(int(entries[name]["logical_value_count"]) != slots for name in wanted):
         raise ValueError("subtract, sum, and mean kernels must use the same logical lane count")
     work = root / "runner"; work.mkdir()
+    shutil.copyfile(Path(__file__).resolve().parents[1] / "runtime" / "group_statistics.h", work / "group_statistics.h")
     for entry, prefix in wanted.items():
         copy_generated_sources((args.generated_dir / entries[entry]["source"]).parent, work, prefix)
     mean_cpp = work / "mean_output.cpp"

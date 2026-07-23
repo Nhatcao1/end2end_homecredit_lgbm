@@ -10,7 +10,9 @@ class RealPaymentDiffSumMeanBenchmarkTest(unittest.TestCase):
         self.assertIn("std::ofstream meta(argv[5])", benchmark.RUNNER)
         self.assertIn("encrypted_subtract(context, encryptedInstallment, encryptedPayment)", benchmark.RUNNER)
         self.assertIn("auto partialSum = encrypted_sum(context, diffForSum)", benchmark.RUNNER)
-        self.assertIn("context->EvalMult(totalSum[0], 1.0 / static_cast<double>(count))", benchmark.RUNNER)
+        self.assertIn('#include "group_statistics.h"', benchmark.RUNNER)
+        self.assertIn("heir::runtime::add_bundles", benchmark.RUNNER)
+        self.assertIn("heir::runtime::mean_from_sum(context, totalSum, count)", benchmark.RUNNER)
         self.assertIn("auto encryptedValid = encrypted_sum__encrypt__arg0", benchmark.RUNNER)
 
     def test_mean_context_depth_patch_is_explicit(self):
