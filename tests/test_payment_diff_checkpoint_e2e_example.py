@@ -13,18 +13,19 @@ class PaymentDiffCheckpointE2EExampleTest(unittest.TestCase):
         source = SCRIPT.read_text(encoding="utf-8")
         self.assertIn("prepare_post_psi_groups(", source)
         self.assertIn(
-            "compile_checkpointable_binary_column_statistics(",
+            "compile_checkpointable_binary_column_aggregate(",
             source,
         )
         self.assertIn('operation="subtract"', source)
         self.assertIn(
-            "save_binary_column_statistics_checkpoint(",
+            "save_binary_column_aggregate_checkpoint(",
             source,
         )
         self.assertIn(
-            "load_binary_column_statistics_checkpoint(",
+            "load_binary_column_aggregate_checkpoint(",
             source,
         )
+        self.assertIn('("sum", "mean", "variance")', source)
         self.assertIn("OfficialOpenFheColumnOps(", source)
         self.assertIn("maximum.maximum(", source)
         self.assertIn("PAYMENT_DIFF_MEAN", source)

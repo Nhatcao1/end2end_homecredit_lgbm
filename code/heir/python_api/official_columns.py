@@ -13,6 +13,7 @@ from code.heir.python_api.official_ckks_aggregates import (
 
 
 BinaryOperation = Literal["add", "subtract", "multiply"]
+AggregateOperation = Literal["sum", "mean", "variance"]
 _ARITHMETIC = {
     "add": "arith.addf",
     "subtract": "arith.subf",
@@ -151,6 +152,99 @@ def binary_column_statistics_mlir(
     return "\n".join(lines) + "\n"
 
 
+def binary_column_aggregate_mlir(
+    width: int,
+    valid_count: int,
+    operation: BinaryOperation,
+    aggregate: AggregateOperation,
+) -> str:
+    """Emit one encrypted aggregate over one encrypted binary column.
+
+    HEIR 2026.7.1 is substantially more reliable with a single scalar result
+    than with a packed multi-result statistics tensor.
+    """
+    if width < 2 or not 2 <= valid_count <= width:
+        raise ValueError("valid_count must be in [2, width]")
+    operation = _validate_operation(operation)
+    if aggregate not in {"sum", "mean", "variance"}:
+        raise ValueError(f"unsupported aggregate: {aggregate}")
+    tensor = f"tensor<{width}xf64>"
+    lines = [
+        f"func.func @encrypted_column_{operation}_{aggregate}_{width}_{valid_count}(",
+        f"    %left: {tensor} {{secret.secret}},",
+        f"    %right: {tensor} {{secret.secret}}",
+        ") -> f64 {",
+        f"  %derived = {_ARITHMETIC[operation]} "
+        f"%left, %right : {tensor}",
+        "  %zero_index = arith.constant 0 : index",
+        f"  %first_value = tensor.extract "
+        f"%derived[%zero_index] : {tensor}",
+    ]
+    if aggregate == "variance":
+        lines.extend(
+            [
+                "  %first_square = arith.mulf "
+                "%first_value, %first_value : f64",
+                f"  %sum_result, %square_sum_result = affine.for "
+                f"%i = 1 to {valid_count}",
+                "      iter_args(%sum = %first_value, "
+                "%squares = %first_square)",
+                "      -> (f64, f64) {",
+                f"    %value = tensor.extract %derived[%i] : {tensor}",
+                "    %square = arith.mulf %value, %value : f64",
+                "    %next_sum = arith.addf %sum, %value : f64",
+                "    %next_squares = arith.addf "
+                "%squares, %square : f64",
+                "    affine.yield %next_sum, %next_squares : f64, f64",
+                "  }",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                f"  %sum_result = affine.for %i = 1 to {valid_count}",
+                "      iter_args(%sum = %first_value) -> (f64) {",
+                f"    %value = tensor.extract %derived[%i] : {tensor}",
+                "    %next_sum = arith.addf %sum, %value : f64",
+                "    affine.yield %next_sum : f64",
+                "  }",
+            ]
+        )
+    if aggregate == "sum":
+        lines.extend(["  return %sum_result : f64", "}"])
+    elif aggregate == "mean":
+        lines.extend(
+            [
+                f"  %inverse_count = arith.constant "
+                f"{1.0 / valid_count:.17g} : f64",
+                "  %mean_result = arith.mulf %sum_result, "
+                "%inverse_count : f64",
+                "  return %mean_result : f64",
+                "}",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                f"  %inverse_count = arith.constant "
+                f"{1.0 / valid_count:.17g} : f64",
+                f"  %inverse_sample_count = arith.constant "
+                f"{1.0 / (valid_count - 1):.17g} : f64",
+                "  %sum_squared = arith.mulf %sum_result, "
+                "%sum_result : f64",
+                "  %mean_square_correction = arith.mulf %sum_squared, "
+                "%inverse_count : f64",
+                "  %centered_square_sum = arith.subf %square_sum_result, "
+                "%mean_square_correction : f64",
+                "  %variance_result = arith.mulf %centered_square_sum, "
+                "%inverse_sample_count : f64",
+                "  return %variance_result : f64",
+                "}",
+            ]
+        )
+    return "\n".join(lines) + "\n"
+
+
 @dataclass
 class OfficialCkksBinaryColumn:
     """Reusable HEIR program equivalent to ``df[left] op df[right]``."""
@@ -232,6 +326,103 @@ class OfficialCkksBinaryColumn:
         return tuple(
             float(value) * self.output_scale
             for value in decoded[:valid_count]
+        )
+
+    def _require_setup(self) -> None:
+        if not self._is_setup:
+            raise RuntimeError("call setup() before encrypt/eval/decrypt")
+
+
+@dataclass
+class OfficialCkksBinaryColumnAggregate:
+    """One stable single-output aggregate over an encrypted binary column."""
+
+    operation: BinaryOperation
+    aggregate: AggregateOperation
+    width: int
+    valid_count: int
+    input_scale: float = 1.0
+    debug: bool = False
+    backend: Any | None = field(default=None, repr=False)
+    _program: Any = field(init=False, repr=False)
+    _is_setup: bool = field(init=False, default=False, repr=False)
+
+    def __post_init__(self) -> None:
+        self.operation = _validate_operation(self.operation)
+        if self.aggregate not in {"sum", "mean", "variance"}:
+            raise ValueError(f"unsupported aggregate: {self.aggregate}")
+        if self.input_scale <= 0 or not math.isfinite(self.input_scale):
+            raise ValueError("input_scale must be finite and positive")
+        options = {
+            "mlir_str": binary_column_aggregate_mlir(
+                self.width,
+                self.valid_count,
+                self.operation,
+                self.aggregate,
+            ),
+            "scheme": "ckks",
+            "debug": self.debug,
+        }
+        if self.backend is not None:
+            options["backend"] = self.backend
+        self._program = _load_official_heir_compile()(**options)
+
+    @property
+    def mlir(self) -> str:
+        return binary_column_aggregate_mlir(
+            self.width,
+            self.valid_count,
+            self.operation,
+            self.aggregate,
+        )
+
+    @property
+    def derived_scale(self) -> float:
+        if self.operation == "multiply":
+            return self.input_scale * self.input_scale
+        return self.input_scale
+
+    def setup(self) -> None:
+        self._program.setup()
+        self._is_setup = True
+
+    def encrypt(
+        self,
+        left: Sequence[float],
+        right: Sequence[float],
+    ) -> tuple[Any, Any]:
+        self._require_setup()
+        if len(left) != self.valid_count or len(right) != self.valid_count:
+            raise ValueError(
+                f"both columns must contain exactly {self.valid_count} values"
+            )
+        packed_left = _pack(
+            [float(value) / self.input_scale for value in left],
+            self.width,
+        )
+        packed_right = _pack(
+            [float(value) / self.input_scale for value in right],
+            self.width,
+        )
+        encryptors = self._program.compilation_result.arg_enc_funcs or {}
+        if len(encryptors) != 2:
+            raise RuntimeError("expected two encrypted column inputs")
+        names = list(encryptors)
+        return (
+            getattr(self._program, f"encrypt_{names[0]}")(packed_left),
+            getattr(self._program, f"encrypt_{names[1]}")(packed_right),
+        )
+
+    def eval(self, encrypted_columns: tuple[Any, Any]) -> Any:
+        self._require_setup()
+        return self._program.eval(*encrypted_columns)
+
+    def decrypt(self, encrypted_result: Any) -> float:
+        self._require_setup()
+        decoded = float(self._program.decrypt_result(encrypted_result))
+        scale = self.derived_scale
+        return decoded * (
+            scale * scale if self.aggregate == "variance" else scale
         )
 
     def _require_setup(self) -> None:

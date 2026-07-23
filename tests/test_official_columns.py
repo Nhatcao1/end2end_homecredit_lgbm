@@ -10,7 +10,9 @@ sys.path.insert(0, str(ROOT))
 
 from code.heir.python_api.official_columns import (
     OfficialCkksBinaryColumn,
+    OfficialCkksBinaryColumnAggregate,
     OfficialCkksBinaryColumnStatistics,
+    binary_column_aggregate_mlir,
     binary_column_mlir,
     binary_column_statistics_mlir,
 )
@@ -44,6 +46,11 @@ class FakeStatisticsProgram(FakeProgram):
         return [30.0, 15.0, 2.0]
 
 
+class FakeAggregateProgram(FakeProgram):
+    def decrypt_result(self, result):
+        return 2.0
+
+
 class OfficialColumnsTest(unittest.TestCase):
     def test_primitive_mlir_is_feature_agnostic(self):
         for operation, instruction in (
@@ -61,6 +68,22 @@ class OfficialColumnsTest(unittest.TestCase):
         self.assertIn("%derived = arith.subf %left, %right", source)
         self.assertIn("return %result : tensor<3xf64>", source)
         self.assertNotIn("PAYMENT_DIFF", source)
+
+    def test_single_output_aggregate_mlir_avoids_multi_result_tensor(self):
+        for aggregate, result_name in (
+            ("sum", "%sum_result"),
+            ("mean", "%mean_result"),
+            ("variance", "%variance_result"),
+        ):
+            source = binary_column_aggregate_mlir(
+                8,
+                3,
+                "subtract",
+                aggregate,
+            )
+            self.assertIn("%derived = arith.subf %left, %right", source)
+            self.assertIn(f"return {result_name} : f64", source)
+            self.assertNotIn("tensor.from_elements", source)
 
     def test_binary_column_wraps_dataframe_style_sequences(self):
         loader = "code.heir.python_api.official_columns._load_official_heir_compile"
@@ -95,6 +118,19 @@ class OfficialColumnsTest(unittest.TestCase):
             program.decrypt(result),
         )
         self.assertEqual((0.5, 1.0), result[1][-2:])
+
+    def test_single_output_variance_restores_squared_input_scale(self):
+        loader = "code.heir.python_api.official_columns._load_official_heir_compile"
+        with patch(loader, return_value=lambda **_: FakeAggregateProgram()):
+            program = OfficialCkksBinaryColumnAggregate(
+                "subtract",
+                "variance",
+                width=4,
+                valid_count=2,
+                input_scale=8.0,
+            )
+        program.setup()
+        self.assertEqual(128.0, program.decrypt("encrypted-result"))
 
 
 if __name__ == "__main__":

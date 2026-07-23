@@ -3,8 +3,8 @@
 
 This is application flow, not a benchmark/report generator:
 
-``CSV -> post-PSI group -> encrypt parents -> PAYMENT_DIFF ->
-encrypted SUM/MEAN/VAR -> save/reload -> encrypted MAX -> final decrypt``.
+``CSV -> post-PSI group -> three encrypted PAYMENT_DIFF aggregate branches
+-> save/reload -> encrypted MAX branch -> final decrypt``.
 """
 
 from __future__ import annotations
@@ -20,11 +20,11 @@ if str(ROOT) not in sys.path:
 
 from code.heir.python_api import (
     OfficialOpenFheColumnOps,
-    compile_checkpointable_binary_column_statistics,
-    load_binary_column_statistics_checkpoint,
+    compile_checkpointable_binary_column_aggregate,
+    load_binary_column_aggregate_checkpoint,
     prepare_post_psi_groups,
     public_power_of_two_scale,
-    save_binary_column_statistics_checkpoint,
+    save_binary_column_aggregate_checkpoint,
 )
 
 
@@ -71,41 +71,48 @@ def main() -> None:
         ]
     )
 
-    # One official HEIR circuit performs the original feature expression and
-    # returns an encrypted [SUM, MEAN, sample VAR] tensor. There is no
-    # PAYMENT_DIFF plaintext between these operations.
-    statistics = compile_checkpointable_binary_column_statistics(
-        operation="subtract",
-        width=args.bucket_size,
-        input_scale=scale,
-    )
-    statistics.setup()
-    statistics_parents = statistics.encrypt(
-        group.installment,
-        group.payment,
-    )
-    statistics_ciphertext = statistics.eval(
-        statistics_parents,
-        valid_count=group.real_count,
-    )
+    # HEIR Python 2026.7.1 is unreliable when one circuit returns a packed
+    # SUM/MEAN/VAR tensor. Use one proven scalar-output circuit per branch.
+    # Every branch still computes PAYMENT_DIFF after encryption; no plaintext
+    # derived column is passed between branches.
+    aggregate_root = args.checkpoint_dir.resolve() / "aggregates"
+    branch_dirs: dict[str, Path] = {}
+    for aggregate in ("sum", "mean", "variance"):
+        print(f"[HEIR] compile {aggregate} branch", flush=True)
+        branch = compile_checkpointable_binary_column_aggregate(
+            operation="subtract",
+            aggregate=aggregate,
+            width=args.bucket_size,
+            valid_count=group.real_count,
+            input_scale=scale,
+        )
+        print(f"[HEIR] setup/encrypt/evaluate {aggregate} branch", flush=True)
+        branch.setup()
+        encrypted_parents = branch.encrypt(
+            group.installment,
+            group.payment,
+        )
+        encrypted_result = branch.eval(encrypted_parents)
+        branch_dir = aggregate_root / aggregate
+        save_binary_column_aggregate_checkpoint(
+            branch,
+            encrypted_columns=encrypted_parents,
+            result_ciphertext=encrypted_result,
+            checkpoint_dir=branch_dir,
+            overwrite=args.overwrite,
+        )
+        print(f"[HEIR] saved {aggregate} checkpoint: {branch_dir}", flush=True)
+        branch_dirs[aggregate] = branch_dir
+        del branch, encrypted_parents, encrypted_result
 
-    # Persist the context, evaluation keys, encrypted parents, and encrypted
-    # aggregate tensor. The audit key remains client-private.
-    save_binary_column_statistics_checkpoint(
-        statistics,
-        encrypted_columns=statistics_parents,
-        result_ciphertext=statistics_ciphertext,
-        valid_count=group.real_count,
-        checkpoint_dir=args.checkpoint_dir,
-        overwrite=args.overwrite,
-    )
-
-    # Conceptual restart boundary: reconstruct the program only from files.
-    del statistics, statistics_parents, statistics_ciphertext
-    restored = load_binary_column_statistics_checkpoint(
-        args.checkpoint_dir,
-        for_audit=True,
-    )
+    # Conceptual restart boundary: rebuild all three programs from files.
+    restored = {
+        aggregate: load_binary_column_aggregate_checkpoint(
+            checkpoint_dir,
+            for_audit=True,
+        )
+        for aggregate, checkpoint_dir in branch_dirs.items()
+    }
 
     # Exact MAX needs CKKS-to-FHEW switching. The current HEIR Python module
     # cannot attach switching to its module-local ciphertexts, so this follows
@@ -115,6 +122,7 @@ def main() -> None:
         input_scale=scale,
         ring_dimension=args.max_ring_dimension,
     )
+    print("[OpenFHE] setup CKKS-to-FHEW MAX branch", flush=True)
     maximum.setup()
     max_installment = maximum.encrypt(
         group.installment,
@@ -126,10 +134,17 @@ def main() -> None:
     )
     max_payment_diff = maximum.subtract(max_installment, max_payment)
     maximum_ciphertext = maximum.maximum(max_payment_diff)
+    print("[OpenFHE] encrypted MAX ready", flush=True)
 
     # Final client boundary only. All four values were encrypted until here.
-    payment_diff_sum, payment_diff_mean, payment_diff_var = (
-        restored.program.decrypt(restored.result_ciphertext)
+    payment_diff_sum = restored["sum"].program.decrypt(
+        restored["sum"].result_ciphertext
+    )
+    payment_diff_mean = restored["mean"].program.decrypt(
+        restored["mean"].result_ciphertext
+    )
+    payment_diff_var = restored["variance"].program.decrypt(
+        restored["variance"].result_ciphertext
     )
     payment_diff_max = maximum.decrypt_scalar(maximum_ciphertext)
     audit_csv = (
@@ -158,7 +173,7 @@ def main() -> None:
             ]
         )
 
-    print(f"public checkpoint: {args.checkpoint_dir.resolve() / 'public'}")
+    print(f"aggregate checkpoints: {aggregate_root}")
     print(f"final client features: {audit_csv}")
 
 

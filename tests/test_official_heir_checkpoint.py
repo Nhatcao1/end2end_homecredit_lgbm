@@ -9,6 +9,7 @@ sys.path.insert(0, str(ROOT))
 from code.heir.python_api.checkpoint import (
     _SerializationTranslateProxy,
     patch_generated_pybind,
+    save_binary_column_aggregate_checkpoint,
     save_binary_column_checkpoint,
     save_binary_column_statistics_checkpoint,
 )
@@ -184,6 +185,54 @@ class OfficialHeirCheckpointTest(unittest.TestCase):
             },
             public_names,
         )
+
+    def test_single_aggregate_checkpoint_records_scalar_branch(self):
+        class FakeModule:
+            @staticmethod
+            def _write(path):
+                Path(path).write_bytes(b"artifact")
+
+        for name in (
+            "__checkpoint_save_context",
+            "__checkpoint_save_public_key",
+            "__checkpoint_save_private_key",
+            "__checkpoint_save_ciphertexts",
+            "__checkpoint_save_eval_sum_keys",
+        ):
+            setattr(
+                FakeModule,
+                name,
+                staticmethod(lambda value, path: FakeModule._write(path)),
+            )
+        program = SimpleNamespace(
+            operation="subtract",
+            aggregate="mean",
+            width=8,
+            valid_count=3,
+            input_scale=16.0,
+            derived_scale=16.0,
+            mlir="func.func @generic_mean",
+            _is_setup=True,
+            _program=SimpleNamespace(
+                crypto_context="context",
+                keypair=SimpleNamespace(
+                    publicKey="public",
+                    secretKey="secret",
+                ),
+                compilation_result=SimpleNamespace(module=FakeModule()),
+            ),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            manifest = save_binary_column_aggregate_checkpoint(
+                program,
+                encrypted_columns=(["left"], ["right"]),
+                result_ciphertext=["mean"],
+                checkpoint_dir=Path(directory),
+            )
+
+        self.assertEqual("binary_column_aggregate", manifest["operation"])
+        self.assertEqual("mean", manifest["aggregate"])
+        self.assertIn("result_ciphertext", manifest["public_artifacts"])
 
 
 if __name__ == "__main__":
