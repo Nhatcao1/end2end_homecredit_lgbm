@@ -10,6 +10,7 @@ sys.path.insert(0, str(ROOT))
 from code.heir.python_api.official_openfhe_minmax import (
     EncryptedMinMax,
     OfficialOpenFheMinMax,
+    OfficialOpenFhePaymentDiffMax,
     public_power_of_two_scale,
 )
 
@@ -62,6 +63,10 @@ class FakeContext:
 
     def EvalMaxSchemeSwitching(self, *args):
         return ["maximum-ct", "argmax-ct"]
+
+    def EvalSub(self, left, right):
+        self.subtracted = (left, right)
+        return "difference-ct"
 
     def Decrypt(self, secret_key, ciphertext):
         value = -0.25 if ciphertext == "minimum-ct" else 0.25
@@ -123,6 +128,34 @@ class OfficialOpenFheMinMaxTest(unittest.TestCase):
         )
         self.assertEqual((-128.0, 128.0), program.decrypt(encrypted))
         self.assertEqual((1, 1, True), fake.context.precompute)
+
+    def test_payment_diff_is_subtracted_after_parent_encryption(self):
+        fake = FakeOpenFhe()
+        target = "code.heir.python_api.official_openfhe_minmax._load_openfhe"
+        with patch(target, return_value=fake):
+            program = OfficialOpenFhePaymentDiffMax(
+                width=4,
+                input_scale=512.0,
+                ring_dimension=16,
+            )
+            program.setup()
+        parents = program.encrypt(
+            payment=[60.0, 40.0],
+            installment=[100.0, 50.0],
+        )
+        encrypted_maximum = program.eval(parents)
+
+        self.assertEqual("maximum-ct", encrypted_maximum)
+        self.assertEqual(parents, fake.context.subtracted)
+        self.assertEqual(128.0, program.decrypt(encrypted_maximum))
+
+    def test_payment_diff_max_requires_power_of_two_width(self):
+        with self.assertRaisesRegex(ValueError, "power of two"):
+            OfficialOpenFhePaymentDiffMax(
+                width=3,
+                input_scale=512.0,
+                ring_dimension=16,
+            )
 
 
 if __name__ == "__main__":

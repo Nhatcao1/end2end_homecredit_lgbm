@@ -206,3 +206,85 @@ class OfficialOpenFheMinMax:
     def _require_setup(self) -> None:
         if self._context is None or self._keys is None:
             raise RuntimeError("call setup() before encrypt/eval/decrypt")
+
+
+class OfficialOpenFhePaymentDiffMax:
+    """Exact MAX where PAYMENT_DIFF is derived after parent encryption."""
+
+    def __init__(
+        self,
+        *,
+        width: int,
+        input_scale: float,
+        ring_dimension: int = 16384,
+    ) -> None:
+        if width < 2:
+            raise ValueError("width must be at least two")
+        if width & (width - 1):
+            raise ValueError("width must be a power of two")
+        self.width = width
+        self.input_scale = float(input_scale)
+        self._engine = OfficialOpenFheMinMax(
+            valid_count=width,
+            input_scale=input_scale,
+            ring_dimension=ring_dimension,
+        )
+
+    def setup(self) -> None:
+        self._engine.setup()
+
+    def encrypt(
+        self,
+        payment: Sequence[float],
+        installment: Sequence[float],
+    ) -> tuple[Any, Any]:
+        """Duplicate-pad genuine parent pairs, then encrypt both columns."""
+        self._engine._require_setup()
+        paid = [float(value) for value in payment]
+        due = [float(value) for value in installment]
+        if len(paid) != len(due) or not 2 <= len(paid) <= self.width:
+            raise ValueError("parent columns must have equal length in [2, width]")
+        if not all(math.isfinite(value) for value in [*paid, *due]):
+            raise ValueError("parent columns must not contain NaN or infinity")
+        paid.extend([paid[0]] * (self.width - len(paid)))
+        due.extend([due[0]] * (self.width - len(due)))
+        normalized_paid = [value / self.input_scale for value in paid]
+        normalized_due = [value / self.input_scale for value in due]
+        if not all(
+            -0.5 < value <= 0.5
+            for value in [*normalized_paid, *normalized_due]
+        ):
+            raise ValueError(
+                "parent input violates (-0.5, 0.5]; increase input_scale"
+            )
+        context = self._engine._context
+        key = self._engine._keys.publicKey
+        return (
+            context.Encrypt(
+                key,
+                context.MakeCKKSPackedPlaintext(normalized_due),
+            ),
+            context.Encrypt(
+                key,
+                context.MakeCKKSPackedPlaintext(normalized_paid),
+            ),
+        )
+
+    def eval(self, encrypted_parents: tuple[Any, Any]) -> Any:
+        """Calculate PAYMENT_DIFF as CT-CT, then exact scheme-switched MAX."""
+        self._engine._require_setup()
+        installment, payment = encrypted_parents
+        difference = self._engine._context.EvalSub(installment, payment)
+        return self._engine.eval_max(difference)
+
+    def decrypt(self, encrypted_maximum: Any) -> float:
+        """Decrypt only the final maximum at the audit boundary."""
+        self._engine._require_setup()
+        plaintext = self._engine._context.Decrypt(
+            self._engine._keys.secretKey,
+            encrypted_maximum,
+        )
+        plaintext.SetLength(1)
+        return (
+            float(plaintext.GetRealPackedValue()[0]) * self.input_scale
+        )

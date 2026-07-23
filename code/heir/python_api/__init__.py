@@ -9,9 +9,11 @@ from code.heir.python_api.official_ckks_aggregates import (
 from code.heir.python_api.official_openfhe_minmax import (
     EncryptedMinMax,
     OfficialOpenFheMinMax,
+    OfficialOpenFhePaymentDiffMax,
     public_power_of_two_scale,
 )
 from code.heir.python_api.official_groupby import (
+    OfficialPaymentDiffGroupStatistics,
     OfficialPaymentDiffGroupSum,
     OpaquePaymentGroup,
     PostPsiGroupLayout,
@@ -29,6 +31,8 @@ __all__ = [
     "LoadedSumCheckpoint",
     "OfficialCkksAggregate",
     "OfficialOpenFheMinMax",
+    "OfficialOpenFhePaymentDiffMax",
+    "OfficialPaymentDiffGroupStatistics",
     "OfficialPaymentDiffGroupSum",
     "OpaquePaymentGroup",
     "PostPsiGroupLayout",

@@ -74,6 +74,93 @@ def payment_diff_sum_mlir(width: int) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _balanced_reduce(names: list[str], result: str, prefix: str) -> list[str]:
+    """Return MLIR additions for one balanced scalar reduction tree."""
+    current = list(names)
+    lines: list[str] = []
+    operation = 0
+    while len(current) > 1:
+        next_level: list[str] = []
+        for index in range(0, len(current), 2):
+            if index + 1 == len(current):
+                next_level.append(current[index])
+                continue
+            name = (
+                result
+                if len(current) == 2
+                else f"%{prefix}_{operation}"
+            )
+            lines.append(
+                f"  {name} = arith.addf {current[index]}, "
+                f"{current[index + 1]} : f64"
+            )
+            next_level.append(name)
+            operation += 1
+        current = next_level
+    return lines
+
+
+def payment_diff_statistics_mlir(width: int) -> str:
+    """Emit one encrypted tensor containing PAYMENT_DIFF SUM/MEAN/VAR.
+
+    The two reciprocals are public group metadata. Parent amounts and all
+    derived values remain encrypted. Returning one tensor avoids HEIR
+    Python's current multi-result limitation.
+    """
+    if width < 2:
+        raise ValueError("width must be at least two")
+    tensor = f"tensor<{width}xf64>"
+    lines = [
+        "func.func @payment_diff_statistics(",
+        f"    %installment: {tensor} {{secret.secret}},",
+        f"    %payment: {tensor} {{secret.secret}},",
+        "    %inverse_count: f64,",
+        "    %inverse_sample_count: f64",
+        ") -> tensor<3xf64> {",
+        f"  %difference = arith.subf %installment, %payment : {tensor}",
+        f"  %squares = arith.mulf %difference, %difference : {tensor}",
+    ]
+    differences: list[str] = []
+    squares: list[str] = []
+    for index in range(width):
+        lines.extend(
+            [
+                f"  %index_{index} = arith.constant {index} : index",
+                f"  %difference_{index} = tensor.extract "
+                f"%difference[%index_{index}] : {tensor}",
+                f"  %square_{index} = tensor.extract "
+                f"%squares[%index_{index}] : {tensor}",
+            ]
+        )
+        differences.append(f"%difference_{index}")
+        squares.append(f"%square_{index}")
+    lines.extend(
+        _balanced_reduce(differences, "%sum_result", "sum_tree")
+    )
+    lines.extend(
+        _balanced_reduce(squares, "%square_sum_result", "square_sum_tree")
+    )
+    lines.extend(
+        [
+            "  %mean_result = arith.mulf %sum_result, "
+            "%inverse_count : f64",
+            "  %sum_squared = arith.mulf %sum_result, "
+            "%sum_result : f64",
+            "  %mean_square_correction = arith.mulf %sum_squared, "
+            "%inverse_count : f64",
+            "  %centered_square_sum = arith.subf %square_sum_result, "
+            "%mean_square_correction : f64",
+            "  %variance_result = arith.mulf %centered_square_sum, "
+            "%inverse_sample_count : f64",
+            "  %result = tensor.from_elements %sum_result, %mean_result, "
+            "%variance_result : tensor<3xf64>",
+            "  return %result : tensor<3xf64>",
+            "}",
+        ]
+    )
+    return "\n".join(lines) + "\n"
+
+
 def _pack_column(values: Sequence[float], width: int) -> Any:
     materialized = [float(value) for value in values]
     if not 1 <= len(materialized) <= width:
@@ -141,12 +228,15 @@ def prepare_post_psi_groups(
     *,
     group_count: int,
     bucket_size: int,
+    minimum_group_size: int = 1,
 ) -> PostPsiGroupLayout:
     """Select complete PSI-approved groups and replace keys with ordinals."""
     if group_count < 1:
         raise ValueError("group_count must be positive")
     if bucket_size < 2:
         raise ValueError("bucket_size must be at least two")
+    if not 1 <= minimum_group_size <= bucket_size:
+        raise ValueError("minimum_group_size must be in [1, bucket_size]")
     if not installments.is_file():
         raise FileNotFoundError(f"installments CSV is missing: {installments}")
 
@@ -176,7 +266,9 @@ def prepare_post_psi_groups(
             counts[key] += 1
 
     fitting = [
-        key for key, count in counts.items() if 1 <= count <= bucket_size
+        key
+        for key, count in counts.items()
+        if minimum_group_size <= count <= bucket_size
     ]
     selected = sorted(
         fitting,
@@ -281,6 +373,96 @@ class OfficialPaymentDiffGroupSum:
     def decrypt(self, encrypted_sum: Any) -> float:
         self._require_setup()
         return float(self._program.decrypt_result(encrypted_sum))
+
+    def _require_setup(self) -> None:
+        if not self._is_setup:
+            raise RuntimeError("call setup() before encrypt/eval/decrypt")
+
+
+@dataclass
+class OfficialPaymentDiffGroupStatistics:
+    """One official HEIR context returning encrypted SUM/MEAN/VAR together."""
+
+    width: int
+    input_scale: float = 1.0
+    debug: bool = False
+    _program: Any = field(init=False, repr=False)
+    _is_setup: bool = field(init=False, default=False, repr=False)
+
+    def __post_init__(self) -> None:
+        if self.input_scale <= 0 or not math.isfinite(self.input_scale):
+            raise ValueError("input_scale must be finite and positive")
+        self._program = _load_official_heir_compile()(
+            mlir_str=payment_diff_statistics_mlir(self.width),
+            scheme="ckks",
+            debug=self.debug,
+        )
+
+    @property
+    def mlir(self) -> str:
+        return payment_diff_statistics_mlir(self.width)
+
+    def setup(self) -> None:
+        self._program.setup()
+        self._is_setup = True
+
+    def encrypt(self, group: OpaquePaymentGroup) -> tuple[Any, Any]:
+        """Encrypt only the two parent columns in the shared HEIR context."""
+        self._require_setup()
+        if not 2 <= group.real_count <= self.width:
+            raise ValueError(
+                "statistics require 2..width real rows per group"
+            )
+        installment = _pack_column(
+            [value / self.input_scale for value in group.installment],
+            self.width,
+        )
+        payment = _pack_column(
+            [value / self.input_scale for value in group.payment],
+            self.width,
+        )
+        encryptors = self._program.compilation_result.arg_enc_funcs or {}
+        if len(encryptors) != 2:
+            raise RuntimeError(
+                "expected two encrypted parent inputs; compiled encryptors "
+                f"are {sorted(encryptors)}"
+            )
+        names = list(encryptors)
+        return (
+            getattr(self._program, f"encrypt_{names[0]}")(installment),
+            getattr(self._program, f"encrypt_{names[1]}")(payment),
+        )
+
+    def eval(
+        self,
+        encrypted_parents: tuple[Any, Any],
+        *,
+        valid_count: int,
+    ) -> Any:
+        """Return one encrypted tensor ordered as SUM, MEAN, sample VAR."""
+        self._require_setup()
+        if not 2 <= valid_count <= self.width:
+            raise ValueError("valid_count must be in [2, width]")
+        return self._program.eval(
+            *encrypted_parents,
+            1.0 / valid_count,
+            1.0 / (valid_count - 1),
+        )
+
+    def decrypt(self, encrypted_statistics: Any) -> tuple[float, float, float]:
+        """Decrypt the three statistics only at the final audit boundary."""
+        self._require_setup()
+        decoded = self._program.decrypt_result(encrypted_statistics)
+        values = [float(value) for value in decoded]
+        if len(values) != 3:
+            raise RuntimeError(
+                f"expected three decrypted statistics; received {len(values)}"
+            )
+        return (
+            values[0] * self.input_scale,
+            values[1] * self.input_scale,
+            values[2] * self.input_scale * self.input_scale,
+        )
 
     def _require_setup(self) -> None:
         if not self._is_setup:

@@ -118,3 +118,23 @@ python3 code/heir/scripts/run_official_python_post_psi_groupby_trial.py \
 The raw identifier mapping is written only under `client_private/`.
 `he_ready/group_blocks.csv` contains parent columns and padding, never a
 plaintext `PAYMENT_DIFF`.
+
+## Full exposed-Python PAYMENT_DIFF E2E
+
+The full Python orchestration adds encrypted MEAN, sample VAR, and exact MAX:
+
+```bash
+python3 code/heir/scripts/run_official_python_payment_diff_e2e.py \
+  --installments data/home_credit/installments_payments.csv \
+  --bridge-dir benchmark_runs/psi/installments_application/rr22_train_test_01 \
+  --group-count 2 \
+  --bucket-size 128 \
+  --output-dir benchmark_runs/official_python_payment_diff_e2e_2groups \
+  --overwrite
+```
+
+HEIR returns encrypted `[SUM, MEAN, VAR]` as one tensor in one context. MAX is
+an explicit second OpenFHE scheme-switching context and re-encrypts only the
+two parent columns; it never receives a plaintext `PAYMENT_DIFF`. Parent
+amounts are normalized before encryption to keep the squared variance branch
+inside the CKKS numerical range.

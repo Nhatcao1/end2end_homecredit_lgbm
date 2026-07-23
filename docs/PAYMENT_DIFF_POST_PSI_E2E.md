@@ -57,6 +57,33 @@ is deliberately not hidden here because it is a separate depth-heavy design.
 
 ## Run two groups first
 
+The preferred implementation now uses the exposed Python APIs and contains no
+inline CMake or generated C++ runner:
+
+```bash
+python3 code/heir/scripts/run_official_python_payment_diff_e2e.py \
+  --bridge-dir benchmark_runs/psi/installments_application/rr22_train_test_01 \
+  --installments data/home_credit/installments_payments.csv \
+  --output-dir benchmark_runs/official_python_payment_diff_e2e_2groups \
+  --group-count 2 \
+  --bucket-size 128 \
+  --max-ring-dimension 16384 \
+  --relative-tolerance 1e-5 \
+  --overwrite
+```
+
+The official HEIR program returns one encrypted tensor containing SUM, MEAN,
+and sample VAR, so those outputs share one context and one parent encryption
+per group. Exact MAX remains a separately measured OpenFHE CKKS↔FHEW context:
+the two official Python runtimes do not expose compatible ciphertext objects.
+Both routes calculate `PAYMENT_DIFF` only after encrypting its parent columns,
+and all result ciphertexts are retained until the final audit loop. Both
+routes normalize parent amounts with the same public power-of-two scale before
+encryption; final SUM/MEAN and VAR are restored by `scale` and `scale²`
+respectively only during the audit.
+
+### Legacy one-context C++ proof
+
 The integrated CKKS↔FHEW maximum route needs a larger ring and multiplicative
 depth than the CKKS-only benchmarks. Start with two groups.
 
