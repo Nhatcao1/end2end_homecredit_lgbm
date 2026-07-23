@@ -152,7 +152,7 @@ int main(int argc, char** argv) {
       const double online = item.encrypt + item.feature + item.square + item.sum + item.variance + item.maximum;
       output << item.id << ',' << item.count << ',' << item.encrypt << ',' << item.feature << ',' << item.square << ',' << item.sum << ',' << item.variance << ',' << item.maximum << ',' << audit << ',' << online << ',' << maximum << ',' << mean << ',' << total << ',' << variance << '\n';
     }
-    std::ofstream meta(argv[4]); meta << std::setprecision(17) << "{\"setup_seconds\":" << setupSeconds << ",\"groups\":" << groups.size() << ",\"logical_slots\":" << slots << ",\"ring_dimension\":" << context->GetRingDimension() << ",\"pipeline\":\"CKKS HEIR subtract/multiply/sum plus same-context CKKS-to-FHEW maximum; audit decrypt only at end\"}\n";
+    std::ofstream meta(argv[4]); meta << std::setprecision(17) << "{\"setup_seconds\":" << setupSeconds << ",\"groups\":" << groups.size() << ",\"logical_slots\":" << slots << ",\"ring_dimension\":" << context->GetRingDimension() << ",\"one_crypto_context\":true,\"context_origin\":\"HEIR generated CKKS multiply context; subtract and sum configured on the same instance\",\"maximum_route\":\"FHEW switching keys attached to that same CryptoContext; no second CKKS encryption\",\"pipeline\":\"CKKS HEIR subtract/multiply/sum plus same-context CKKS-to-FHEW maximum; audit decrypt only at end\"}\n";
     return 0;
   } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }
@@ -244,18 +244,27 @@ def _patch_depth(path: Path, depth: int) -> int:
     return original
 
 
-def _pandas_reference(path: Path) -> tuple[list[dict[str, float]], float]:
+def _pandas_reference(path: Path) -> tuple[list[dict[str, float]], dict[str, float]]:
     try:
         import pandas as pd
     except ImportError as error:
         raise RuntimeError("install pandas in the active HEIR environment: python3 -m pip install pandas") from error
     frame = pd.read_csv(path)
-    started = time.perf_counter()
     real = frame.loc[frame["validity_mask"] == 1, ["opaque_group_id", "AMT_PAYMENT", "AMT_INSTALMENT"]].copy()
+    started = time.perf_counter()
     real["PAYMENT_DIFF"] = real["AMT_INSTALMENT"] - real["AMT_PAYMENT"]
+    feature_seconds = time.perf_counter() - started
+    started = time.perf_counter()
     result = real.groupby("opaque_group_id")["PAYMENT_DIFF"].agg(["max", "mean", "sum", "var"])
-    elapsed = time.perf_counter() - started
-    return [{"opaque_group_id": int(index), "count": int((real["opaque_group_id"] == index).sum()), **{key: float(value) for key, value in row.items()}} for index, row in result.iterrows()], elapsed
+    aggregation_seconds = time.perf_counter() - started
+    return [
+        {"opaque_group_id": int(index), "count": int((real["opaque_group_id"] == index).sum()), **{key: float(value) for key, value in row.items()}}
+        for index, row in result.iterrows()
+    ], {
+        "payment_diff_expression_seconds": feature_seconds,
+        "groupby_aggregations_seconds": aggregation_seconds,
+        "full_workload_seconds": feature_seconds + aggregation_seconds,
+    }
 
 
 def _status(observed: float, expected: float, tolerance: float) -> tuple[float, str]:
@@ -263,7 +272,7 @@ def _status(observed: float, expected: float, tolerance: float) -> tuple[float, 
     return error, "PASS" if error <= tolerance * max(1.0, abs(expected)) else "FAIL"
 
 
-def _report(root: Path, preparation: dict[str, Any], pandas_seconds: float, tolerance: float) -> None:
+def _report(root: Path, preparation: dict[str, Any], pandas_timing: dict[str, float], tolerance: float) -> None:
     he = list(csv.DictReader((root / "he_results.csv").open(encoding="utf-8", newline="")))
     reference = {int(row["opaque_group_id"]): row for row in csv.DictReader((root / "client_private" / "pandas_groupby_reference.csv").open(encoding="utf-8", newline=""))}
     execution = json.loads((root / "execution.json").read_text(encoding="utf-8"))
@@ -282,9 +291,26 @@ def _report(root: Path, preparation: dict[str, Any], pandas_seconds: float, tole
         for label, plain_field, he_field in fields:
             error, status = _status(float(row[he_field]), float(ref[plain_field]), tolerance); all_pass &= status == "PASS"
             lines.append(f"| {row['opaque_group_id']} | `PAYMENT_DIFF_{label}` | {float(ref[plain_field]):.12g} | {float(row[he_field]):.12g} | {error:.12g} | {status} |")
-    def median(field: str) -> float: return statistics.median(float(row[field]) for row in he)
-    online = median("he_online_seconds")
-    lines += ["", "## End-to-end latency after PSI", "", "PSI execution itself is excluded. The latency starts from the already PSI-aligned selected rows. Client grouping/padding is reported separately; the HE online path starts with encryption and ends before audit decryption.", "", "| Client post-PSI layout | Shared CKKS/FHEW setup | HE encrypt | PAYMENT_DIFF | Square branch | SUM reductions | Mean/variance finalization | MAX scheme switch | HE online | Final audit decrypt | Pandas groupby |", "|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|", f"| {preparation.get('client_prepare_seconds', 0.0):.9f} | {execution['setup_seconds']:.9f} | {median('encrypt_seconds'):.9f} | {median('feature_seconds'):.9f} | {median('square_seconds'):.9f} | {median('sum_reduce_seconds'):.9f} | {median('variance_finalize_seconds'):.9f} | {median('max_switch_seconds'):.9f} | {online:.9f} | {median('audit_decrypt_seconds'):.9f} | {pandas_seconds:.9f} |", "", f"Overall audit status: **{'PASS' if all_pass else 'FAIL'}** with relative tolerance `{tolerance:g}`. A failed MAX/VAR entry is a failed HE result and must not be used downstream.", "", "Private files: `client_private/group_mapping.csv`, `client_private/pandas_groupby_reference.csv`. HE input: `he_ready/group_blocks.csv`. Raw timing rows: `he_results.csv`, `execution.json`."]
+    def total(field: str) -> float: return sum(float(row[field]) for row in he)
+    he_online = total("he_online_seconds")
+    audit = total("audit_decrypt_seconds")
+    setup = float(execution["setup_seconds"])
+    lines += [
+        "", "## Equivalent Pandas workload", "",
+        "The Python timing uses the exact selected post-PSI rows and equivalent original-code logic below. It excludes CSV read and client selection/padding, just as the HE calculation comparison excludes those client-only steps.", "",
+        "```python", "real['PAYMENT_DIFF'] = real['AMT_INSTALMENT'] - real['AMT_PAYMENT']", "real.groupby('opaque_group_id')['PAYMENT_DIFF'].agg(['max', 'mean', 'sum', 'var'])", "```", "",
+        "## Full end-to-end latency after PSI", "",
+        "PSI execution itself is excluded. `HE online` sums the ciphertext path across every selected group: parent encryption, `PAYMENT_DIFF`, square, encrypted reductions, encrypted mean/variance, and CKKS↔FHEW maximum. It excludes only the final audit decrypt. The shared context/setup is paid once for the entire workload.", "",
+        "| Client post-PSI layout | Shared one-context setup | HE encrypt, all groups | PAYMENT_DIFF, all groups | Square, all groups | SUM reductions, all groups | Mean/variance, all groups | MAX switch, all groups | HE online, all groups | Final audit decrypt, all groups | Pandas expression | Pandas groupby | Pandas total |", "|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        f"| {preparation.get('client_prepare_seconds', 0.0):.9f} | {setup:.9f} | {total('encrypt_seconds'):.9f} | {total('feature_seconds'):.9f} | {total('square_seconds'):.9f} | {total('sum_reduce_seconds'):.9f} | {total('variance_finalize_seconds'):.9f} | {total('max_switch_seconds'):.9f} | {he_online:.9f} | {audit:.9f} | {pandas_timing['payment_diff_expression_seconds']:.9f} | {pandas_timing['groupby_aggregations_seconds']:.9f} | {pandas_timing['full_workload_seconds']:.9f} |",
+        "", "| Fair workload comparison | Seconds | HE ÷ Pandas |", "|---|---:|---:|",
+        f"| Pandas complete expression + groupby | {pandas_timing['full_workload_seconds']:.9f} | 1.00× |",
+        f"| HE all groups: encryption through final encrypted aggregate | {he_online:.9f} | {he_online / pandas_timing['full_workload_seconds']:.2f}× |",
+        f"| HE all groups: one setup + online + final audit | {setup + he_online + audit:.9f} | {(setup + he_online + audit) / pandas_timing['full_workload_seconds']:.2f}× |",
+        "", "## Context contract", "",
+        f"`one_crypto_context = {execution['one_crypto_context']}`. The context begins as `{execution['context_origin']}`. `{execution['maximum_route']}`", "",
+        f"Overall audit status: **{'PASS' if all_pass else 'FAIL'}** with relative tolerance `{tolerance:g}`. A failed MAX/VAR entry is a failed HE result and must not be used downstream.", "", "Private files: `client_private/group_mapping.csv`, `client_private/pandas_groupby_reference.csv`. HE input: `he_ready/group_blocks.csv`. Raw timing rows: `he_results.csv`, `execution.json`."
+    ]
     (root / "REPORT.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     write_json(root / "result.json", {"status": "payment_diff_groupby_e2e_executed", "accuracy_status": "PASS" if all_pass else "FAIL", "groups": len(he), "report": "REPORT.md"})
 
@@ -312,7 +338,7 @@ def main() -> None:
         shutil.rmtree(root)
     root.mkdir(parents=True)
     started = time.perf_counter(); preparation = _prepare(args.installments.resolve(), args.bridge_dir.resolve(), root, args.group_count, args.bucket_size); preparation["client_prepare_seconds"] = time.perf_counter() - started; write_json(root / "preparation.json", preparation)
-    pandas, pandas_seconds = _pandas_reference(root / "he_ready" / "group_blocks.csv")
+    pandas, pandas_timing = _pandas_reference(root / "he_ready" / "group_blocks.csv")
     with (root / "client_private" / "pandas_groupby_reference.csv").open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=["opaque_group_id", "count", "max", "mean", "sum", "var"])
         writer.writeheader(); writer.writerows(pandas)
@@ -330,8 +356,8 @@ def main() -> None:
     he, execution = root / "he_results.csv", root / "execution.json"
     wall_seconds, log = run(["env", "OMP_NUM_THREADS=1", str((build / "payment_diff_e2e_runner").resolve()), str((root / "he_ready" / "group_blocks.csv").resolve()), str(preparation["input_scale"]), str(he.resolve()), str(execution.resolve())], work)
     (work / "runner.log").write_text(log, encoding="utf-8")
-    metadata = json.loads(execution.read_text(encoding="utf-8")); metadata.update({"generated_kernels": [item["entry_function"] for item in generation["kernels"]], "translated_multiply_depth_before_patch": translated_depth, "requested_multiplicative_depth": args.ckks_mul_depth, "build_seconds": {"configure": configure_seconds, "build": build_seconds}, "runner_wall_seconds": wall_seconds, "pandas_groupby_seconds": pandas_seconds}); write_json(execution, metadata)
-    _report(root, preparation, pandas_seconds, args.relative_tolerance)
+    metadata = json.loads(execution.read_text(encoding="utf-8")); metadata.update({"generated_kernels": [item["entry_function"] for item in generation["kernels"]], "translated_multiply_depth_before_patch": translated_depth, "requested_multiplicative_depth": args.ckks_mul_depth, "build_seconds": {"configure": configure_seconds, "build": build_seconds}, "runner_wall_seconds": wall_seconds, "pandas_equivalent_timing_seconds": pandas_timing}); write_json(execution, metadata)
+    _report(root, preparation, pandas_timing, args.relative_tolerance)
     print((root / "result.json").read_text(encoding="utf-8"))
 
 
