@@ -75,16 +75,12 @@ RUNNER = r'''
 #include "sub_output.h"
 #include "mul_output.h"
 #include "sum_output.h"
+#include "group_statistics.h"
 using namespace lbcrypto;
 using Bundle = std::vector<Ciphertext<DCRTPoly>>;
 struct Group {
   std::vector<double> installment, payment, maxInstallment, maxPayment;
   std::vector<int> seen, real; size_t count = 0;
-};
-struct Final {
-  unsigned long long id; size_t count;
-  double encrypt, feature, square, sum, variance, maximum;
-  Bundle total, mean, varianceValue; Ciphertext<DCRTPoly> maximumValue;
 };
 double seconds(std::chrono::steady_clock::time_point start) { return std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count(); }
 void require(bool value, const std::string& message) { if (!value) throw std::runtime_error(message); }
@@ -138,24 +134,30 @@ int main(int argc, char** argv) {
     context->EvalSchemeSwitchingKeyGen(keys, lweSecretKey);
     context->EvalCompareSwitchPrecompute(1, 1, true);
     const double setupSeconds = seconds(setupStart);
-    std::vector<Final> final; final.reserve(groups.size());
+    std::vector<heir::runtime::OpaqueGroupBlock> blocks; blocks.reserve(groups.size());
     for (const auto& item : groups) {
-      const auto& group = item.second; auto started = std::chrono::steady_clock::now();
-      auto due = encrypted_subtract__encrypt__arg0(context, group.installment, keys.publicKey); auto paid = encrypted_subtract__encrypt__arg1(context, group.payment, keys.publicKey);
-      auto maxDue = encrypted_subtract__encrypt__arg0(context, group.maxInstallment, keys.publicKey); auto maxPaid = encrypted_subtract__encrypt__arg1(context, group.maxPayment, keys.publicKey); const double encrypt = seconds(started);
-      started = std::chrono::steady_clock::now(); auto diff = encrypted_subtract(context, due, paid); auto maxDiff = encrypted_subtract(context, maxDue, maxPaid); const double feature = seconds(started);
-      auto squareInput = diff; started = std::chrono::steady_clock::now(); auto squared = encrypted_multiply(context, squareInput, squareInput); const double square = seconds(started);
-      auto sumInput = diff; auto squareSumInput = squared; started = std::chrono::steady_clock::now(); auto total = encrypted_sum(context, sumInput); auto squareTotal = encrypted_sum(context, squareSumInput); require(total.size() == 1 && squareTotal.size() == 1, "expected scalar encrypted sums"); const double sum = seconds(started);
-      started = std::chrono::steady_clock::now(); const double inverse = 1.0 / static_cast<double>(group.count); Bundle mean = total; mean[0] = context->EvalMult(mean[0], inverse); auto sumTimesMean = context->EvalMult(total[0], mean[0]); auto varianceScalar = context->EvalSub(squareTotal[0], sumTimesMean); varianceScalar = context->EvalMult(varianceScalar, 1.0 / static_cast<double>(group.count - 1)); Bundle variance{varianceScalar}; const double varianceSeconds = seconds(started);
-      started = std::chrono::steady_clock::now(); auto maximumValues = context->EvalMaxSchemeSwitching(maxDiff[0], keys.publicKey, slots, slots); require(!maximumValues.empty(), "scheme-switched maximum missing"); const double maximum = seconds(started);
-      final.push_back(Final{item.first, group.count, encrypt, feature, square, sum, varianceSeconds, maximum, std::move(total), std::move(mean), std::move(variance), maximumValues[0]});
+      const auto& group = item.second;
+      blocks.push_back(heir::runtime::OpaqueGroupBlock{item.first, group.count, group.installment, group.payment, group.maxInstallment, group.maxPayment});
     }
+    auto final = heir::runtime::evaluate_group_statistics(
+        context, keys.publicKey, blocks,
+        [](const auto& cc, const auto& values, const auto& key) { return encrypted_subtract__encrypt__arg0(cc, values, key); },
+        [](const auto& cc, const auto& values, const auto& key) { return encrypted_subtract__encrypt__arg1(cc, values, key); },
+        [](const auto& cc, const auto& left, const auto& right) { return encrypted_subtract(cc, left, right); },
+        [](const auto& cc, const auto& left, const auto& right) { return encrypted_multiply(cc, left, right); },
+        [](const auto& cc, const auto& values) { return encrypted_sum(cc, values); },
+        [&keys, slots](const auto& cc, const auto& values) {
+          if (values.empty()) throw std::runtime_error("maximum feature bundle is empty");
+          auto output = cc->EvalMaxSchemeSwitching(values[0], keys.publicKey, slots, slots);
+          if (output.empty()) throw std::runtime_error("scheme-switched maximum missing");
+          return output[0];
+        });
     // Final audit boundary: no decrypted value above was used by an HE operation.
     std::ofstream output(argv[3]); output << std::setprecision(17) << "opaque_group_id,count,encrypt_seconds,feature_seconds,square_seconds,sum_reduce_seconds,variance_finalize_seconds,max_switch_seconds,audit_decrypt_seconds,he_online_seconds,he_max,he_mean,he_sum,he_var\n";
     for (const auto& item : final) {
-      auto started = std::chrono::steady_clock::now(); const double maximum = decryptScalar(context, keys.secretKey, item.maximumValue) * scale; const double mean = encrypted_sum__decrypt__result0(context, item.mean, keys.secretKey) * scale; const double total = encrypted_sum__decrypt__result0(context, item.total, keys.secretKey) * scale; const double variance = encrypted_sum__decrypt__result0(context, item.varianceValue, keys.secretKey) * scale * scale; const double audit = seconds(started);
-      const double online = item.encrypt + item.feature + item.square + item.sum + item.variance + item.maximum;
-      output << item.id << ',' << item.count << ',' << item.encrypt << ',' << item.feature << ',' << item.square << ',' << item.sum << ',' << item.variance << ',' << item.maximum << ',' << audit << ',' << online << ',' << maximum << ',' << mean << ',' << total << ',' << variance << '\n';
+      auto started = std::chrono::steady_clock::now(); const double maximum = decryptScalar(context, keys.secretKey, item.maximum) * scale; const double mean = encrypted_sum__decrypt__result0(context, item.mean, keys.secretKey) * scale; const double total = encrypted_sum__decrypt__result0(context, item.sum, keys.secretKey) * scale; const double variance = encrypted_sum__decrypt__result0(context, item.sample_variance, keys.secretKey) * scale * scale; const double audit = seconds(started);
+      const double online = item.timing.encrypt_seconds + item.timing.feature_seconds + item.timing.square_seconds + item.timing.sum_reduce_seconds + item.timing.variance_finalize_seconds + item.timing.max_seconds;
+      output << item.opaque_group_id << ',' << item.public_valid_count << ',' << item.timing.encrypt_seconds << ',' << item.timing.feature_seconds << ',' << item.timing.square_seconds << ',' << item.timing.sum_reduce_seconds << ',' << item.timing.variance_finalize_seconds << ',' << item.timing.max_seconds << ',' << audit << ',' << online << ',' << maximum << ',' << mean << ',' << total << ',' << variance << '\n';
     }
     std::ofstream meta(argv[4]); meta << std::setprecision(17) << "{\"setup_seconds\":" << setupSeconds << ",\"groups\":" << groups.size() << ",\"logical_slots\":" << slots << ",\"ring_dimension\":" << context->GetRingDimension() << ",\"one_crypto_context\":true,\"compute_argmin_keys_generated\":true,\"argmax_artifact_retained\":false,\"context_origin\":\"HEIR generated CKKS multiply context; subtract and sum configured on the same instance\",\"maximum_route\":\"FHEW switching comparison-tree keys attached to that same CryptoContext; no second CKKS encryption\",\"pipeline\":\"CKKS HEIR subtract/multiply/sum plus same-context CKKS-to-FHEW maximum; audit decrypt only at end\"}\n";
     return 0;
@@ -354,6 +356,7 @@ def main() -> None:
     work = root / "runner"; work.mkdir()
     for entry, prefix in (("encrypted_subtract", "sub"), ("encrypted_multiply", "mul"), ("encrypted_sum", "sum")):
         copy_generated_sources((generated / entries[entry]["source"]).parent, work, prefix)
+    shutil.copyfile(Path(__file__).resolve().parents[1] / "runtime" / "group_statistics.h", work / "group_statistics.h")
     translated_depth = _patch_depth(work / "mul_output.cpp", args.ckks_mul_depth)
     (work / "payment_diff_e2e_runner.cpp").write_text(RUNNER.replace("@SLOTS@", str(args.bucket_size)), encoding="utf-8")
     (work / "CMakeLists.txt").write_text(CMAKE, encoding="utf-8")

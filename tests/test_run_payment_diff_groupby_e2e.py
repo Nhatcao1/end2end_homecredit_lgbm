@@ -19,11 +19,21 @@ def load_module():
 
 
 class PaymentDiffEndToEndPreparationTest(unittest.TestCase):
+    def test_e2e_runner_uses_reusable_group_statistics_runtime(self) -> None:
+        module = load_module()
+        header = Path(__file__).resolve().parents[1] / "code/heir/runtime/group_statistics.h"
+        source = header.read_text(encoding="utf-8")
+        self.assertIn("mean_from_sum", source)
+        self.assertIn("sample_variance_from_moments", source)
+        self.assertIn("evaluate_group_statistics", source)
+        self.assertIn('#include "group_statistics.h"', module.RUNNER)
+        self.assertIn("heir::runtime::evaluate_group_statistics", module.RUNNER)
+
     def test_same_context_max_route_generates_comparison_tree_keys(self) -> None:
         module = load_module()
         self.assertIn("switchParameters.SetComputeArgmin(true)", module.RUNNER)
         self.assertIn("argmax_artifact_retained", module.RUNNER)
-        self.assertIn("EvalMaxSchemeSwitching(maxDiff[0]", module.RUNNER)
+        self.assertIn("EvalMaxSchemeSwitching(values[0]", module.RUNNER)
         self.assertIn("one_crypto_context", module.RUNNER)
 
     def test_uses_only_matched_psi_groups_and_keeps_parent_columns(self) -> None:
