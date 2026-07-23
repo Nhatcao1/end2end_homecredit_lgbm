@@ -65,9 +65,13 @@ VAR, and MAX together, keep the generated OpenFHE C++ runtime and expose it to
 Python through a dedicated binding; the official frontend cannot represent
 that interface yet.
 
-## VAR/MIN/MAX trial
+## Optional pip-wrapper VAR/MIN/MAX trial
 
-Install the official OpenFHE Python wrapper in addition to `heir_py`:
+This standalone trial is only for a machine deliberately using the official
+OpenFHE Python wrapper. It is **not** the deployment route used by the source-
+built OpenFHE server or by `payment_diff_checkpoint_e2e.py`.
+
+For that optional environment, install the wrapper in addition to `heir_py`:
 
 ```bash
 python3 -m pip install "openfhe==1.5.1.0"
@@ -181,6 +185,11 @@ maximum_ct = ops.maximum(payment_diff_ct)
 The same APIs accept any numeric columns. `OfficialCkksBinaryColumn` exposes
 element-wise `add`, `subtract`, and `multiply` HEIR circuits; no kernel knows
 the names `PAYMENT_DIFF`, `AMT_PAYMENT`, or `AMT_INSTALMENT`.
+
+The checkpoint E2E example does **not** require the optional pip `openfhe`
+wrapper. SUM/MEAN/VAR use the HEIR Python frontend. Its MAX branch is
+orchestrated from Python but compiled against the server's source-built
+OpenFHE installation via `--openfhe-dir /usr/local/lib/OpenFHE`.
 
 ### Conceptual E2E with a checkpoint
 

@@ -21,7 +21,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from code.heir.python_api import (
-    OfficialOpenFheColumnOps,
+    SourceBuiltOpenFheColumnMax,
     compile_checkpointable_binary_column_aggregate,
     load_binary_column_aggregate_checkpoint,
     prepare_post_psi_groups,
@@ -52,23 +52,6 @@ def _audit_one_checkpoint(checkpoint_dir: Path) -> float:
             f"{completed.stdout}{completed.stderr}"
         )
     return float(json.loads(output.read_text(encoding="utf-8"))["value"])
-
-
-def _require_openfhe_python() -> None:
-    """Fail before data preparation when the MAX Python binding is absent."""
-    completed = subprocess.run(
-        [sys.executable, "-c", "import openfhe"],
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    if completed.returncode:
-        raise RuntimeError(
-            "exact MAX requires the separate OpenFHE Python wrapper in the "
-            f"active interpreter ({sys.executable}). HEIR's bundled native "
-            "backend does not provide `import openfhe`. Install it with:\n"
-            f"  {sys.executable} -m pip install 'openfhe==1.5.1.0'"
-        )
 
 
 def _validate_resumed_branch(
@@ -115,6 +98,11 @@ def main() -> None:
     parser.add_argument("--bucket-size", type=int, default=128)
     parser.add_argument("--max-ring-dimension", type=int, default=16384)
     parser.add_argument(
+        "--openfhe-dir",
+        default="/usr/local/lib/OpenFHE",
+        help="CMake package directory for the source-built OpenFHE install",
+    )
+    parser.add_argument(
         "--checkpoint-dir",
         type=Path,
         default=Path(
@@ -158,8 +146,6 @@ def main() -> None:
         return
     if args.bridge_dir is None:
         parser.error("--bridge-dir is required")
-    _require_openfhe_python()
-
     # Client-only post-PSI semi-join and grouping. The HE evaluator receives
     # neither the raw applicant key nor the join mapping.
     layout = prepare_post_psi_groups(
@@ -227,35 +213,30 @@ def main() -> None:
         print(f"[HEIR] saved {aggregate} checkpoint: {branch_dir}", flush=True)
         del branch, encrypted_parents, encrypted_result
 
-    # Exact MAX needs CKKS-to-FHEW switching. The current HEIR Python module
-    # cannot attach switching to its module-local ciphertexts, so this follows
-    # the benchmark's separate OpenFHE context without decrypting either path.
-    maximum = OfficialOpenFheColumnOps(
-        width=args.bucket_size,
+    # Exact MAX needs CKKS-to-FHEW switching. Compile the small MAX runner
+    # against the server's source-built OpenFHE installation; no pip
+    # ``openfhe`` Python package is required.
+    maximum = SourceBuiltOpenFheColumnMax(
         input_scale=scale,
         ring_dimension=args.max_ring_dimension,
+        openfhe_dir=args.openfhe_dir,
     )
-    print("[OpenFHE] setup CKKS-to-FHEW MAX branch", flush=True)
-    maximum.setup()
-    max_installment = maximum.encrypt(
+    print("[OpenFHE] build/run source-installed CKKS-to-FHEW MAX", flush=True)
+    max_result = maximum.run_subtract_max(
         group.installment,
-        padding="duplicate",
-    )
-    max_payment = maximum.encrypt(
         group.payment,
-        padding="duplicate",
+        output_dir=args.checkpoint_dir.resolve() / "maximum",
+        overwrite=True,
     )
-    max_payment_diff = maximum.subtract(max_installment, max_payment)
-    maximum_ciphertext = maximum.maximum(max_payment_diff)
-    print("[OpenFHE] encrypted MAX ready", flush=True)
+    print("[OpenFHE] encrypted MAX checkpoint ready", flush=True)
 
-    # Final client boundary only. All four values were encrypted until here.
-    # Final audit boundary. Each reload uses a fresh process so OpenFHE's
-    # process-global evaluation-key maps begin empty.
+    # Final client audit boundary only. The source-built MAX child decrypted
+    # only after maximum.ct was written; the aggregate children now do the
+    # same independently so OpenFHE's process-global key maps begin empty.
     payment_diff_sum = _audit_one_checkpoint(branch_dirs["sum"])
     payment_diff_mean = _audit_one_checkpoint(branch_dirs["mean"])
     payment_diff_var = _audit_one_checkpoint(branch_dirs["variance"])
-    payment_diff_max = maximum.decrypt_scalar(maximum_ciphertext)
+    payment_diff_max = float(max_result["maximum"])
     audit_csv = (
         args.checkpoint_dir.resolve()
         / "client_private"

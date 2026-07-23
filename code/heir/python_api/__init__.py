@@ -26,6 +26,9 @@ from code.heir.python_api.official_groupby import (
     PostPsiGroupLayout,
     prepare_post_psi_groups,
 )
+from code.heir.python_api.source_built_openfhe import (
+    SourceBuiltOpenFheColumnMax,
+)
 from code.heir.python_api.checkpoint import (
     LoadedBinaryColumnCheckpoint,
     LoadedBinaryColumnAggregateCheckpoint,
@@ -60,6 +63,7 @@ __all__ = [
     "OfficialOpenFheMinMax",
     "OpaquePaymentGroup",
     "PostPsiGroupLayout",
+    "SourceBuiltOpenFheColumnMax",
     "binary_column_aggregate_mlir",
     "binary_column_mlir",
     "binary_column_statistics_mlir",
