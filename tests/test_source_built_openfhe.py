@@ -30,6 +30,7 @@ class SourceBuiltOpenFheColumnMaxTest(unittest.TestCase):
             def fake_run(command, _cwd):
                 commands.append(command)
                 if str(command[0]).endswith("column_max_runner"):
+                    Path(command[8]).write_bytes(b"encrypted-max")
                     Path(command[9]).write_text(
                         '{"maximum_normalized":0.25}\n',
                         encoding="utf-8",
@@ -56,6 +57,11 @@ class SourceBuiltOpenFheColumnMaxTest(unittest.TestCase):
                     for command in commands
                 )
             )
+            resumed = SourceBuiltOpenFheColumnMax(
+                input_scale=1024
+            ).load_completed(root)
+            self.assertEqual(256.0, resumed["maximum"])
+            self.assertTrue(resumed["resumed"])
 
 
 if __name__ == "__main__":

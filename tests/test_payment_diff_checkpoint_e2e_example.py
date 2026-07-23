@@ -28,6 +28,7 @@ class PaymentDiffCheckpointE2EExampleTest(unittest.TestCase):
         self.assertIn('("sum", "mean", "variance")', source)
         self.assertIn("SourceBuiltOpenFheColumnMax(", source)
         self.assertIn("maximum.run_subtract_max(", source)
+        self.assertIn("maximum.load_completed(", source)
         self.assertIn("PAYMENT_DIFF_MEAN", source)
         self.assertIn("PAYMENT_DIFF_SUM", source)
         self.assertIn("PAYMENT_DIFF_VAR", source)

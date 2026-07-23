@@ -221,14 +221,19 @@ def main() -> None:
         ring_dimension=args.max_ring_dimension,
         openfhe_dir=args.openfhe_dir,
     )
-    print("[OpenFHE] build/run source-installed CKKS-to-FHEW MAX", flush=True)
-    max_result = maximum.run_subtract_max(
-        group.installment,
-        group.payment,
-        output_dir=args.checkpoint_dir.resolve() / "maximum",
-        overwrite=True,
-    )
-    print("[OpenFHE] encrypted MAX checkpoint ready", flush=True)
+    maximum_dir = args.checkpoint_dir.resolve() / "maximum"
+    if args.resume_checkpoints:
+        print(f"[OpenFHE] reuse encrypted MAX checkpoint: {maximum_dir}", flush=True)
+        max_result = maximum.load_completed(maximum_dir)
+    else:
+        print("[OpenFHE] build/run source-installed CKKS-to-FHEW MAX", flush=True)
+        max_result = maximum.run_subtract_max(
+            group.installment,
+            group.payment,
+            output_dir=maximum_dir,
+            overwrite=args.overwrite,
+        )
+        print("[OpenFHE] encrypted MAX checkpoint ready", flush=True)
 
     # Final client audit boundary only. The source-built MAX child decrypted
     # only after maximum.ct was written; the aggregate children now do the

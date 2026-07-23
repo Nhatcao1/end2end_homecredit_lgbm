@@ -194,6 +194,28 @@ class SourceBuiltOpenFheColumnMax:
     ring_dimension: int = 16384
     openfhe_dir: str = "/usr/local/lib/OpenFHE"
 
+    def load_completed(self, output_dir: Path) -> dict[str, object]:
+        """Load the final audit of an already-completed encrypted MAX lane."""
+        root = output_dir.resolve()
+        result_path = root / "client_private" / "maximum_audit.json"
+        ciphertext_path = root / "ciphertexts" / "maximum.ct"
+        if not result_path.is_file() or not ciphertext_path.is_file():
+            raise FileNotFoundError(
+                "cannot resume source-built MAX; maximum.ct or its final "
+                f"audit is missing under {root}"
+            )
+        result = json.loads(result_path.read_text(encoding="utf-8"))
+        result.update(
+            {
+                "maximum": float(result["maximum_normalized"])
+                * self.input_scale,
+                "backend": "source-built OpenFHE via CMake",
+                "openfhe_dir": self.openfhe_dir,
+                "resumed": True,
+            }
+        )
+        return result
+
     def run_subtract_max(
         self,
         left: Sequence[float],
@@ -286,6 +308,7 @@ class SourceBuiltOpenFheColumnMax:
                 "padding_count": padding,
                 "backend": "source-built OpenFHE via CMake",
                 "openfhe_dir": self.openfhe_dir,
+                "resumed": False,
             }
         )
         return result
