@@ -32,6 +32,7 @@ class PaymentDiffCheckpointE2EExampleTest(unittest.TestCase):
         self.assertIn("PAYMENT_DIFF_SUM", source)
         self.assertIn("PAYMENT_DIFF_VAR", source)
         self.assertIn("subprocess.run(", source)
+        self.assertIn("openfhe==1.5.1.0", source)
         self.assertIn("--resume-checkpoints", source)
         self.assertNotIn("REPORT.md", source)
         self.assertNotIn("perf_counter", source)

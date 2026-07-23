@@ -54,6 +54,23 @@ def _audit_one_checkpoint(checkpoint_dir: Path) -> float:
     return float(json.loads(output.read_text(encoding="utf-8"))["value"])
 
 
+def _require_openfhe_python() -> None:
+    """Fail before data preparation when the MAX Python binding is absent."""
+    completed = subprocess.run(
+        [sys.executable, "-c", "import openfhe"],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if completed.returncode:
+        raise RuntimeError(
+            "exact MAX requires the separate OpenFHE Python wrapper in the "
+            f"active interpreter ({sys.executable}). HEIR's bundled native "
+            "backend does not provide `import openfhe`. Install it with:\n"
+            f"  {sys.executable} -m pip install 'openfhe==1.5.1.0'"
+        )
+
+
 def _validate_resumed_branch(
     checkpoint_dir: Path,
     *,
@@ -141,6 +158,7 @@ def main() -> None:
         return
     if args.bridge_dir is None:
         parser.error("--bridge-dir is required")
+    _require_openfhe_python()
 
     # Client-only post-PSI semi-join and grouping. The HE evaluator receives
     # neither the raw applicant key nor the join mapping.
