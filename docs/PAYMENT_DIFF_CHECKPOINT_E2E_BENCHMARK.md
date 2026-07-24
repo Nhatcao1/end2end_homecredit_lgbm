@@ -56,13 +56,17 @@ Run:
 ```bash
 python3 code/heir/scripts/run_payment_diff_checkpoint_e2e_benchmark.py \
   --installments data/home_credit/installments_payments.csv \
-  --allowed-sk-id-curr 100001 \
+  --allowed-sk-id-curr 100001 100005 100013 \
   --max-ring-dimension 16384 \
   --openfhe-dir /usr/local/lib/OpenFHE \
   --relative-tolerance 1e-5 \
   --output-dir benchmark_runs/payment_diff_checkpoint_e2e_benchmark_01 \
   --overwrite
 ```
+
+Multiple explicitly allowed IDs are executed strictly sequentially. The root
+`REPORT.md` and `accuracy_all_groups.csv` combine every group; each detailed
+run remains under `groups/group_NNNNNN/`.
 
 The run is intentionally fresh. Do not pass the example's
 `--resume-checkpoints` option when collecting cold benchmark latency.

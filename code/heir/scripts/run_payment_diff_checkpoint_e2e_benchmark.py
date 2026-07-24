@@ -450,6 +450,262 @@ Raw artifacts: `exact_execution.json`, `benchmark_result.json`,
 """
 
 
+def _multi_report(result: dict[str, object]) -> str:
+    summaries = result["groups"]
+    accuracy = result["accuracy"]
+    group_rows = []
+    timing_rows = []
+    for group in summaries:
+        group_rows.append(
+            "| {sequence} | {allowed} | {status} | {real} | {width} | "
+            "{ones} | {zeroes} | {he:.6f} | {pandas:.6f} |".format(
+                sequence=group["sequence"],
+                allowed=group["allowed_sk_id_curr"],
+                status=group["status"],
+                real=group.get("real_rows", ""),
+                width=group.get("padded_width", ""),
+                ones=group.get("mask_ones", ""),
+                zeroes=group.get("mask_zeroes", ""),
+                he=float(group.get("he_full_seconds", 0.0)),
+                pandas=float(group.get("pandas_full_seconds", 0.0)),
+            )
+        )
+        timing_rows.append(
+            "| {sequence} | {allowed} | {sum:.6f} | {mean:.6f} | "
+            "{variance:.6f} | {maximum:.6f} |".format(
+                sequence=group["sequence"],
+                allowed=group["allowed_sk_id_curr"],
+                sum=float(group.get("sum_branch_seconds", 0.0)),
+                mean=float(group.get("mean_branch_seconds", 0.0)),
+                variance=float(group.get("variance_branch_seconds", 0.0)),
+                maximum=float(group.get("maximum_branch_seconds", 0.0)),
+            )
+        )
+    accuracy_rows = [
+        "| {sequence} | {allowed} | {output} | {pandas:.12g} | "
+        "{he:.12g} | {relative:.6g} | {status} |".format(
+            sequence=row["sequence"],
+            allowed=row["allowed_sk_id_curr"],
+            output=row["output"],
+            pandas=float(row["pandas"]),
+            he=float(row["he_final_audit"]),
+            relative=float(row["relative_error"]),
+            status=row["status"],
+        )
+        for row in accuracy
+    ]
+    return f"""# Multiple allowed-group PAYMENT_DIFF benchmark
+
+The client explicitly allowed {len(summaries)} applicant groups. Each complete
+group was prepared with its own 1/0 validity mask and automatic padded width.
+The existing one-group checkpoint E2E application was then executed
+**sequentially**, one isolated child process at a time. No HE workloads ran in
+parallel.
+
+## Group summary
+
+| Sequence | Allowed SK_ID_CURR | Status | Real rows | Padded width | Mask ones | Mask zeroes | Client prep + HE wall (s) | Client prep + Pandas (s) |
+|---:|---:|---|---:|---:|---:|---:|---:|---:|
+{chr(10).join(group_rows)}
+
+## HE output-branch latency
+
+Branch time includes final audit for SUM/MEAN/VAR. MAX includes its
+source-built OpenFHE branch and final audit.
+
+| Sequence | Allowed SK_ID_CURR | SUM (s) | MEAN (s) | VAR (s) | MAX (s) |
+|---:|---:|---:|---:|---:|---:|
+{chr(10).join(timing_rows)}
+
+## Accuracy for every allowed group
+
+| Sequence | Allowed SK_ID_CURR | Output | Pandas | Final HE audit | Relative error | Status |
+|---:|---:|---|---:|---:|---:|---|
+{chr(10).join(accuracy_rows)}
+
+## Sequential total
+
+| Overall status | Requested groups | HE-executed groups | Accuracy-passing groups | Sequential wall seconds |
+|---|---:|---:|---:|---:|
+| {result["status"]} | {result["requested_groups"]} | {result["completed_groups"]} | {result["passed_groups"]} | {result["sequential_wall_seconds"]:.6f} |
+
+Each group retains its complete detailed report under
+`groups/group_NNNNNN/REPORT.md`. A failed or unsupported group does not erase
+the completed results for other allowed groups.
+"""
+
+
+def _run_multiple_allowed_groups(
+    args: argparse.Namespace,
+    allowed_ids: list[str],
+) -> None:
+    root = args.output_dir.resolve()
+    if root.exists():
+        if not args.overwrite:
+            raise FileExistsError(
+                f"refusing to overwrite benchmark output: {root}"
+            )
+        shutil.rmtree(root)
+    (root / "groups").mkdir(parents=True)
+    (root / "logs").mkdir()
+
+    sequential_started = time.perf_counter()
+    summaries: list[dict[str, object]] = []
+    all_accuracy: list[dict[str, object]] = []
+    for sequence, allowed in enumerate(allowed_ids):
+        child = root / "groups" / f"group_{sequence:06d}"
+        command = [
+            sys.executable,
+            str(Path(__file__).resolve()),
+            "--installments",
+            str(args.installments.resolve()),
+            "--allowed-sk-id-curr",
+            allowed,
+            "--max-ring-dimension",
+            str(args.max_ring_dimension),
+            "--openfhe-dir",
+            args.openfhe_dir,
+            "--relative-tolerance",
+            str(args.relative_tolerance),
+            "--output-dir",
+            str(child),
+            "--overwrite",
+        ]
+        completed = subprocess.run(
+            command,
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        (root / "logs" / f"group_{sequence:06d}.log").write_text(
+            completed.stdout + completed.stderr,
+            encoding="utf-8",
+        )
+        result_path = child / "benchmark_result.json"
+        if not result_path.is_file():
+            preparation_path = child / "client_preparation.json"
+            preparation = (
+                json.loads(preparation_path.read_text(encoding="utf-8"))
+                if preparation_path.is_file()
+                else {}
+            )
+            summaries.append(
+                {
+                    "sequence": sequence,
+                    "allowed_sk_id_curr": allowed,
+                    "status": preparation.get(
+                        "status",
+                        f"FAILED_EXIT_{completed.returncode}",
+                    ),
+                    "reason": preparation.get(
+                        "reason",
+                        "inspect the per-group log",
+                    ),
+                }
+            )
+            continue
+
+        child_result = json.loads(result_path.read_text(encoding="utf-8"))
+        preparation = child_result["client_preparation"]
+        exact = child_result["exact_execution"]
+        branches = exact["aggregate_branches"]
+        audits = exact["final_audit"]
+        pandas_seconds = (
+            float(child_result["client_prepare_seconds"])
+            + float(child_result["pandas_timings_seconds"]["total"])
+        )
+        he_seconds = (
+            float(child_result["client_prepare_seconds"])
+            + float(child_result["exact_process_wall_seconds"])
+        )
+        summary = {
+            "sequence": sequence,
+            "allowed_sk_id_curr": allowed,
+            "status": child_result["status"],
+            "real_rows": preparation["real_rows"],
+            "padded_width": preparation["bucket_size"],
+            "mask_ones": preparation["mask_ones"],
+            "mask_zeroes": preparation["mask_zeroes"],
+            "client_prepare_seconds": child_result[
+                "client_prepare_seconds"
+            ],
+            "he_full_seconds": he_seconds,
+            "pandas_full_seconds": pandas_seconds,
+            "sum_branch_seconds": (
+                float(branches["sum"]["branch_total_seconds"])
+                + float(audits["sum_seconds"])
+            ),
+            "mean_branch_seconds": (
+                float(branches["mean"]["branch_total_seconds"])
+                + float(audits["mean_seconds"])
+            ),
+            "variance_branch_seconds": (
+                float(branches["variance"]["branch_total_seconds"])
+                + float(audits["variance_seconds"])
+            ),
+            "maximum_branch_seconds": float(
+                exact["maximum_branch"]["branch_total_seconds"]
+            ),
+            "directory": str(child.relative_to(root)),
+        }
+        summaries.append(summary)
+        for row in child_result["accuracy"]:
+            all_accuracy.append(
+                {
+                    "sequence": sequence,
+                    "allowed_sk_id_curr": allowed,
+                    **row,
+                }
+            )
+
+    sequential_wall = time.perf_counter() - sequential_started
+    completed_groups = sum(
+        1 for summary in summaries if "real_rows" in summary
+    )
+    passed_groups = sum(
+        1 for summary in summaries if summary["status"] == "PASS"
+    )
+    overall_status = (
+        "PASS"
+        if passed_groups == len(allowed_ids)
+        else "PARTIAL"
+        if completed_groups
+        else "FAIL"
+    )
+    result: dict[str, object] = {
+        "status": overall_status,
+        "execution_policy": "strictly sequential isolated child processes",
+        "requested_groups": len(allowed_ids),
+        "completed_groups": completed_groups,
+        "passed_groups": passed_groups,
+        "sequential_wall_seconds": sequential_wall,
+        "groups": summaries,
+        "accuracy": all_accuracy,
+    }
+    if all_accuracy:
+        write_csv(
+            root / "accuracy_all_groups.csv",
+            list(all_accuracy[0]),
+            all_accuracy,
+        )
+    write_json(root / "combined_result.json", result)
+    (root / "REPORT.md").write_text(_multi_report(result), encoding="utf-8")
+    print(
+        json.dumps(
+            {
+                "status": overall_status,
+                "requested_groups": len(allowed_ids),
+                "completed_groups": completed_groups,
+                "passed_groups": passed_groups,
+                "sequential_wall_seconds": sequential_wall,
+                "output_dir": str(root),
+            },
+            indent=2,
+        )
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -460,8 +716,10 @@ def main() -> None:
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument(
         "--allowed-sk-id-curr",
+        nargs="+",
         help=(
-            "no-PSI mode: client-approved complete applicant group to prepare"
+            "no-PSI mode: one or more client-approved complete applicant "
+            "groups; multiple groups run sequentially"
         ),
     )
     source.add_argument(
@@ -475,6 +733,12 @@ def main() -> None:
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--overwrite", action="store_true")
     args = parser.parse_args()
+
+    if args.allowed_sk_id_curr is not None and len(
+        args.allowed_sk_id_curr
+    ) > 1:
+        _run_multiple_allowed_groups(args, args.allowed_sk_id_curr)
+        return
 
     root = args.output_dir.resolve()
     if root.exists():
@@ -494,6 +758,7 @@ def main() -> None:
     client_prepare_seconds = 0.0
     client_preparation: dict[str, object] | None = None
     if args.allowed_sk_id_curr is not None:
+        allowed_sk_id_curr = args.allowed_sk_id_curr[0]
         prepared_group_path = (
             root
             / "client_private"
@@ -503,7 +768,7 @@ def main() -> None:
         try:
             prepared = prepare_allowed_group_csv(
                 installments,
-                allowed_sk_id_curr=args.allowed_sk_id_curr,
+                allowed_sk_id_curr=allowed_sk_id_curr,
                 bucket_size=0,
                 maximum_width=args.max_ring_dimension // 2,
                 output_csv=prepared_group_path,
@@ -513,7 +778,7 @@ def main() -> None:
             rejection = {
                 "status": "HE_UNSUPPORTED_COMPLETE_GROUP",
                 "reason": str(error),
-                "allowed_sk_id_curr": str(args.allowed_sk_id_curr),
+                "allowed_sk_id_curr": allowed_sk_id_curr,
                 "automatic_width": True,
                 "maximum_width": args.max_ring_dimension // 2,
                 "client_prepare_seconds": client_prepare_seconds,
