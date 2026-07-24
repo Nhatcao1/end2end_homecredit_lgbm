@@ -10,7 +10,9 @@ Flow:
 installments CSV
 → client selects one complete allowed group
 → encrypt AMT_INSTALMENT and AMT_PAYMENT
+→ ADD.ct = installment.ct + payment.ct
 → PAYMENT_DIFF.ct = installment.ct - payment.ct
+→ MULTIPLY.ct = installment.ct × payment.ct
 → encrypted SUM / MEAN / VAR / MIN / MAX
 → final client decryption
 ```
@@ -20,10 +22,8 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 from pathlib import Path
 import shutil
-import statistics
 import subprocess
 import sys
 
@@ -33,21 +33,9 @@ sys.path.insert(0, str(ROOT))
 
 from code.heir.python_api import (
     SourceBuiltCkksSession,
-    load_prepared_allowed_group,
     prepare_allowed_group_csv,
     public_power_of_two_scale,
 )
-
-
-def plaintext_reference(values: list[float]) -> dict[str, float]:
-    """Return the equivalent non-HE result for the final correctness audit."""
-    return {
-        "sum": float(sum(values)),
-        "mean": float(statistics.fmean(values)),
-        "variance": float(statistics.variance(values)),
-        "minimum": float(min(values)),
-        "maximum": float(max(values)),
-    }
 
 
 def save_parent_checkpoint(args: argparse.Namespace) -> None:
@@ -118,10 +106,13 @@ def evaluate_loaded_checkpoint(args: argparse.Namespace) -> None:
     installment_ct = he.load_column("AMT_INSTALMENT")
     payment_ct = he.load_column("AMT_PAYMENT")
 
-    # No plaintext feature is calculated here.
+    # Each API call receives two ciphertext handles and returns another
+    # ciphertext handle. No parent plaintext is loaded in this process.
+    added_ct = he.add(installment_ct, payment_ct)
     payment_diff_ct = he.subtract(installment_ct, payment_ct)
+    multiplied_ct = he.multiply(installment_ct, payment_ct)
 
-    encrypted_outputs = {
+    aggregate_ct = {
         "sum": he.sum(payment_diff_ct),
         "mean": he.mean(payment_diff_ct),
         "variance": he.variance(payment_diff_ct),
@@ -130,59 +121,49 @@ def evaluate_loaded_checkpoint(args: argparse.Namespace) -> None:
     }
 
     # This is the only decryption boundary.
-    final_audit = {
-        name: he.decrypt_scalar(ciphertext)
-        for name, ciphertext in encrypted_outputs.items()
+    decrypted_outputs = {
+        "columns": {
+            "AMT_INSTALMENT_PLUS_AMT_PAYMENT": he.decrypt_column(added_ct),
+            "PAYMENT_DIFF": he.decrypt_column(payment_diff_ct),
+            "AMT_INSTALMENT_TIMES_AMT_PAYMENT": he.decrypt_column(
+                multiplied_ct
+            ),
+        },
+        "payment_diff_aggregates": {
+            name: he.decrypt_scalar(ciphertext)
+            for name, ciphertext in aggregate_ct.items()
+        },
     }
 
-    # Only after every encrypted result has reached the final decrypt boundary
-    # does the client reopen plaintext for a correctness comparison.
-    client_private = root / "client_private"
-    prepared = load_prepared_allowed_group(
-        client_private / "prepared_group.csv"
+    application = json.loads(
+        (root / "application.json").read_text(encoding="utf-8")
     )
-    expected_values = [
-        installment - payment
-        for installment, payment in zip(
-            prepared.group.installment,
-            prepared.group.payment,
-        )
-    ]
-    reference = plaintext_reference(expected_values)
-    comparison = {
-        name: {
-            "plaintext_reference": reference[name],
-            "final_he_audit": final_audit[name],
-            "absolute_error": abs(reference[name] - final_audit[name]),
-        }
-        for name in reference
-    }
-    if not all(
-        math.isfinite(row["final_he_audit"])
-        for row in comparison.values()
-    ):
-        raise RuntimeError("final HE audit contains a non-finite value")
 
     result = {
         "status": "payment_diff_simple_api_executed",
-        "allowed_sk_id_curr": prepared.raw_applicant_id,
-        "real_rows": prepared.group.real_count,
-        "encrypted_width": prepared.bucket_size,
+        "allowed_sk_id_curr": application["allowed_sk_id_curr"],
+        "real_rows": application["real_rows"],
+        "encrypted_width": application["encrypted_width"],
         "input_scale": he.input_scale,
         "backend": "source-built OpenFHE C++",
         "parent_ciphertexts_reloaded_in_fresh_process": True,
         "same_openfhe_context": True,
         "no_intermediate_decryption": True,
-        "expression": "AMT_INSTALMENT.ct - AMT_PAYMENT.ct",
-        "outputs": comparison,
+        "ciphertext_operations": {
+            "add": "AMT_INSTALMENT.ct + AMT_PAYMENT.ct",
+            "subtract": "AMT_INSTALMENT.ct - AMT_PAYMENT.ct",
+            "multiply": "AMT_INSTALMENT.ct * AMT_PAYMENT.ct",
+            "aggregates": "SUM/MEAN/VAR/MIN/MAX(PAYMENT_DIFF.ct)",
+        },
+        "decrypted_outputs": decrypted_outputs,
     }
-    result_path = client_private / "final_audit.json"
+    result_path = root / "client_private/decrypted_outputs.json"
     result_path.write_text(
         json.dumps(result, indent=2) + "\n",
         encoding="utf-8",
     )
     print(json.dumps(result, indent=2))
-    print(f"final client audit: {result_path}")
+    print(f"final decrypted output: {result_path}")
 
 
 def main() -> None:

@@ -260,9 +260,9 @@ encrypted_session/
 
 `--stage save` tạo context, mã hóa hai parent column và kết thúc process.
 `--stage evaluate` mở process Python mới, kiểm tra hash context/ciphertext, load
-hai parent ciphertext, sau đó mới chạy CT−CT và aggregate. Không có plaintext
-parent nào được truyền vào evaluator. File prepared chỉ được client mở lại tại
-final audit boundary để so sánh correctness.
+hai parent ciphertext, sau đó chạy CT+CT, CT−CT, CT×CT và aggregate trên
+`PAYMENT_DIFF.ct`. Không có plaintext parent hoặc plaintext reference nào được
+truyền vào process evaluate.
 
 Ví dụ đầy đủ:
 
@@ -292,9 +292,9 @@ prepare_allowed_group_csv
 → process kết thúc
 → SourceBuiltCkksSession.load trong process mới
 → load_column cho hai parent ciphertext
-→ subtract
+→ add / subtract / multiply trên hai ciphertext
 → sum / mean / variance / minimum / maximum
-→ decrypt_scalar tại final audit boundary
+→ decrypt_column / decrypt_scalar tại output boundary
 ```
 
 Trong trial hiện tại, audit secret nằm trong `client_private/`. MIN/MAX process

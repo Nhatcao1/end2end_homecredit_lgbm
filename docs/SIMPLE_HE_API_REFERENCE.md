@@ -570,7 +570,8 @@ python3 code/heir/examples/simple_ciphertext_api.py
 ```
 
 Current source-built server API with a parent checkpoint and fresh-process
-reload:
+reload. The example visibly evaluates CT+CT, CT−CT, and CT×CT on the two
+reloaded parents, then reduces the CT−CT result:
 
 ```bash
 python3 code/heir/examples/payment_diff_simple_api_e2e.py \
