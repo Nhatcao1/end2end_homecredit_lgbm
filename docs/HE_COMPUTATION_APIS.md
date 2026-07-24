@@ -184,3 +184,60 @@ trước khi aggregate.
 Adapter ciphertext chung giữa `EncryptedDataset` và các aggregate API là phần
 kết nối còn thiếu nếu muốn toàn bộ pipeline dùng một ciphertext nguồn duy
 nhất.
+
+## 8. API ciphertext-in/ciphertext-out đơn giản
+
+`CkksSession` cung cấp API nhỏ, giữ tất cả phép tính trong cùng một OpenFHE
+context:
+
+```python
+from code.heir.python_api import CkksSession
+
+he = CkksSession.create(
+    width=4,
+    input_scale=4096.0,
+    ring_dimension=16384,
+)
+
+left_ct = he.encrypt_column(left)
+right_ct = he.encrypt_column(right)
+
+derived_ct = he.subtract(left_ct, right_ct)
+
+sum_ct = he.sum(derived_ct)
+mean_ct = he.mean(derived_ct)
+variance_ct = he.variance(derived_ct)
+minimum_ct = he.minimum(derived_ct)
+maximum_ct = he.maximum(derived_ct)
+```
+
+API public:
+
+```text
+he.add(left_ct, right_ct)       -> EncryptedColumn
+he.subtract(left_ct, right_ct)  -> EncryptedColumn
+he.multiply(left_ct, right_ct)  -> EncryptedColumn
+
+he.sum(column_ct)               -> EncryptedScalar
+he.mean(column_ct)              -> EncryptedScalar
+he.variance(column_ct)          -> EncryptedScalar
+he.minimum(column_ct)           -> EncryptedScalar
+he.maximum(column_ct)           -> EncryptedScalar
+```
+
+`EncryptedColumn` lưu reference đến session, public `valid_count` và scale.
+Ciphertext từ hai session khác nhau bị từ chối trước khi gọi OpenFHE.
+
+SUM, MEAN và VAR dùng public validity mask để loại padding. MIN/MAX dùng
+duplicate padding nên padding không thay đổi extrema.
+
+Implementation này sử dụng direct OpenFHE Python wrapper để giữ tất cả phép
+tính trong cùng một context. Bản OpenFHE development trên server hiện chưa có
+Python wrapper tương thích; source-built C++ MAX route vẫn là backend đang dùng
+trong full benchmark cho tới khi binding đó được build.
+
+Ví dụ đầy đủ:
+
+```bash
+python3 code/heir/examples/simple_ciphertext_api.py
+```

@@ -14,6 +14,11 @@ from code.heir.python_api.official_openfhe_minmax import (
     OfficialOpenFheMinMax,
     public_power_of_two_scale,
 )
+from code.heir.python_api.simple_session import (
+    CkksSession,
+    EncryptedColumn,
+    EncryptedScalar,
+)
 
 
 class FakeParameters:
@@ -55,6 +60,9 @@ class FakeContext:
     def EvalMultKeyGen(self, secret_key):
         self.eval_mult_key = secret_key
 
+    def EvalSumKeyGen(self, secret_key):
+        self.eval_sum_key = secret_key
+
     def MakeCKKSPackedPlaintext(self, values):
         self.encoded = values
         return values
@@ -79,6 +87,10 @@ class FakeContext:
     def EvalMult(self, left, right):
         self.multiplied = (left, right)
         return "product-ct"
+
+    def EvalSum(self, ciphertext, width):
+        self.summed = (ciphertext, width)
+        return "reduced-sum-ct"
 
     def Decrypt(self, secret_key, ciphertext):
         value = -0.25 if ciphertext == "minimum-ct" else 0.25
@@ -181,6 +193,82 @@ class OfficialOpenFheMinMaxTest(unittest.TestCase):
             program.decrypt_scalar(encrypted_maximum),
         )
         self.assertEqual("secret", fake.context.eval_mult_key)
+
+    def test_generic_columns_support_sum_mean_and_sample_variance(self):
+        fake = FakeOpenFhe()
+        target = "code.heir.python_api.official_openfhe_minmax._load_openfhe"
+        with patch(target, return_value=fake):
+            program = OfficialOpenFheColumnOps(
+                width=4,
+                input_scale=512.0,
+                ring_dimension=16,
+            )
+            program.setup()
+        column = program.encrypt(
+            [160.0, -100.0, 250.0],
+            padding="duplicate",
+        )
+
+        encrypted_sum = program.sum(column)
+        encrypted_mean = program.mean(column)
+        encrypted_variance = program.variance(column)
+
+        self.assertEqual("reduced-sum-ct", encrypted_sum.ciphertext)
+        self.assertEqual("product-ct", encrypted_mean.ciphertext)
+        self.assertEqual("product-ct", encrypted_variance.ciphertext)
+        self.assertEqual(512.0 * 512.0, encrypted_variance.scale)
+        self.assertEqual("secret", fake.context.eval_sum_key)
+        self.assertEqual("secret", fake.context.eval_mult_key)
+        self.assertEqual(("product-ct", 4), fake.context.summed)
+
+    def test_simple_session_exposes_ciphertext_in_ciphertext_out_api(self):
+        fake = FakeOpenFhe()
+        target = "code.heir.python_api.official_openfhe_minmax._load_openfhe"
+        with patch(target, return_value=fake):
+            he = CkksSession.create(
+                width=4,
+                input_scale=512.0,
+                ring_dimension=16,
+            )
+        left = he.encrypt_column([160.0, -100.0, 250.0])
+        right = he.encrypt_column([100.0, -50.0, 200.0])
+
+        derived = he.subtract(left, right)
+        outputs = (
+            he.sum(derived),
+            he.mean(derived),
+            he.variance(derived),
+            he.minimum(derived),
+            he.maximum(derived),
+        )
+
+        self.assertIsInstance(derived, EncryptedColumn)
+        self.assertTrue(
+            all(isinstance(output, EncryptedScalar) for output in outputs)
+        )
+        self.assertEqual((3, 3, 3, 3, 3), tuple(
+            output.source_count for output in outputs
+        ))
+
+    def test_simple_session_rejects_foreign_ciphertext(self):
+        first_fake = FakeOpenFhe()
+        second_fake = FakeOpenFhe()
+        target = "code.heir.python_api.official_openfhe_minmax._load_openfhe"
+        with patch(target, side_effect=[first_fake, second_fake]):
+            first = CkksSession.create(
+                width=4,
+                input_scale=512.0,
+                ring_dimension=16,
+            )
+            second = CkksSession.create(
+                width=4,
+                input_scale=512.0,
+                ring_dimension=16,
+            )
+        foreign = first.encrypt_column([1.0, 2.0])
+        local = second.encrypt_column([1.0, 2.0])
+        with self.assertRaisesRegex(ValueError, "different CKKS context"):
+            second.add(foreign, local)
 
     def test_column_ops_require_power_of_two_width(self):
         with self.assertRaisesRegex(ValueError, "power of two"):

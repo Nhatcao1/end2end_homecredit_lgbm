@@ -54,11 +54,18 @@ from code.heir.python_api.checkpoint import (
     save_sum_checkpoint,
 )
 from code.heir.python_api.encrypted_dataset import EncryptedDataset
+from code.heir.python_api.simple_session import (
+    CkksSession,
+    EncryptedColumn,
+    EncryptedScalar,
+)
 
 __all__ = [
     "EncryptedMinMax",
     "EncryptedDataset",
+    "EncryptedColumn",
     "EncryptedOpenFheColumn",
+    "EncryptedScalar",
     "LoadedBinaryColumnCheckpoint",
     "LoadedBinaryColumnAggregateCheckpoint",
     "LoadedBinaryColumnStatisticsCheckpoint",
@@ -74,6 +81,7 @@ __all__ = [
     "PreparedAllowedGroup",
     "SourceBuiltOpenFheColumnMax",
     "CompleteGroupDoesNotFitError",
+    "CkksSession",
     "binary_column_aggregate_mlir",
     "binary_column_mlir",
     "binary_column_statistics_mlir",

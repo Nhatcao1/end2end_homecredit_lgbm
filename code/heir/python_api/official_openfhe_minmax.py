@@ -239,6 +239,7 @@ class OfficialOpenFheColumnOps:
             ring_dimension=ring_dimension,
         )
         self._multiplication_ready = False
+        self._sum_ready = False
 
     def setup(self) -> None:
         self._engine.setup()
@@ -310,11 +311,7 @@ class OfficialOpenFheColumnOps:
     ) -> EncryptedOpenFheColumn:
         """Element-wise encrypted column multiplication."""
         self._validate_pair(left, right)
-        if not self._multiplication_ready:
-            self._engine._context.EvalMultKeyGen(
-                self._engine._keys.secretKey
-            )
-            self._multiplication_ready = True
+        self._ensure_multiplication_key()
         return EncryptedOpenFheColumn(
             self._engine._context.EvalMult(
                 left.ciphertext,
@@ -322,6 +319,71 @@ class OfficialOpenFheColumnOps:
             ),
             left.scale * right.scale,
             left.valid_count,
+        )
+
+    def sum(
+        self,
+        column: EncryptedOpenFheColumn,
+    ) -> EncryptedOpenFheColumn:
+        """Return an encrypted sum while excluding public padding lanes."""
+        masked = self._masked(column)
+        self._ensure_sum_keys()
+        return EncryptedOpenFheColumn(
+            self._engine._context.EvalSum(masked, self.width),
+            column.scale,
+            1,
+        )
+
+    def mean(
+        self,
+        column: EncryptedOpenFheColumn,
+    ) -> EncryptedOpenFheColumn:
+        """Return encrypted SUM(x) / public valid_count."""
+        encrypted_sum = self.sum(column)
+        return EncryptedOpenFheColumn(
+            self._engine._context.EvalMult(
+                encrypted_sum.ciphertext,
+                1.0 / float(column.valid_count),
+            ),
+            column.scale,
+            1,
+        )
+
+    def variance(
+        self,
+        column: EncryptedOpenFheColumn,
+    ) -> EncryptedOpenFheColumn:
+        """Return encrypted ddof=1 sample variance from one ciphertext."""
+        if column.valid_count < 2:
+            raise ValueError("sample variance requires at least two values")
+        self._ensure_multiplication_key()
+        self._ensure_sum_keys()
+        masked = self._masked(column)
+        encrypted_sum = self._engine._context.EvalSum(masked, self.width)
+        encrypted_squares = self._engine._context.EvalMult(masked, masked)
+        encrypted_square_sum = self._engine._context.EvalSum(
+            encrypted_squares,
+            self.width,
+        )
+        encrypted_mean = self._engine._context.EvalMult(
+            encrypted_sum,
+            1.0 / float(column.valid_count),
+        )
+        centered_square_sum = self._engine._context.EvalSub(
+            encrypted_square_sum,
+            self._engine._context.EvalMult(
+                encrypted_sum,
+                encrypted_mean,
+            ),
+        )
+        sample_variance = self._engine._context.EvalMult(
+            centered_square_sum,
+            1.0 / float(column.valid_count - 1),
+        )
+        return EncryptedOpenFheColumn(
+            sample_variance,
+            column.scale * column.scale,
+            1,
         )
 
     def minimum(
@@ -369,6 +431,33 @@ class OfficialOpenFheColumnOps:
         if column.valid_count != 1:
             raise ValueError("decrypt_scalar requires a reduced column")
         return self.decrypt(column)[0]
+
+    def _masked(self, column: EncryptedOpenFheColumn) -> Any:
+        """Zero public padding without revealing or decrypting real values."""
+        if not 1 <= column.valid_count <= self.width:
+            raise ValueError("column valid_count is outside this context")
+        mask = [1.0] * column.valid_count + [0.0] * (
+            self.width - column.valid_count
+        )
+        plaintext_mask = self._engine._context.MakeCKKSPackedPlaintext(mask)
+        return self._engine._context.EvalMult(
+            column.ciphertext,
+            plaintext_mask,
+        )
+
+    def _ensure_multiplication_key(self) -> None:
+        if not self._multiplication_ready:
+            self._engine._context.EvalMultKeyGen(
+                self._engine._keys.secretKey
+            )
+            self._multiplication_ready = True
+
+    def _ensure_sum_keys(self) -> None:
+        if not self._sum_ready:
+            self._engine._context.EvalSumKeyGen(
+                self._engine._keys.secretKey
+            )
+            self._sum_ready = True
 
     @staticmethod
     def _validate_pair(
