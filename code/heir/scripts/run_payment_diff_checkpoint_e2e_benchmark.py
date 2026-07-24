@@ -26,6 +26,10 @@ from code.heir.python_api import prepare_post_psi_groups
 
 
 EXAMPLE = ROOT / "code/heir/examples/payment_diff_checkpoint_e2e.py"
+PROBE = (
+    ROOT
+    / "code/heir/benchmarking/payment_diff_checkpoint_probe.py"
+)
 OUTPUT_COLUMNS = {
     "max": "PAYMENT_DIFF_MAX",
     "mean": "PAYMENT_DIFF_MEAN",
@@ -47,7 +51,7 @@ def _run_exact_example(
 ) -> tuple[float, list[str]]:
     command = [
         sys.executable,
-        str(EXAMPLE),
+        str(PROBE),
         "--installments",
         str(installments),
         "--bridge-dir",
@@ -254,9 +258,10 @@ def _report(result: dict[str, object]) -> str:
 
     return f"""# Exact checkpoint PAYMENT_DIFF end-to-end benchmark
 
-This benchmark launches
-`code/heir/examples/payment_diff_checkpoint_e2e.py` directly. It does not copy
-or replace its HE logic. The measured cold path is:
+This benchmark imports and invokes
+`code/heir/examples/payment_diff_checkpoint_e2e.py` through an external timing
+probe. The example contains no clocks, and the probe does not copy or replace
+its HE logic. The measured cold path is:
 
 `post-PSI layout → HEIR SUM/MEAN/VAR branches → encrypted checkpoints →`
 `source-built OpenFHE CKKS↔FHEW MAX → final audit CSV`.
@@ -300,7 +305,6 @@ only in the final isolated audit process.
 |---|---:|
 | Client post-PSI scan/select/pad | {_seconds(exact, "client_post_psi_prepare_seconds"):.9f} |
 | Public CKKS scale calibration | {_seconds(exact, "public_scale_seconds"):.9f} |
-| Final feature CSV write | {_seconds(exact, "final_output_write_seconds"):.9f} |
 
 | Workload | Seconds | HE ÷ Pandas |
 |---|---:|---:|

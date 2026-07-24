@@ -15,7 +15,6 @@ import json
 from pathlib import Path
 import subprocess
 import sys
-import time
 
 ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
@@ -117,14 +116,6 @@ def main() -> None:
         help="reuse already-saved SUM/MEAN/VAR branches",
     )
     parser.add_argument(
-        "--execution-json",
-        type=Path,
-        help=(
-            "optional per-stage timing trace for a benchmark wrapper; "
-            "omitting it keeps this as a plain application example"
-        ),
-    )
-    parser.add_argument(
         "--audit-aggregate-checkpoint",
         type=Path,
         help=argparse.SUPPRESS,
@@ -155,15 +146,8 @@ def main() -> None:
         return
     if args.bridge_dir is None:
         parser.error("--bridge-dir is required")
-    workflow_started = time.perf_counter()
-    trace: dict[str, object] = {
-        "workflow": "payment_diff_checkpoint_e2e",
-        "resume_checkpoints": args.resume_checkpoints,
-        "aggregate_branches": {},
-    }
     # Client-only post-PSI semi-join and grouping. The HE evaluator receives
     # neither the raw applicant key nor the join mapping.
-    started = time.perf_counter()
     layout = prepare_post_psi_groups(
         args.installments.resolve(),
         args.bridge_dir.resolve(),
@@ -171,14 +155,10 @@ def main() -> None:
         bucket_size=args.bucket_size,
         minimum_group_size=2,
     )
-    trace["client_post_psi_prepare_seconds"] = (
-        time.perf_counter() - started
-    )
     group = layout.groups[0]
     raw_applicant_id = layout.private_mapping[0][1]
 
     # A public scale is part of the CKKS representation contract.
-    started = time.perf_counter()
     scale = public_power_of_two_scale(
         [
             abs(installment) + abs(payment)
@@ -188,16 +168,6 @@ def main() -> None:
             )
         ]
     )
-    trace["public_scale_seconds"] = time.perf_counter() - started
-    trace["input"] = {
-        "post_psi_applicants": layout.post_psi_applicants,
-        "source_rows_scanned": layout.source_rows_scanned,
-        "invalid_parent_rows": layout.invalid_parent_rows,
-        "selected_groups": 1,
-        "real_rows": group.real_count,
-        "bucket_size": args.bucket_size,
-        "input_scale": scale,
-    }
 
     # HEIR Python 2026.7.1 is unreliable when one circuit returns a packed
     # SUM/MEAN/VAR tensor. Use one proven scalar-output circuit per branch.
@@ -206,14 +176,9 @@ def main() -> None:
     aggregate_root = args.checkpoint_dir.resolve() / "aggregates"
     branch_dirs: dict[str, Path] = {}
     for aggregate in ("sum", "mean", "variance"):
-        branch_started = time.perf_counter()
-        branch_trace: dict[str, float | bool] = {
-            "resumed": args.resume_checkpoints,
-        }
         branch_dir = aggregate_root / aggregate
         branch_dirs[aggregate] = branch_dir
         if args.resume_checkpoints:
-            started = time.perf_counter()
             _validate_resumed_branch(
                 branch_dir,
                 aggregate=aggregate,
@@ -221,17 +186,10 @@ def main() -> None:
                 valid_count=group.real_count,
                 input_scale=scale,
             )
-            branch_trace["resume_validation_seconds"] = (
-                time.perf_counter() - started
-            )
-            branch_trace["branch_total_seconds"] = (
-                time.perf_counter() - branch_started
-            )
-            trace["aggregate_branches"][aggregate] = branch_trace
             print(f"[HEIR] reuse {aggregate} checkpoint: {branch_dir}", flush=True)
             continue
         print(f"[HEIR] compile {aggregate} branch", flush=True)
-        started = time.perf_counter()
+        ##cyphertext - cyperhtext
         branch = compile_checkpointable_binary_column_aggregate(
             operation="subtract",
             aggregate=aggregate,
@@ -239,23 +197,14 @@ def main() -> None:
             valid_count=group.real_count,
             input_scale=scale,
         )
-        branch_trace["compile_seconds"] = time.perf_counter() - started
         print(f"[HEIR] setup/encrypt/evaluate {aggregate} branch", flush=True)
-        started = time.perf_counter()
         branch.setup()
-        branch_trace["setup_seconds"] = time.perf_counter() - started
-        started = time.perf_counter()
+        ##cyphertext - cyphertext
         encrypted_parents = branch.encrypt(
             group.installment,
             group.payment,
         )
-        branch_trace["parent_encrypt_seconds"] = (
-            time.perf_counter() - started
-        )
-        started = time.perf_counter()
         encrypted_result = branch.eval(encrypted_parents)
-        branch_trace["evaluate_seconds"] = time.perf_counter() - started
-        started = time.perf_counter()
         save_binary_column_aggregate_checkpoint(
             branch,
             encrypted_columns=encrypted_parents,
@@ -263,13 +212,6 @@ def main() -> None:
             checkpoint_dir=branch_dir,
             overwrite=args.overwrite,
         )
-        branch_trace["checkpoint_save_seconds"] = (
-            time.perf_counter() - started
-        )
-        branch_trace["branch_total_seconds"] = (
-            time.perf_counter() - branch_started
-        )
-        trace["aggregate_branches"][aggregate] = branch_trace
         print(f"[HEIR] saved {aggregate} checkpoint: {branch_dir}", flush=True)
         del branch, encrypted_parents, encrypted_result
 
@@ -282,7 +224,6 @@ def main() -> None:
         openfhe_dir=args.openfhe_dir,
     )
     maximum_dir = args.checkpoint_dir.resolve() / "maximum"
-    maximum_started = time.perf_counter()
     if args.resume_checkpoints:
         print(f"[OpenFHE] reuse encrypted MAX checkpoint: {maximum_dir}", flush=True)
         max_result = maximum.load_completed(maximum_dir)
@@ -295,39 +236,19 @@ def main() -> None:
             overwrite=args.overwrite,
         )
         print("[OpenFHE] encrypted MAX checkpoint ready", flush=True)
-    trace["maximum_branch"] = {
-        **dict(max_result.get("timings_seconds", {})),
-        "branch_total_seconds": time.perf_counter() - maximum_started,
-        "resumed": bool(max_result.get("resumed", False)),
-    }
 
     # Final client audit boundary only. The source-built MAX child decrypted
     # only after maximum.ct was written; the aggregate children now do the
     # same independently so OpenFHE's process-global key maps begin empty.
-    audit_trace: dict[str, float] = {}
-    started = time.perf_counter()
     payment_diff_sum = _audit_one_checkpoint(branch_dirs["sum"])
-    audit_trace["sum_seconds"] = time.perf_counter() - started
-    started = time.perf_counter()
     payment_diff_mean = _audit_one_checkpoint(branch_dirs["mean"])
-    audit_trace["mean_seconds"] = time.perf_counter() - started
-    started = time.perf_counter()
     payment_diff_var = _audit_one_checkpoint(branch_dirs["variance"])
-    audit_trace["variance_seconds"] = time.perf_counter() - started
-    audit_trace["maximum_seconds"] = float(
-        dict(max_result.get("timings_seconds", {})).get(
-            "audit_decrypt",
-            0.0,
-        )
-    )
-    trace["final_audit"] = audit_trace
     payment_diff_max = float(max_result["maximum"])
     audit_csv = (
         args.checkpoint_dir.resolve()
         / "client_private"
         / "payment_diff_features.csv"
     )
-    started = time.perf_counter()
     audit_csv.parent.mkdir(parents=True, exist_ok=True)
     with audit_csv.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.writer(handle)
@@ -349,22 +270,6 @@ def main() -> None:
                 payment_diff_var,
             ]
         )
-    trace["final_output_write_seconds"] = time.perf_counter() - started
-    trace["total_workflow_seconds"] = time.perf_counter() - workflow_started
-    trace["final_outputs"] = {
-        "PAYMENT_DIFF_MAX": payment_diff_max,
-        "PAYMENT_DIFF_MEAN": payment_diff_mean,
-        "PAYMENT_DIFF_SUM": payment_diff_sum,
-        "PAYMENT_DIFF_VAR": payment_diff_var,
-    }
-    if args.execution_json is not None:
-        execution_json = args.execution_json.resolve()
-        execution_json.parent.mkdir(parents=True, exist_ok=True)
-        execution_json.write_text(
-            json.dumps(trace, indent=2) + "\n",
-            encoding="utf-8",
-        )
-
     print(f"aggregate checkpoints: {aggregate_root}")
     print(f"final client features: {audit_csv}")
 

@@ -23,10 +23,14 @@ def _load_module():
 
 
 class PaymentDiffCheckpointE2EBenchmarkTest(unittest.TestCase):
-    def test_benchmark_invokes_exact_example_with_timing_trace(self):
+    def test_benchmark_invokes_external_probe_for_exact_example(self):
         source = SCRIPT.read_text(encoding="utf-8")
         self.assertIn(
             'EXAMPLE = ROOT / "code/heir/examples/payment_diff_checkpoint_e2e.py"',
+            source,
+        )
+        self.assertIn(
+            '"code/heir/benchmarking/payment_diff_checkpoint_probe.py"',
             source,
         )
         self.assertIn('"--execution-json"', source)

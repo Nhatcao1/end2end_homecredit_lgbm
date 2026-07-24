@@ -1,10 +1,11 @@
 # Exact checkpoint PAYMENT_DIFF E2E benchmark
 
-This benchmark executes
-`code/heir/examples/payment_diff_checkpoint_e2e.py` as its HE workload. It
-does not maintain a second copy of the encrypted feature logic.
+This benchmark uses an external timing probe to import and invoke
+`code/heir/examples/payment_diff_checkpoint_e2e.py` as its HE workload. The
+application example contains no timers, and the probe does not maintain a
+second copy of the encrypted feature logic.
 
-The example's optional `--execution-json` trace records the cold path:
+The external probe records the cold path:
 
 1. post-PSI client layout;
 2. public CKKS scale selection;

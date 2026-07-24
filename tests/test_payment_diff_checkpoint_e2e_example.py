@@ -40,8 +40,9 @@ class PaymentDiffCheckpointE2EExampleTest(unittest.TestCase):
         self.assertIn("--openfhe-dir", source)
         self.assertNotIn("import openfhe", source)
         self.assertIn("--resume-checkpoints", source)
-        self.assertIn("--execution-json", source)
         self.assertNotIn("REPORT.md", source)
+        self.assertNotIn("perf_counter", source)
+        self.assertNotIn("import time", source)
 
     def test_help_is_available_without_he_setup(self):
         completed = subprocess.run(
