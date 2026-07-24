@@ -241,3 +241,25 @@ Ví dụ đầy đủ:
 ```bash
 python3 code/heir/examples/simple_ciphertext_api.py
 ```
+
+Ví dụ real-data `PAYMENT_DIFF` từ đầu đến cuối, không có benchmark:
+
+```bash
+python3 code/heir/examples/payment_diff_simple_api_e2e.py \
+  --installments data/home_credit/installments_payments.csv \
+  --allowed-sk-id-curr 100001 \
+  --ring-dimension 16384 \
+  --output-dir benchmark_runs/payment_diff_simple_api_100001 \
+  --overwrite
+```
+
+Application code chỉ gọi:
+
+```text
+prepare_allowed_group_csv
+→ CkksSession.create
+→ encrypt_column
+→ subtract
+→ sum / mean / variance / minimum / maximum
+→ decrypt_scalar tại final audit boundary
+```
