@@ -53,9 +53,11 @@ from code.heir.python_api.checkpoint import (
     save_binary_column_statistics_checkpoint,
     save_sum_checkpoint,
 )
+from code.heir.python_api.encrypted_dataset import EncryptedDataset
 
 __all__ = [
     "EncryptedMinMax",
+    "EncryptedDataset",
     "EncryptedOpenFheColumn",
     "LoadedBinaryColumnCheckpoint",
     "LoadedBinaryColumnAggregateCheckpoint",
