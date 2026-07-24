@@ -1,5 +1,8 @@
 # Các API thực sự tham gia tính toán HE
 
+Tham khảo contract đầy đủ về input, output và giới hạn của các simple API tại
+[`SIMPLE_HE_API_REFERENCE.md`](SIMPLE_HE_API_REFERENCE.md).
+
 Tài liệu này phân biệt:
 
 - API thực hiện phép tính trên ciphertext;

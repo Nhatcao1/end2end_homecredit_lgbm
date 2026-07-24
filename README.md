@@ -57,3 +57,5 @@ For the small complete post-PSI `PAYMENT_DIFF_{MAX,MEAN,SUM,VAR}` proof, use
 `docs/PAYMENT_DIFF_POST_PSI_E2E.md`.
 The definitive data, ciphertext, key, timing, and audit flow is in
 `docs/POST_PSI_PAYMENT_DIFF_E2E_FLOW.md`.
+The public input/output contracts for the simple ciphertext APIs are in
+`docs/SIMPLE_HE_API_REFERENCE.md`.
