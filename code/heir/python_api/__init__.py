@@ -59,6 +59,11 @@ from code.heir.python_api.simple_session import (
     EncryptedColumn,
     EncryptedScalar,
 )
+from code.heir.python_api.source_built_session import (
+    SourceBuiltCkksSession,
+    SourceBuiltEncryptedColumn,
+    SourceBuiltEncryptedScalar,
+)
 
 __all__ = [
     "EncryptedMinMax",
@@ -80,6 +85,9 @@ __all__ = [
     "PostPsiGroupLayout",
     "PreparedAllowedGroup",
     "SourceBuiltOpenFheColumnMax",
+    "SourceBuiltCkksSession",
+    "SourceBuiltEncryptedColumn",
+    "SourceBuiltEncryptedScalar",
     "CompleteGroupDoesNotFitError",
     "CkksSession",
     "binary_column_aggregate_mlir",

@@ -34,10 +34,13 @@ class PaymentDiffSimpleApiE2ETest(unittest.TestCase):
         self.assertEqual(-100.0, result["minimum"])
         self.assertEqual(160.0, result["maximum"])
 
-    def test_example_uses_only_simple_ciphertext_operations(self):
+    def test_example_uses_source_built_checkpoint_api(self):
         source = SCRIPT.read_text(encoding="utf-8")
-        self.assertIn("CkksSession.create(", source)
+        self.assertIn("SourceBuiltCkksSession.create(", source)
+        self.assertIn("SourceBuiltCkksSession.load(", source)
         self.assertIn("he.encrypt_column(", source)
+        self.assertIn('he.load_column("AMT_INSTALMENT")', source)
+        self.assertIn('he.load_column("AMT_PAYMENT")', source)
         self.assertIn("he.subtract(", source)
         self.assertIn("he.sum(", source)
         self.assertIn("he.mean(", source)
@@ -51,6 +54,15 @@ class PaymentDiffSimpleApiE2ETest(unittest.TestCase):
         )
         self.assertNotIn("perf_counter", source)
         self.assertNotIn("CMake", source)
+
+    def test_roundtrip_uses_distinct_python_processes(self):
+        source = SCRIPT.read_text(encoding="utf-8")
+        self.assertIn("subprocess.run(save_command", source)
+        self.assertIn('"--stage", "evaluate"', source)
+        self.assertIn(
+            "parent_ciphertexts_reloaded_in_fresh_process",
+            source,
+        )
 
 
 if __name__ == "__main__":

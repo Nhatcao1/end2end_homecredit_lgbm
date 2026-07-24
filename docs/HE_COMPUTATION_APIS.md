@@ -187,8 +187,11 @@ nhất.
 
 ## 8. API ciphertext-in/ciphertext-out đơn giản
 
-`CkksSession` cung cấp API nhỏ, giữ tất cả phép tính trong cùng một OpenFHE
-context:
+Hai backend cùng cung cấp API ciphertext-in/ciphertext-out nhỏ:
+
+- `CkksSession`: OpenFHE Python binding, session nằm trong memory;
+- `SourceBuiltCkksSession`: build runner C++ với OpenFHE đang cài tại
+  `/usr/local/lib/OpenFHE`, context và ciphertext nằm trong checkpoint.
 
 ```python
 from code.heir.python_api import CkksSession
@@ -231,10 +234,32 @@ Ciphertext từ hai session khác nhau bị từ chối trước khi gọi OpenF
 SUM, MEAN và VAR dùng public validity mask để loại padding. MIN/MAX dùng
 duplicate padding nên padding không thay đổi extrema.
 
-Implementation này sử dụng direct OpenFHE Python wrapper để giữ tất cả phép
-tính trong cùng một context. Bản OpenFHE development trên server hiện chưa có
-Python wrapper tương thích; source-built C++ MAX route vẫn là backend đang dùng
-trong full benchmark cho tới khi binding đó được build.
+`CkksSession` sử dụng direct OpenFHE Python wrapper. Bản OpenFHE development
+trên server hiện chưa có Python wrapper tương thích, vì vậy ví dụ real-data sử
+dụng `SourceBuiltCkksSession`. Python vẫn là public orchestration API; các phép
+tính thực tế chạy trong một runner C++ được link với OpenFHE trên server.
+
+Checkpoint source-built chứa:
+
+```text
+encrypted_session/
+├── manifest.json
+├── public/
+│   ├── context.bin
+│   └── public.key
+├── ciphertexts/
+│   ├── AMT_INSTALMENT.ct
+│   └── AMT_PAYMENT.ct
+├── client_private/
+│   └── audit_secret.key
+└── runner/build/simple_ckks_session_runner
+```
+
+`--stage save` tạo context, mã hóa hai parent column và kết thúc process.
+`--stage evaluate` mở process Python mới, kiểm tra hash context/ciphertext, load
+hai parent ciphertext, sau đó mới chạy CT−CT và aggregate. Không có plaintext
+parent nào được truyền vào evaluator. File prepared chỉ được client mở lại tại
+final audit boundary để so sánh correctness.
 
 Ví dụ đầy đủ:
 
@@ -246,9 +271,11 @@ Ví dụ real-data `PAYMENT_DIFF` từ đầu đến cuối, không có benchmar
 
 ```bash
 python3 code/heir/examples/payment_diff_simple_api_e2e.py \
+  --stage roundtrip \
   --installments data/home_credit/installments_payments.csv \
   --allowed-sk-id-curr 100001 \
   --ring-dimension 16384 \
+  --openfhe-dir /usr/local/lib/OpenFHE \
   --output-dir benchmark_runs/payment_diff_simple_api_100001 \
   --overwrite
 ```
@@ -257,9 +284,17 @@ Application code chỉ gọi:
 
 ```text
 prepare_allowed_group_csv
-→ CkksSession.create
+→ SourceBuiltCkksSession.create
 → encrypt_column
+→ process kết thúc
+→ SourceBuiltCkksSession.load trong process mới
+→ load_column cho hai parent ciphertext
 → subtract
 → sum / mean / variance / minimum / maximum
 → decrypt_scalar tại final audit boundary
 ```
+
+Trong trial hiện tại, audit secret nằm trong `client_private/`. MIN/MAX process
+cần secret này để tái tạo CKKS↔FHEW switching keys sau reload. Không chuyển thư
+mục `client_private/` cho evaluator không đáng tin cậy; production deployment
+cần tách client key service khỏi evaluator.
