@@ -50,6 +50,7 @@ def prepare_allowed_group_csv(
     *,
     allowed_sk_id_curr: str,
     bucket_size: int,
+    maximum_width: int = 8192,
     output_csv: Path,
     overwrite: bool = False,
 ) -> PreparedAllowedGroup:
@@ -59,8 +60,12 @@ def prepare_allowed_group_csv(
     removed before the completeness check. The function never truncates or
     splits a group: an oversized complete group is rejected before HE.
     """
-    if bucket_size < 2:
-        raise ValueError("bucket_size must be at least two")
+    if bucket_size < 0:
+        raise ValueError("bucket_size must be zero (auto) or at least two")
+    if bucket_size == 1:
+        raise ValueError("bucket_size must be zero (auto) or at least two")
+    if maximum_width < 2 or maximum_width & (maximum_width - 1):
+        raise ValueError("maximum_width must be a power of two of at least two")
     allowed = str(allowed_sk_id_curr).strip()
     if not allowed:
         raise ValueError("allowed SK_ID_CURR must not be empty")
@@ -98,6 +103,13 @@ def prepare_allowed_group_csv(
     if not clean:
         raise ValueError(
             f"allowed applicant {allowed} has no clean installment rows"
+        )
+    if bucket_size == 0:
+        bucket_size = max(2, 1 << (len(clean) - 1).bit_length())
+    if bucket_size > maximum_width:
+        raise CompleteGroupDoesNotFitError(
+            f"allowed applicant {allowed} needs padded width {bucket_size}, "
+            f"exceeding CKKS capacity {maximum_width}; HE was not started"
         )
     if len(clean) > bucket_size:
         raise CompleteGroupDoesNotFitError(

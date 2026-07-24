@@ -61,7 +61,7 @@ class AllowedGroupPreparationTest(unittest.TestCase):
             prepared = prepare_allowed_group_csv(
                 self._source(root),
                 allowed_sk_id_curr="10",
-                bucket_size=4,
+                bucket_size=0,
                 output_csv=output,
             )
             self.assertEqual((1, 1, 1, 0), prepared.validity_mask)

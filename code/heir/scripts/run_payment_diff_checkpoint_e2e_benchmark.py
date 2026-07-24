@@ -469,7 +469,6 @@ def main() -> None:
         type=Path,
         help="legacy post-PSI group-selection mode",
     )
-    parser.add_argument("--bucket-size", type=int, default=128)
     parser.add_argument("--max-ring-dimension", type=int, default=16384)
     parser.add_argument("--openfhe-dir", default="/usr/local/lib/OpenFHE")
     parser.add_argument("--relative-tolerance", type=float, default=1e-5)
@@ -489,6 +488,9 @@ def main() -> None:
     installments = args.installments.resolve()
     bridge_dir = args.bridge_dir.resolve() if args.bridge_dir else None
     prepared_group_path: Path | None = None
+    effective_bucket_size = (
+        0 if args.allowed_sk_id_curr is not None else 128
+    )
     client_prepare_seconds = 0.0
     client_preparation: dict[str, object] | None = None
     if args.allowed_sk_id_curr is not None:
@@ -502,7 +504,8 @@ def main() -> None:
             prepared = prepare_allowed_group_csv(
                 installments,
                 allowed_sk_id_curr=args.allowed_sk_id_curr,
-                bucket_size=args.bucket_size,
+                bucket_size=0,
+                maximum_width=args.max_ring_dimension // 2,
                 output_csv=prepared_group_path,
             )
         except CompleteGroupDoesNotFitError as error:
@@ -511,7 +514,8 @@ def main() -> None:
                 "status": "HE_UNSUPPORTED_COMPLETE_GROUP",
                 "reason": str(error),
                 "allowed_sk_id_curr": str(args.allowed_sk_id_curr),
-                "bucket_size": args.bucket_size,
+                "automatic_width": True,
+                "maximum_width": args.max_ring_dimension // 2,
                 "client_prepare_seconds": client_prepare_seconds,
                 "no_truncation": True,
                 "no_group_split": True,
@@ -550,6 +554,9 @@ def main() -> None:
             "client_prepare_seconds": client_prepare_seconds,
         }
         write_json(root / "client_preparation.json", client_preparation)
+        effective_bucket_size = prepared.bucket_size
+    elif effective_bucket_size == 0:
+        effective_bucket_size = 128
 
     exact_execution_path = root / "exact_execution.json"
     checkpoint_dir = root / "exact_checkpoint"
@@ -559,7 +566,7 @@ def main() -> None:
         prepared_group=prepared_group_path,
         checkpoint_dir=checkpoint_dir,
         execution_json=exact_execution_path,
-        bucket_size=args.bucket_size,
+        bucket_size=effective_bucket_size,
         max_ring_dimension=args.max_ring_dimension,
         openfhe_dir=args.openfhe_dir,
         log_path=root / "exact_example.log",
@@ -577,7 +584,7 @@ def main() -> None:
         pandas_values, pandas_timings, reference_input = _pandas_reference(
             installments,
             bridge_dir,
-            args.bucket_size,
+            effective_bucket_size,
         )
         input_mode = "post-PSI compatibility"
     if reference_input["real_rows"] != exact_execution["input"]["real_rows"]:
