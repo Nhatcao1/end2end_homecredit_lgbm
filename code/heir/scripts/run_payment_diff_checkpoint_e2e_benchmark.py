@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Benchmark the exact ``payment_diff_checkpoint_e2e.py`` application flow.
 
-The benchmark does not reimplement HE. It launches the example as a child
-process with its optional timing trace enabled, then evaluates the same
-post-PSI applicant group with the original Pandas PAYMENT_DIFF/groupby logic.
+The benchmark does not reimplement HE. An external probe invokes the example
+with timing-only proxies, then evaluates the same client-prepared applicant
+group with the original Pandas PAYMENT_DIFF/groupby logic.
 """
 
 from __future__ import annotations
@@ -22,7 +22,12 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from code.heir.common import write_csv, write_json
-from code.heir.python_api import prepare_post_psi_groups
+from code.heir.python_api import (
+    CompleteGroupDoesNotFitError,
+    load_prepared_allowed_group,
+    prepare_allowed_group_csv,
+    prepare_post_psi_groups,
+)
 
 
 EXAMPLE = ROOT / "code/heir/examples/payment_diff_checkpoint_e2e.py"
@@ -40,8 +45,9 @@ OUTPUT_COLUMNS = {
 
 def _run_exact_example(
     *,
-    installments: Path,
-    bridge_dir: Path,
+    installments: Path | None,
+    bridge_dir: Path | None,
+    prepared_group: Path | None,
     checkpoint_dir: Path,
     execution_json: Path,
     bucket_size: int,
@@ -52,10 +58,6 @@ def _run_exact_example(
     command = [
         sys.executable,
         str(PROBE),
-        "--installments",
-        str(installments),
-        "--bridge-dir",
-        str(bridge_dir),
         "--bucket-size",
         str(bucket_size),
         "--max-ring-dimension",
@@ -68,6 +70,21 @@ def _run_exact_example(
         str(execution_json),
         "--overwrite",
     ]
+    if prepared_group is not None:
+        command.extend(["--prepared-group", str(prepared_group)])
+    else:
+        if installments is None or bridge_dir is None:
+            raise ValueError(
+                "legacy post-PSI mode needs installments and bridge_dir"
+            )
+        command.extend(
+            [
+                "--installments",
+                str(installments),
+                "--bridge-dir",
+                str(bridge_dir),
+            ]
+        )
     started = time.perf_counter()
     completed = subprocess.run(
         command,
@@ -169,6 +186,70 @@ def _pandas_reference(
     return values, timings, input_info
 
 
+def _pandas_prepared_reference(
+    prepared_group_csv: Path,
+) -> tuple[dict[str, float], dict[str, float], dict[str, object]]:
+    """Run Pandas only over mask-one rows from the exact prepared HE input."""
+    try:
+        import pandas as pd
+    except ImportError as error:
+        raise RuntimeError(
+            "this benchmark requires pandas: python3 -m pip install pandas"
+        ) from error
+
+    prepared = load_prepared_allowed_group(prepared_group_csv)
+    group = prepared.group
+    total_started = time.perf_counter()
+    started = time.perf_counter()
+    frame = pd.DataFrame(
+        {
+            "opaque_group_id": [0] * group.real_count,
+            "AMT_INSTALMENT": group.installment,
+            "AMT_PAYMENT": group.payment,
+        }
+    )
+    dataframe_seconds = time.perf_counter() - started
+    started = time.perf_counter()
+    frame["PAYMENT_DIFF"] = (
+        frame["AMT_INSTALMENT"] - frame["AMT_PAYMENT"]
+    )
+    expression_seconds = time.perf_counter() - started
+    grouped = frame.groupby("opaque_group_id")["PAYMENT_DIFF"]
+    started = time.perf_counter()
+    aggregate = grouped.agg(["max", "mean", "sum", "var"]).iloc[0]
+    combined_seconds = time.perf_counter() - started
+    total_seconds = time.perf_counter() - total_started
+    probes: dict[str, float] = {}
+    for term in OUTPUT_COLUMNS:
+        started = time.perf_counter()
+        grouped.agg(term)
+        probes[f"{term}_groupby_probe"] = time.perf_counter() - started
+    return (
+        {
+            OUTPUT_COLUMNS[term]: float(aggregate[term])
+            for term in OUTPUT_COLUMNS
+        },
+        {
+            "post_psi_prepare": 0.0,
+            "dataframe_construct": dataframe_seconds,
+            "payment_diff_expression": expression_seconds,
+            "combined_groupby": combined_seconds,
+            "total": total_seconds,
+            **probes,
+        },
+        {
+            "mode": "client-allowed complete masked group",
+            "selected_groups": 1,
+            "real_rows": group.real_count,
+            "bucket_size": prepared.bucket_size,
+            "valid_mask_ones": sum(prepared.validity_mask),
+            "valid_mask_zeroes": (
+                prepared.bucket_size - sum(prepared.validity_mask)
+            ),
+        },
+    )
+
+
 def _read_he_outputs(path: Path) -> dict[str, float]:
     with path.open("r", encoding="utf-8-sig", newline="") as handle:
         rows = list(csv.DictReader(handle))
@@ -222,6 +303,55 @@ def _report(result: dict[str, object]) -> str:
     maximum = exact["maximum_branch"]
     pandas = result["pandas_timings_seconds"]
     accuracy = result["accuracy"]
+    input_mode = str(result["input_mode"])
+    client_prepare = float(result.get("client_prepare_seconds", 0.0))
+    pandas_calculation = _seconds(pandas, "total")
+    pandas_full = client_prepare + pandas_calculation
+    he_process = float(result["exact_process_wall_seconds"])
+    he_full = client_prepare + he_process
+    if input_mode == "client-allowed masked group":
+        preparation = result["client_preparation"]
+        input_description = f"""No PSI is used. The client explicitly allowed
+`SK_ID_CURR={preparation["allowed_sk_id_curr"]}`, removed
+{preparation["removed_null_rows"]} invalid parent rows, retained the complete
+{preparation["real_rows"]}-row group, and wrote a {preparation["bucket_size"]}-lane
+CSV containing {preparation["mask_ones"]} mask-one lanes and
+{preparation["mask_zeroes"]} mask-zero padding lanes. The group was not
+truncated or split.
+
+| Source rows scanned | Complete clean group rows | Bucket size | Mask ones | Mask zeroes |
+|---:|---:|---:|---:|---:|
+| {preparation["source_rows_scanned"]} | {preparation["real_rows"]} | {preparation["bucket_size"]} | {preparation["mask_ones"]} | {preparation["mask_zeroes"]} |"""
+        flow = (
+            "`client allow + complete mask CSV → HEIR SUM/MEAN/VAR branches → "
+            "encrypted checkpoints → source-built OpenFHE CKKS↔FHEW MAX → "
+            "final audit CSV`"
+        )
+        preparation_stage = (
+            f"| Client scan/sanitize/sort/mask preparation | "
+            f"{client_prepare:.9f} |"
+        )
+        pandas_label = (
+            "Client preparation + Pandas DataFrame/expression/groupby"
+        )
+    else:
+        input_description = f"""The existing PSI protocol run is outside this
+measurement. Reading its bridge and selecting the applicant group are included.
+
+| Source rows scanned | Post-PSI applicants | Selected groups | Real rows | Bucket size |
+|---:|---:|---:|---:|---:|
+| {exact["input"]["source_rows_scanned"]} | {exact["input"]["post_psi_applicants"]} | 1 | {exact["input"]["real_rows"]} | {exact["input"]["bucket_size"]} |"""
+        flow = (
+            "`post-PSI layout → HEIR SUM/MEAN/VAR branches → encrypted "
+            "checkpoints → source-built OpenFHE CKKS↔FHEW MAX → final audit CSV`"
+        )
+        preparation_stage = (
+            f'| Client post-PSI scan/select/pad | '
+            f'{_seconds(exact, "client_post_psi_prepare_seconds"):.9f} |'
+        )
+        pandas_label = (
+            "Pandas post-PSI preparation + DataFrame/expression/groupby"
+        )
 
     branch_rows = []
     for term in ("sum", "mean", "variance"):
@@ -263,17 +393,11 @@ This benchmark imports and invokes
 probe. The example contains no clocks, and the probe does not copy or replace
 its HE logic. The measured cold path is:
 
-`post-PSI layout → HEIR SUM/MEAN/VAR branches → encrypted checkpoints →`
-`source-built OpenFHE CKKS↔FHEW MAX → final audit CSV`.
-
-The existing PSI protocol run is outside this measurement. Reading the
-post-PSI bridge and selecting/padding the applicant group are included.
+{flow}.
 
 ## Input
 
-| Source rows scanned | Post-PSI applicants | Selected groups | Real rows | Bucket size |
-|---:|---:|---:|---:|---:|
-| {exact["input"]["source_rows_scanned"]} | {exact["input"]["post_psi_applicants"]} | 1 | {exact["input"]["real_rows"]} | {exact["input"]["bucket_size"]} |
+{input_description}
 
 ## Accuracy
 
@@ -303,14 +427,14 @@ only in the final isolated audit process.
 
 | Exact E2E orchestration stage | Seconds |
 |---|---:|
-| Client post-PSI scan/select/pad | {_seconds(exact, "client_post_psi_prepare_seconds"):.9f} |
+{preparation_stage}
 | Public CKKS scale calibration | {_seconds(exact, "public_scale_seconds"):.9f} |
 
 | Workload | Seconds | HE ÷ Pandas |
 |---|---:|---:|
-| Pandas post-PSI preparation + DataFrame + expression + combined groupby | {_seconds(pandas, "total"):.9f} | 1.00× |
-| Exact HE workflow, internal start-to-final-CSV | {_seconds(exact, "total_workflow_seconds"):.9f} | {_seconds(exact, "total_workflow_seconds") / _seconds(pandas, "total"):.2f}× |
-| Exact example process wall time, including Python startup | {result["exact_process_wall_seconds"]:.9f} | {result["exact_process_wall_seconds"] / _seconds(pandas, "total"):.2f}× |
+| {pandas_label} | {pandas_full:.9f} | 1.00× |
+| Exact HE application only, internal start-to-final-CSV | {_seconds(exact, "total_workflow_seconds"):.9f} | {_seconds(exact, "total_workflow_seconds") / pandas_calculation:.2f}× calculation-only |
+| Client preparation + exact example process wall | {he_full:.9f} | {he_full / pandas_full:.2f}× |
 
 ## Pandas term latency
 
@@ -333,7 +457,18 @@ def main() -> None:
         type=Path,
         default=Path("data/home_credit/installments_payments.csv"),
     )
-    parser.add_argument("--bridge-dir", type=Path, required=True)
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument(
+        "--allowed-sk-id-curr",
+        help=(
+            "no-PSI mode: client-approved complete applicant group to prepare"
+        ),
+    )
+    source.add_argument(
+        "--bridge-dir",
+        type=Path,
+        help="legacy post-PSI group-selection mode",
+    )
     parser.add_argument("--bucket-size", type=int, default=128)
     parser.add_argument("--max-ring-dimension", type=int, default=16384)
     parser.add_argument("--openfhe-dir", default="/usr/local/lib/OpenFHE")
@@ -352,12 +487,76 @@ def main() -> None:
     root.mkdir(parents=True)
 
     installments = args.installments.resolve()
-    bridge_dir = args.bridge_dir.resolve()
+    bridge_dir = args.bridge_dir.resolve() if args.bridge_dir else None
+    prepared_group_path: Path | None = None
+    client_prepare_seconds = 0.0
+    client_preparation: dict[str, object] | None = None
+    if args.allowed_sk_id_curr is not None:
+        prepared_group_path = (
+            root
+            / "client_private"
+            / "allowed_group_000000.csv"
+        )
+        started = time.perf_counter()
+        try:
+            prepared = prepare_allowed_group_csv(
+                installments,
+                allowed_sk_id_curr=args.allowed_sk_id_curr,
+                bucket_size=args.bucket_size,
+                output_csv=prepared_group_path,
+            )
+        except CompleteGroupDoesNotFitError as error:
+            client_prepare_seconds = time.perf_counter() - started
+            rejection = {
+                "status": "HE_UNSUPPORTED_COMPLETE_GROUP",
+                "reason": str(error),
+                "allowed_sk_id_curr": str(args.allowed_sk_id_curr),
+                "bucket_size": args.bucket_size,
+                "client_prepare_seconds": client_prepare_seconds,
+                "no_truncation": True,
+                "no_group_split": True,
+                "he_executed": False,
+            }
+            write_json(root / "client_preparation.json", rejection)
+            (root / "REPORT.md").write_text(
+                "# PAYMENT_DIFF checkpoint benchmark\n\n"
+                "**HE was not executed.**\n\n"
+                f"{error}\n\n"
+                "The client refused to truncate or split the allowed "
+                "applicant group.\n",
+                encoding="utf-8",
+            )
+            raise RuntimeError(str(error)) from error
+        client_prepare_seconds = time.perf_counter() - started
+        client_preparation = {
+            "status": "COMPLETE_ALLOWED_GROUP_PREPARED",
+            "allowed_sk_id_curr": prepared.raw_applicant_id,
+            "source_rows_scanned": prepared.source_rows_scanned,
+            "allowed_rows_before_null_removal": (
+                prepared.allowed_rows_before_null_removal
+            ),
+            "removed_null_rows": prepared.removed_null_rows,
+            "real_rows": prepared.group.real_count,
+            "bucket_size": prepared.bucket_size,
+            "mask_ones": sum(prepared.validity_mask),
+            "mask_zeroes": (
+                prepared.bucket_size - sum(prepared.validity_mask)
+            ),
+            "stable_source_order": True,
+            "complete_group": True,
+            "truncated": False,
+            "split": False,
+            "prepared_csv": str(prepared_group_path),
+            "client_prepare_seconds": client_prepare_seconds,
+        }
+        write_json(root / "client_preparation.json", client_preparation)
+
     exact_execution_path = root / "exact_execution.json"
     checkpoint_dir = root / "exact_checkpoint"
     process_wall, command = _run_exact_example(
-        installments=installments,
+        installments=installments if prepared_group_path is None else None,
         bridge_dir=bridge_dir,
+        prepared_group=prepared_group_path,
         checkpoint_dir=checkpoint_dir,
         execution_json=exact_execution_path,
         bucket_size=args.bucket_size,
@@ -368,11 +567,19 @@ def main() -> None:
     exact_execution = json.loads(
         exact_execution_path.read_text(encoding="utf-8")
     )
-    pandas_values, pandas_timings, reference_input = _pandas_reference(
-        installments,
-        bridge_dir,
-        args.bucket_size,
-    )
+    if prepared_group_path is not None:
+        pandas_values, pandas_timings, reference_input = (
+            _pandas_prepared_reference(prepared_group_path)
+        )
+        input_mode = "client-allowed masked group"
+    else:
+        assert bridge_dir is not None
+        pandas_values, pandas_timings, reference_input = _pandas_reference(
+            installments,
+            bridge_dir,
+            args.bucket_size,
+        )
+        input_mode = "post-PSI compatibility"
     if reference_input["real_rows"] != exact_execution["input"]["real_rows"]:
         raise RuntimeError("exact HE and Pandas reference selected different groups")
     he_values = _read_he_outputs(
@@ -402,6 +609,9 @@ def main() -> None:
         "exact_example": str(EXAMPLE),
         "exact_command": command,
         "exact_process_wall_seconds": process_wall,
+        "input_mode": input_mode,
+        "client_prepare_seconds": client_prepare_seconds,
+        "client_preparation": client_preparation,
         "exact_execution": exact_execution,
         "pandas_values": pandas_values,
         "pandas_timings_seconds": pandas_timings,

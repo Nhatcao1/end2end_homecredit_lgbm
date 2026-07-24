@@ -12,6 +12,8 @@ class PaymentDiffCheckpointE2EExampleTest(unittest.TestCase):
     def test_example_runs_full_aggregate_lifecycle_without_benchmark_report(self):
         source = SCRIPT.read_text(encoding="utf-8")
         self.assertIn("prepare_post_psi_groups(", source)
+        self.assertIn("load_prepared_allowed_group(", source)
+        self.assertIn("--prepared-group", source)
         self.assertIn(
             "compile_checkpointable_binary_column_aggregate(",
             source,

@@ -34,6 +34,8 @@ class PaymentDiffCheckpointE2EBenchmarkTest(unittest.TestCase):
             source,
         )
         self.assertIn('"--execution-json"', source)
+        self.assertIn('"--allowed-sk-id-curr"', source)
+        self.assertIn("prepare_allowed_group_csv(", source)
         self.assertIn("subprocess.run(", source)
         self.assertNotIn(
             "compile_checkpointable_binary_column_aggregate",

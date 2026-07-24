@@ -26,6 +26,12 @@ from code.heir.python_api.official_groupby import (
     PostPsiGroupLayout,
     prepare_post_psi_groups,
 )
+from code.heir.python_api.allowed_group import (
+    CompleteGroupDoesNotFitError,
+    PreparedAllowedGroup,
+    load_prepared_allowed_group,
+    prepare_allowed_group_csv,
+)
 from code.heir.python_api.source_built_openfhe import (
     SourceBuiltOpenFheColumnMax,
 )
@@ -63,7 +69,9 @@ __all__ = [
     "OfficialOpenFheMinMax",
     "OpaquePaymentGroup",
     "PostPsiGroupLayout",
+    "PreparedAllowedGroup",
     "SourceBuiltOpenFheColumnMax",
+    "CompleteGroupDoesNotFitError",
     "binary_column_aggregate_mlir",
     "binary_column_mlir",
     "binary_column_statistics_mlir",
@@ -75,8 +83,10 @@ __all__ = [
     "compile_sum",
     "compile_variance",
     "prepare_post_psi_groups",
+    "prepare_allowed_group_csv",
     "public_power_of_two_scale",
     "load_binary_column_checkpoint",
+    "load_prepared_allowed_group",
     "load_binary_column_aggregate_checkpoint",
     "load_binary_column_statistics_checkpoint",
     "load_sum_checkpoint",

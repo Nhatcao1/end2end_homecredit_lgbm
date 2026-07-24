@@ -112,8 +112,10 @@ def _read_final_outputs(checkpoint_dir: Path) -> dict[str, float]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--installments", type=Path, required=True)
-    parser.add_argument("--bridge-dir", type=Path, required=True)
+    parser.add_argument("--installments", type=Path)
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--bridge-dir", type=Path)
+    source.add_argument("--prepared-group", type=Path)
     parser.add_argument("--bucket-size", type=int, required=True)
     parser.add_argument("--max-ring-dimension", type=int, required=True)
     parser.add_argument("--openfhe-dir", required=True)
@@ -133,6 +135,7 @@ def main() -> None:
     }
 
     original_prepare = application.prepare_post_psi_groups
+    original_load_prepared = application.load_prepared_allowed_group
     original_scale = application.public_power_of_two_scale
     original_compile = (
         application.compile_checkpointable_binary_column_aggregate
@@ -157,6 +160,24 @@ def main() -> None:
             "bucket_size": call_kwargs["bucket_size"],
         }
         return layout
+
+    def timed_load_prepared(*call_args: Any, **call_kwargs: Any) -> Any:
+        started = time.perf_counter()
+        prepared = original_load_prepared(*call_args, **call_kwargs)
+        trace["client_prepared_group_load_seconds"] = (
+            time.perf_counter() - started
+        )
+        trace["input"] = {
+            "source": "client-prepared allowed complete group",
+            "selected_groups": 1,
+            "real_rows": prepared.group.real_count,
+            "bucket_size": prepared.bucket_size,
+            "valid_mask_ones": sum(prepared.validity_mask),
+            "valid_mask_zeroes": (
+                prepared.bucket_size - sum(prepared.validity_mask)
+            ),
+        }
+        return prepared
 
     def timed_scale(*call_args: Any, **call_kwargs: Any) -> Any:
         started = time.perf_counter()
@@ -207,6 +228,7 @@ def main() -> None:
         return result
 
     application.prepare_post_psi_groups = timed_prepare
+    application.load_prepared_allowed_group = timed_load_prepared
     application.public_power_of_two_scale = timed_scale
     application.compile_checkpointable_binary_column_aggregate = timed_compile
     application.save_binary_column_aggregate_checkpoint = timed_save
@@ -215,10 +237,6 @@ def main() -> None:
 
     application_argv = [
         str(Path(application.__file__).resolve()),
-        "--installments",
-        str(args.installments.resolve()),
-        "--bridge-dir",
-        str(args.bridge_dir.resolve()),
         "--bucket-size",
         str(args.bucket_size),
         "--max-ring-dimension",
@@ -228,6 +246,24 @@ def main() -> None:
         "--checkpoint-dir",
         str(args.checkpoint_dir.resolve()),
     ]
+    if args.prepared_group is not None:
+        application_argv.extend(
+            [
+                "--prepared-group",
+                str(args.prepared_group.resolve()),
+            ]
+        )
+    else:
+        if args.installments is None:
+            parser.error("--installments is required with --bridge-dir")
+        application_argv.extend(
+            [
+                "--installments",
+                str(args.installments.resolve()),
+                "--bridge-dir",
+                str(args.bridge_dir.resolve()),
+            ]
+        )
     if args.overwrite:
         application_argv.append("--overwrite")
 
