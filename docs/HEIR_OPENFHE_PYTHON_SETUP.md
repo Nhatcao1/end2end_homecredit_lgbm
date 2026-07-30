@@ -78,6 +78,22 @@ each calculation.
 
 ## Canonical benchmarks
 
+Primitive HEIR versus optional OpenFHE-Python comparison:
+
+```bash
+python3 code/heir/scripts/run_python_arithmetic_backend_benchmark.py \
+  --backend both \
+  --value-count 1000 \
+  --slot-count 1024 \
+  --ring-dimension 16384 \
+  --repetitions 1 \
+  --output-dir benchmark_runs/python_arithmetic_smoke \
+  --overwrite
+```
+
+Its full metric contract and larger command are documented in
+[`PYTHON_ARITHMETIC_BACKEND_BENCHMARK.md`](PYTHON_ARITHMETIC_BACKEND_BENCHMARK.md).
+
 Small independent routing proof:
 
 ```bash

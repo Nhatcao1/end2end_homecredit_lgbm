@@ -70,6 +70,9 @@ from code.heir.python_api.backend_policy import (
     calculation_route,
     require_backend,
 )
+from code.heir.python_api.openfhe_python_arithmetic import (
+    OpenFhePythonBinaryColumn,
+)
 
 __all__ = [
     "EncryptedMinMax",
@@ -87,6 +90,7 @@ __all__ = [
     "OfficialCkksBinaryColumnStatistics",
     "OfficialOpenFheColumnOps",
     "OfficialOpenFheMinMax",
+    "OpenFhePythonBinaryColumn",
     "OpaquePaymentGroup",
     "PostPsiGroupLayout",
     "PreparedAllowedGroup",
