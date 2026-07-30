@@ -55,6 +55,8 @@ openfhe                 == 1.5.1.0.22.4 on Ubuntu 22.04
 ```
 
 Both OpenFHE wheels require Python 3.12 for this project setup.
+The script also installs `pandas>=2.2,<4` for the benchmark's equivalent
+plaintext workload.
 
 Override the environment location if needed:
 

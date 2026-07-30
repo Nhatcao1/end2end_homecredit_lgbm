@@ -65,6 +65,7 @@ class BackendPolicyTest(unittest.TestCase):
         self.assertIn("heir_py[python,openfhe]", source)
         self.assertIn("openfhe==", source)
         self.assertIn("1.5.1.0.24.4", source)
+        self.assertIn("pandas>=2.2,<4", source)
         self.assertIn(".venv-heir-python", source)
 
 

@@ -32,6 +32,7 @@ def main() -> None:
 
     from heir import compile as heir_compile
     import openfhe
+    import pandas
 
     heir_version = package_version("heir_py")
     openfhe_version = package_version("openfhe")
@@ -51,9 +52,11 @@ def main() -> None:
         "python": sys.version.split()[0],
         "heir_py": heir_version,
         "openfhe_python": openfhe_version,
+        "pandas": package_version("pandas"),
         "imports": {
             "heir.compile": callable(heir_compile),
             "openfhe": bool(openfhe),
+            "pandas": bool(pandas),
         },
         "calculation_backends": backend_manifest(
             "add",

@@ -5,6 +5,7 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 VENV_PATH="${HEIR_OPENFHE_VENV:-${PROJECT_ROOT}/.venv-heir-python}"
 HEIR_VERSION="${HEIR_VERSION:-2026.7.1}"
+PANDAS_SPEC="${PANDAS_SPEC:-pandas>=2.2,<4}"
 
 if [[ -z "${OPENFHE_PYTHON_VERSION:-}" ]]; then
   if [[ ! -r /etc/os-release ]]; then
@@ -35,7 +36,8 @@ mkdir -p "$(dirname "${VENV_PATH}")"
 "${VENV_PATH}/bin/python" -m pip install --upgrade pip
 "${VENV_PATH}/bin/python" -m pip install \
   "heir_py[python,openfhe]==${HEIR_VERSION}" \
-  "openfhe==${OPENFHE_PYTHON_VERSION}"
+  "openfhe==${OPENFHE_PYTHON_VERSION}" \
+  "${PANDAS_SPEC}"
 
 cd "${PROJECT_ROOT}"
 "${VENV_PATH}/bin/python" \
