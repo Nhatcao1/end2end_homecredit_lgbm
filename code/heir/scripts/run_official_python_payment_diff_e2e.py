@@ -18,8 +18,19 @@ if str(ROOT) not in sys.path:
 from code.heir.python_api import (
     OfficialCkksBinaryColumnStatistics,
     OfficialOpenFheColumnOps,
+    backend_manifest,
     prepare_post_psi_groups,
     public_power_of_two_scale,
+    require_backend,
+)
+
+
+CALCULATION_BACKENDS = backend_manifest(
+    "subtract",
+    "sum",
+    "mean",
+    "variance",
+    "maximum",
 )
 
 
@@ -304,6 +315,9 @@ def main() -> None:
         parser.error("--bucket-size must be at least two")
     if args.group_count < 1:
         parser.error("--group-count must be positive")
+    for operation in ("subtract", "sum", "mean", "variance"):
+        require_backend(operation, "heir")
+    require_backend("maximum", "openfhe-python")
 
     root = args.output_dir.resolve()
     known = [
@@ -455,6 +469,10 @@ def main() -> None:
         "no_intermediate_decryption": True,
         "statistics_ciphertext_result": "[SUM, MEAN, sample VAR]",
         "maximum_route": "separate parent encryption; CT-CT then CKKS-to-FHEW",
+        "calculation_backends": CALCULATION_BACKENDS,
+        "openfhe_fallback_recomputes_subtract": (
+            "MAX cannot consume the HEIR-context PAYMENT_DIFF ciphertext"
+        ),
         "input_scale": input_scale,
         "timing_seconds": {
             "client_prepare": layout.preparation_seconds,

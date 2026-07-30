@@ -64,6 +64,12 @@ from code.heir.python_api.source_built_session import (
     SourceBuiltEncryptedColumn,
     SourceBuiltEncryptedScalar,
 )
+from code.heir.python_api.backend_policy import (
+    CalculationRoute,
+    backend_manifest,
+    calculation_route,
+    require_backend,
+)
 
 __all__ = [
     "EncryptedMinMax",
@@ -89,7 +95,9 @@ __all__ = [
     "SourceBuiltEncryptedColumn",
     "SourceBuiltEncryptedScalar",
     "CompleteGroupDoesNotFitError",
+    "CalculationRoute",
     "CkksSession",
+    "backend_manifest",
     "binary_column_aggregate_mlir",
     "binary_column_mlir",
     "binary_column_statistics_mlir",
@@ -100,6 +108,7 @@ __all__ = [
     "compile_checkpointable_sum",
     "compile_sum",
     "compile_variance",
+    "calculation_route",
     "prepare_post_psi_groups",
     "prepare_allowed_group_csv",
     "public_power_of_two_scale",
@@ -112,4 +121,5 @@ __all__ = [
     "save_binary_column_aggregate_checkpoint",
     "save_binary_column_statistics_checkpoint",
     "save_sum_checkpoint",
+    "require_backend",
 ]

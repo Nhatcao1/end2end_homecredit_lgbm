@@ -25,8 +25,8 @@ def _load_openfhe() -> Any:
     except ImportError as error:
         raise RuntimeError(
             "The official OpenFHE Python wrapper is required for exact "
-            "MIN/MAX. Install it with: "
-            "python3 -m pip install 'openfhe==1.5.1.0'"
+            "MIN/MAX. Create the isolated compatible environment with: "
+            "./scripts/setup_heir_openfhe_python.sh"
         ) from error
     return openfhe
 

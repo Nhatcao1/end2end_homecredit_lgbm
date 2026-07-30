@@ -82,6 +82,12 @@ Important distinction:
 - MIN and MAX require OpenFHE CKKS↔FHEW scheme switching; they are not ordinary
   CKKS arithmetic expressions.
 
+This source-built facade is retained as a compact checkpoint/application
+example. It is not the canonical benchmark-routing policy. New Python
+benchmarks use HEIR for SUM, MEAN, and VARIANCE and use OpenFHE Python only for
+MIN, MAX, and comparison. See
+[`HEIR_OPENFHE_PYTHON_SETUP.md`](HEIR_OPENFHE_PYTHON_SETUP.md).
+
 MEAN uses the public valid row count. VARIANCE is fixed to sample variance,
 equivalent to Pandas `var(ddof=1)`. MIN/MAX return only the encrypted values;
 argmin and argmax are not retained.

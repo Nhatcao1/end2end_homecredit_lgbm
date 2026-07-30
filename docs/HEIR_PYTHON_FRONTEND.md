@@ -74,8 +74,13 @@ built OpenFHE server or by `payment_diff_checkpoint_e2e.py`.
 For that optional environment, install the wrapper in addition to `heir_py`:
 
 ```bash
-python3 -m pip install "openfhe==1.5.1.0"
+./scripts/setup_heir_openfhe_python.sh
+source .venv-heir-python/bin/activate
 ```
+
+The script selects the OpenFHE Python wheel matching Ubuntu 22.04 or 24.04.
+Do not mix this wheel environment with the source-built
+`/usr/local/lib/OpenFHE` libraries.
 
 Then run a small trial:
 

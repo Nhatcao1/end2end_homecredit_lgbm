@@ -19,8 +19,17 @@ if str(ROOT) not in sys.path:
 from code.heir.python_api import (
     EncryptedMinMax,
     OfficialOpenFheMinMax,
+    backend_manifest,
     compile_variance,
     public_power_of_two_scale,
+    require_backend,
+)
+
+
+CALCULATION_BACKENDS = backend_manifest(
+    "variance",
+    "minimum",
+    "maximum",
 )
 
 
@@ -130,6 +139,9 @@ def main() -> None:
         parser.error("--width must be at least the number of --values")
     if args.repetitions < 1:
         parser.error("--repetitions must be positive")
+    require_backend("variance", "heir")
+    require_backend("minimum", "openfhe-python")
+    require_backend("maximum", "openfhe-python")
     scale = (
         args.input_scale
         if args.input_scale > 0
@@ -271,6 +283,7 @@ def main() -> None:
         "values": values,
         "variance_api": "official HEIR Python CKKS",
         "minmax_api": "official OpenFHE Python CKKS-to-FHEW",
+        "calculation_backends": CALCULATION_BACKENDS,
         "separate_contexts": True,
         "input_scale": scale,
         "ring_dimension": args.ring_dimension,
