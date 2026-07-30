@@ -234,6 +234,13 @@ The reusable arithmetic MLIR/oracle layer is complete for K01-K03 and S01-S02,
 and five combined function preparation/report paths are implemented. The
 remaining order is:
 
+The immediate deployment lane is tracked in
+`docs/DOCKER_K3S_BENCHMARK_PLAN.md`. It first packages the self-contained
+official HEIR Python SUM/MEAN trial as a CPU image and validates it as a local
+k3s Job. A representative CPU matrix follows. Standalone FIDESlib GPU work is
+explicitly deferred until that Docker/k3s baseline is repeatable and remains a
+separate experimental backend.
+
 1. Complete the K01 synthetic kernel gate with HEIR-generated CKKS source.
 2. Generalize the K01 generated runner for count and masked-sum components.
 3. Generate and validate K02 CKKS/OpenFHE source once, then reuse its source hash

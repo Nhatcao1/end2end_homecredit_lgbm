@@ -59,3 +59,7 @@ The definitive data, ciphertext, key, timing, and audit flow is in
 `docs/POST_PSI_PAYMENT_DIFF_E2E_FLOW.md`.
 The public input/output contracts for the simple ciphertext APIs are in
 `docs/SIMPLE_HE_API_REFERENCE.md`.
+
+The current deployment order—CPU benchmark image, local k3s Job, representative
+benchmark matrix, and only then the experimental FIDESlib GPU lane—is defined
+in `docs/DOCKER_K3S_BENCHMARK_PLAN.md`.
