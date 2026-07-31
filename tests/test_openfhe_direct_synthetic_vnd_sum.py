@@ -91,7 +91,7 @@ class OpenFHEDirectSyntheticVndSumTest(unittest.TestCase):
                 output_dir=root,
                 value_counts=[2, 5],
                 minimum_value=100_000,
-                maximum_value=200_000_000,
+                maximum_value=20_000_000,
                 seed=123,
                 overwrite=False,
             )
@@ -106,7 +106,9 @@ class OpenFHEDirectSyntheticVndSumTest(unittest.TestCase):
             self.assertTrue(result["prefix_consistent"])
             generated = {int(row["VALUE"]) for row in large}
             self.assertGreater(len(generated), 2)
-            self.assertTrue(all(100_000 <= value <= 200_000_000 for value in generated))
+            self.assertTrue(
+                all(100_000 <= value <= 20_000_000 for value in generated)
+            )
 
     def test_bgv_sum_reports_latency_and_exact_total(self):
         class NumPyDouble:
@@ -135,7 +137,7 @@ class OpenFHEDirectSyntheticVndSumTest(unittest.TestCase):
                 output_dir=data,
                 value_counts=[5],
                 minimum_value=100_000,
-                maximum_value=200_000_000,
+                maximum_value=20_000_000,
                 seed=123,
                 overwrite=False,
             )
@@ -146,7 +148,7 @@ class OpenFHEDirectSyntheticVndSumTest(unittest.TestCase):
                     slot_count=8,
                     repetitions=2,
                     multiplicative_depth=1,
-                    plaintext_modulus=1_000_000_552_961,
+                    plaintext_modulus=100_000_038_913,
                     ring_dimension=0,
                     output_dir=root / "result",
                     overwrite=False,

@@ -338,7 +338,7 @@ def main() -> None:
     parser.add_argument(
         "--plaintext-modulus",
         type=int,
-        default=1_000_000_552_961,
+        default=100_000_038_913,
     )
     parser.add_argument("--ring-dimension", type=int, default=16384)
     parser.add_argument("--output-dir", type=Path, required=True)

@@ -20,7 +20,7 @@ python3 -m code.openfhe_direct.benchmarks.synthetic_vnd.generate_dataset \
   --output-dir data/generated/vnd_sum \
   --value-count 50 100 2000 \
   --minimum-value 100000 \
-  --maximum-value 200000000 \
+  --maximum-value 20000000 \
   --seed 20260731 \
   --overwrite
 ```
@@ -38,7 +38,7 @@ python3 -m code.openfhe_direct.benchmarks.synthetic_vnd.sum \
   --slot-count 8192 \
   --repetitions 5 \
   --multiplicative-depth 1 \
-  --plaintext-modulus 1000000552961 \
+  --plaintext-modulus 100000038913 \
   --ring-dimension 16384 \
   --output-dir benchmark_runs/openfhe_vnd_bgv_sum \
   --overwrite
@@ -46,8 +46,8 @@ python3 -m code.openfhe_direct.benchmarks.synthetic_vnd.sum \
 
 The benchmark calls only `OpenFHEBgvSession.encrypt()`, `sum()`, and
 `decrypt()`. NumPy `int64` SUM is the optimized plaintext reference. The
-configured modulus has positive centered capacity `500000276480`, safely
-above the worst-case 2,000-value total of `400000000000`. Unsafe combinations
+configured 37-bit modulus has positive centered capacity `50000019456`, safely
+above the worst-case 2,000-value total of `40000000000`. Unsafe combinations
 are rejected before encryption rather than allowed to wrap modulo the
 plaintext modulus.
 

@@ -210,7 +210,7 @@ The synthetic VND benchmark additionally must:
 
 - remain a separate, non-credit benchmark;
 - generate deterministic aligned integer vector pairs for arbitrary lengths;
-- default to inclusive values from 100,000 through 200,000,000;
+- default to inclusive values from 100,000 through 20,000,000;
 - test one encrypted vector reduction through `OpenFHEBgvSession.sum()`;
 - use NumPy `int64` SUM as the optimized plaintext reference;
 - require the audited BGV result to equal the full vector SUM exactly;
