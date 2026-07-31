@@ -28,6 +28,7 @@ from code.openfhe_direct.benchmarks.api_latency import (
 from code.openfhe_direct.prepared_data import (
     PreparedPaymentGroup,
     load_prepared_parent_columns,
+    public_power_of_two_scale,
 )
 
 
@@ -44,6 +45,8 @@ FUNCTIONS = (
     "square",
     "sum",
     "mean",
+    "minimum",
+    "maximum",
     "variance_components",
     "variance",
     "covariance_components",
@@ -129,6 +132,12 @@ def _call_function(
     if function == "mean":
         # HE API call: OpenFHECreditSession.mean(difference_ct)
         return session.mean(difference_ct)
+    if function == "minimum":
+        # HE API call: OpenFHECreditSession.minimum(installment_ct)
+        return session.minimum(installment_ct)
+    if function == "maximum":
+        # HE API call: OpenFHECreditSession.maximum(installment_ct)
+        return session.maximum(installment_ct)
     if function == "variance_components":
         # HE API call: OpenFHECreditSession.variance_components(diff_ct)
         return session.variance_components(difference_ct)
@@ -189,7 +198,7 @@ def _run_repetition(
                     group.installment,
                 )
                 parent_encrypt_seconds += elapsed
-            if function != "decrypt":
+            if function not in {"decrypt", "minimum", "maximum"}:
                 # HE API call: OpenFHECreditSession.encrypt(AMT_PAYMENT)
                 payment_ct, elapsed = _timed(
                     session.encrypt,
@@ -259,6 +268,7 @@ def _write_report(
     chunk_count: int,
     repetitions: int,
     setup_seconds: float,
+    input_scale: float | None,
     summary: dict[str, Any],
 ) -> None:
     lines = [
@@ -272,6 +282,14 @@ def _write_report(
         f"- Ciphertext chunks: `{chunk_count}`",
         f"- Repetitions: `{repetitions}`",
         f"- Shared setup/key generation: `{setup_seconds:.9f}` seconds",
+        *(
+            [
+                f"- CKKS/FHEW public input scale: `{input_scale:g}`",
+                "- MIN/MAX source: encrypted `AMT_INSTALMENT` vector",
+            ]
+            if input_scale is not None
+            else []
+        ),
         "",
         "| Parent encryption | Derived-input prerequisite | Function latency | "
         "Audit decryption | Max abs. error | Max relative error | Status |",
@@ -309,6 +327,7 @@ def run_batch_benchmark(
     output_dir: Path,
     overwrite: bool,
     _openfhe_module: Any | None = None,
+    _session_factory: Callable[..., Any] | None = None,
 ) -> dict[str, Any]:
     if function not in FUNCTIONS:
         raise ValueError(f"unsupported function: {function}")
@@ -340,13 +359,29 @@ def run_batch_benchmark(
             "sample variance cannot run on a final one-value chunk; "
             "change value_count or slot_count"
         )
+    minmax = function in {"minimum", "maximum"}
+    input_scale = (
+        public_power_of_two_scale(parents.installment)
+        if minmax
+        else None
+    )
+    factory = _session_factory or OpenFHECreditSession
+    session_options: dict[str, Any] = {
+        "slot_count": slot_count,
+        "multiplicative_depth": multiplicative_depth,
+        "ring_dimension": ring_dimension,
+    }
+    if minmax:
+        session_options.update(
+            input_scale=input_scale,
+            enable_minmax=True,
+        )
+    else:
+        session_options["_openfhe_module"] = _openfhe_module
     # HE API call: OpenFHECreditSession(...) creates context and keys.
     session, setup_seconds = _timed(
-        OpenFHECreditSession,
-        slot_count=slot_count,
-        multiplicative_depth=multiplicative_depth,
-        ring_dimension=ring_dimension,
-        _openfhe_module=_openfhe_module,
+        factory,
+        **session_options,
     )
 
     rows = [
@@ -385,6 +420,7 @@ def run_batch_benchmark(
         "ciphertext_chunks": len(groups),
         "repetitions": repetitions,
         "setup_seconds": setup_seconds,
+        "input_scale": input_scale,
         **medians,
         "max_abs_error": max(float(row["max_abs_error"]) for row in rows),
         "max_relative_error": max(
@@ -413,6 +449,7 @@ def run_batch_benchmark(
         chunk_count=len(groups),
         repetitions=repetitions,
         setup_seconds=setup_seconds,
+        input_scale=input_scale,
         summary=summary,
     )
     return summary

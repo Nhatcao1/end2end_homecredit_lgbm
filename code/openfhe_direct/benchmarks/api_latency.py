@@ -118,6 +118,8 @@ def _expected_values(group: PreparedPaymentGroup) -> dict[str, Any]:
         "square": [value * value for value in difference],
         "sum": sum_difference,
         "mean": sum_difference / count,
+        "minimum": min(installment),
+        "maximum": max(installment),
         "variance_components": {
             "sum_x": sum_difference,
             "sum_x2": sum_difference2,

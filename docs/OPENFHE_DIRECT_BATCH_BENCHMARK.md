@@ -118,6 +118,36 @@ python3 code/openfhe_direct/benchmarks/single_function.py \
   --overwrite
 ```
 
+MINIMUM and MAXIMUM use the much heavier CKKS↔FHEW switching route. Start
+with one 16-value ciphertext and one repetition. These two functions operate
+on encrypted `AMT_INSTALMENT` and automatically select a safe public scale:
+
+```bash
+python3 -m code.openfhe_direct.benchmarks.single_function \
+  --function minimum \
+  --prepared-dir data/prepared/installments_columns \
+  --value-count 16 \
+  --slot-count 16 \
+  --repetitions 1 \
+  --multiplicative-depth 4 \
+  --ring-dimension 16384 \
+  --output-dir benchmark_runs/openfhe_minimum_16 \
+  --overwrite
+```
+
+```bash
+python3 -m code.openfhe_direct.benchmarks.single_function \
+  --function maximum \
+  --prepared-dir data/prepared/installments_columns \
+  --value-count 16 \
+  --slot-count 16 \
+  --repetitions 1 \
+  --multiplicative-depth 4 \
+  --ring-dimension 16384 \
+  --output-dir benchmark_runs/openfhe_maximum_16 \
+  --overwrite
+```
+
 Change only `--function`, `--value-count`, and `--output-dir` for another
 isolated run. Supported function names are shown by:
 

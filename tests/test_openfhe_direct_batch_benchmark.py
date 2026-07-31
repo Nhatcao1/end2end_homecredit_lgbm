@@ -1,7 +1,9 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 import unittest
 
+from code.openfhe_direct import OpenFHECreditSession
 from code.openfhe_direct.benchmarks.single_function import (
     run_batch_benchmark,
 )
@@ -10,6 +12,69 @@ from tests.test_openfhe_direct_credit_api import _OpenFHE
 
 
 class OpenFHEDirectBatchBenchmarkTest(unittest.TestCase):
+    def test_minimum_and_maximum_use_scheme_switching_session(self):
+        class SwitchingSession:
+            def encrypt_column(self, values):
+                return SimpleNamespace(values=list(values))
+
+            def minimum(self, column):
+                return SimpleNamespace(
+                    value=min(column.values),
+                    source_count=len(column.values),
+                )
+
+            def maximum(self, column):
+                return SimpleNamespace(
+                    value=max(column.values),
+                    source_count=len(column.values),
+                )
+
+            def decrypt_column(self, column):
+                return tuple(column.values)
+
+            def decrypt_scalar(self, scalar):
+                return scalar.value
+
+        def factory(**kwargs):
+            return OpenFHECreditSession(
+                slot_count=kwargs["slot_count"],
+                input_scale=kwargs["input_scale"],
+                enable_minmax=True,
+                _switching_session=SwitchingSession(),
+            )
+
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            batches = root / "prepared/batches"
+            batches.mkdir(parents=True)
+            (batches / "batch_000000.csv").write_text(
+                "AMT_PAYMENT,AMT_INSTALMENT,valid\n"
+                "1,11,1\n"
+                "2,42,1\n"
+                "3,7,1\n"
+                "4,24,1\n",
+                encoding="utf-8",
+            )
+
+            for function in ("minimum", "maximum"):
+                result = run_batch_benchmark(
+                    function=function,
+                    prepared_dir=root / "prepared",
+                    value_count=4,
+                    slot_count=4,
+                    repetitions=1,
+                    multiplicative_depth=4,
+                    ring_dimension=16384,
+                    absolute_tolerance=1e-9,
+                    relative_tolerance=1e-9,
+                    output_dir=root / function,
+                    overwrite=False,
+                    _session_factory=factory,
+                )
+
+                self.assertEqual("PASS", result["status"])
+                self.assertGreater(float(result["input_scale"]), 0.0)
+
     def test_one_function_streams_multiple_ciphertext_chunks(self):
         with TemporaryDirectory() as temporary:
             root = Path(temporary)
