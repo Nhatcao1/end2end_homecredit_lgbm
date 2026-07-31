@@ -112,6 +112,29 @@ class _OpenFHE:
         return self.context
 
 
+class _SwitchingSession:
+    def encrypt_column(self, values):
+        return SimpleNamespace(values=list(values))
+
+    def minimum(self, column):
+        return SimpleNamespace(
+            value=min(column.values),
+            source_count=len(column.values),
+        )
+
+    def maximum(self, column):
+        return SimpleNamespace(
+            value=max(column.values),
+            source_count=len(column.values),
+        )
+
+    def decrypt_column(self, column):
+        return tuple(column.values)
+
+    def decrypt_scalar(self, scalar):
+        return scalar.value
+
+
 class OpenFHEDirectCreditApiTest(unittest.TestCase):
     def test_direct_class_runs_credit_operations(self):
         fake_openfhe = _OpenFHE()
@@ -159,6 +182,22 @@ class OpenFHEDirectCreditApiTest(unittest.TestCase):
         )
         self.assertTrue(fake_openfhe.context.mult_keys_generated)
         self.assertTrue(fake_openfhe.context.sum_keys_generated)
+
+    def test_canonical_session_exposes_scheme_switching_minimum_maximum(self):
+        session = OpenFHECreditSession(
+            slot_count=4,
+            input_scale=512.0,
+            enable_minmax=True,
+            _switching_session=_SwitchingSession(),
+        )
+        encrypted = session.encrypt([160.0, -100.0, 0.0])
+
+        minimum = session.minimum(encrypted)
+        maximum = session.maximum(encrypted)
+
+        self.assertTrue(session.scheme_switching_enabled)
+        self.assertEqual(-100.0, session.decrypt(minimum))
+        self.assertEqual(160.0, session.decrypt(maximum))
 
     def test_example_has_no_gateway_or_heir_path(self):
         source = EXAMPLE.read_text(encoding="utf-8")

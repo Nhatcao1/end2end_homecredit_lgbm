@@ -8,6 +8,11 @@ import importlib
 import math
 from typing import Any
 
+from code.heir.python_api.official_openfhe_minmax import (
+    EncryptedOpenFheColumn,
+)
+from code.heir.python_api.simple_session import CkksSession
+
 
 @dataclass(frozen=True)
 class EncryptedVector:
@@ -69,12 +74,40 @@ class OpenFHECreditSession:
         scaling_mod_size: int = 50,
         first_mod_size: int = 60,
         ring_dimension: int = 0,
+        input_scale: float = 1.0,
+        enable_minmax: bool = False,
         _openfhe_module: Any | None = None,
+        _switching_session: Any | None = None,
     ) -> None:
         if slot_count < 2:
             raise ValueError("slot_count must be at least two")
         if multiplicative_depth < 2:
             raise ValueError("multiplicative_depth must be at least two")
+
+        self.slot_count = slot_count
+        self._session_id = id(self)
+        self._switching_session: Any | None = None
+        if enable_minmax or _switching_session is not None:
+            if slot_count & (slot_count - 1):
+                raise ValueError(
+                    "scheme-switching slot_count must be a power of two"
+                )
+            if input_scale <= 0 or not math.isfinite(input_scale):
+                raise ValueError("input_scale must be finite and positive")
+            selected_ring = ring_dimension or max(16384, 2 * slot_count)
+            self._switching_session = (
+                _switching_session
+                if _switching_session is not None
+                else CkksSession.create(
+                    width=slot_count,
+                    input_scale=input_scale,
+                    ring_dimension=selected_ring,
+                )
+            )
+            self._context = None
+            self._public_key = None
+            self._secret_key = None
+            return
 
         if _openfhe_module is not None:
             of = _openfhe_module
@@ -127,11 +160,14 @@ class OpenFHECreditSession:
         context.EvalMultKeyGen(keys.secretKey)
         context.EvalSumKeyGen(keys.secretKey)
 
-        self.slot_count = slot_count
         self._context = context
         self._public_key = keys.publicKey
         self._secret_key = keys.secretKey
-        self._session_id = id(self)
+
+    @property
+    def scheme_switching_enabled(self) -> bool:
+        """Whether this session supports encrypted MIN/MAX."""
+        return self._switching_session is not None
 
     def encrypt(self, values: Sequence[float]) -> EncryptedVector:
         """Encode and encrypt one numeric vector."""
@@ -143,6 +179,11 @@ class OpenFHECreditSession:
             )
         if not all(math.isfinite(value) for value in materialized):
             raise ValueError("values must not contain NaN or infinity")
+        if self._switching_session is not None:
+            return self._vector(
+                self._switching_session.encrypt_column(materialized),
+                len(materialized),
+            )
         plaintext = self._context.MakeCKKSPackedPlaintext(materialized)
         return EncryptedVector(
             ciphertext=self._context.Encrypt(
@@ -159,6 +200,18 @@ class OpenFHECreditSession:
     ) -> list[float] | float:
         """Decrypt only at the application-controlled final boundary."""
         self._require_session(encrypted)
+        if self._switching_session is not None:
+            if isinstance(encrypted, EncryptedVector):
+                return list(
+                    self._switching_session.decrypt_column(
+                        encrypted.ciphertext
+                    )
+                )
+            return float(
+                self._switching_session.decrypt_scalar(
+                    encrypted.ciphertext
+                )
+            )
         plaintext = self._context.Decrypt(
             self._secret_key,
             encrypted.ciphertext,
@@ -182,6 +235,8 @@ class OpenFHECreditSession:
     ) -> EncryptedVector | EncryptedScalar:
         """Ciphertext + ciphertext via OpenFHE ``EvalAdd``."""
         self._require_binary(left, right)
+        if self._switching_session is not None:
+            return self._switching_binary("add", left, right)
         return self._same_shape(
             left,
             self._context.EvalAdd(left.ciphertext, right.ciphertext),
@@ -194,6 +249,8 @@ class OpenFHECreditSession:
     ) -> EncryptedVector | EncryptedScalar:
         """Ciphertext - ciphertext via OpenFHE ``EvalSub``."""
         self._require_binary(left, right)
+        if self._switching_session is not None:
+            return self._switching_binary("subtract", left, right)
         return self._same_shape(
             left,
             self._context.EvalSub(left.ciphertext, right.ciphertext),
@@ -206,6 +263,8 @@ class OpenFHECreditSession:
     ) -> EncryptedVector | EncryptedScalar:
         """Ciphertext × ciphertext via OpenFHE ``EvalMult``."""
         self._require_binary(left, right)
+        if self._switching_session is not None:
+            return self._switching_binary("multiply", left, right)
         return self._same_shape(
             left,
             self._context.EvalMult(left.ciphertext, right.ciphertext),
@@ -218,6 +277,20 @@ class OpenFHECreditSession:
     ) -> EncryptedVector | EncryptedScalar:
         """Ciphertext + visible scalar via OpenFHE ``EvalAdd``."""
         self._require_session(encrypted)
+        if self._switching_session is not None:
+            payload = self._switching_payload(encrypted)
+            result = self._switching_context().EvalAdd(
+                payload.ciphertext,
+                float(scalar) / payload.scale,
+            )
+            return self._switching_result(
+                encrypted,
+                EncryptedOpenFheColumn(
+                    result,
+                    payload.scale,
+                    payload.valid_count,
+                ),
+            )
         return self._same_shape(
             encrypted,
             self._context.EvalAdd(encrypted.ciphertext, float(scalar)),
@@ -230,6 +303,29 @@ class OpenFHECreditSession:
     ) -> EncryptedVector:
         """Ciphertext + visible vector via plaintext ``EvalAdd``."""
         self._require_session(encrypted)
+        if self._switching_session is not None:
+            payload = self._switching_payload(encrypted)
+            values = self._public_values(encrypted, public_values)
+            padded = values + [values[0]] * (
+                self.slot_count - len(values)
+            )
+            plaintext = self._switching_context().MakeCKKSPackedPlaintext(
+                [value / payload.scale for value in padded]
+            )
+            result = self._switching_context().EvalAdd(
+                payload.ciphertext,
+                plaintext,
+            )
+            wrapped = self._switching_result(
+                encrypted,
+                EncryptedOpenFheColumn(
+                    result,
+                    payload.scale,
+                    payload.valid_count,
+                ),
+            )
+            assert isinstance(wrapped, EncryptedVector)
+            return wrapped
         plaintext = self._public_plaintext(encrypted, public_values)
         return self._vector(
             self._context.EvalAdd(encrypted.ciphertext, plaintext),
@@ -243,6 +339,21 @@ class OpenFHECreditSession:
     ) -> EncryptedVector | EncryptedScalar:
         """Ciphertext × visible scalar via OpenFHE ``EvalMult``."""
         self._require_session(encrypted)
+        if self._switching_session is not None:
+            self._switching_session._ops._ensure_multiplication_key()
+            payload = self._switching_payload(encrypted)
+            result = self._switching_context().EvalMult(
+                payload.ciphertext,
+                float(scalar),
+            )
+            return self._switching_result(
+                encrypted,
+                EncryptedOpenFheColumn(
+                    result,
+                    payload.scale,
+                    payload.valid_count,
+                ),
+            )
         return self._same_shape(
             encrypted,
             self._context.EvalMult(encrypted.ciphertext, float(scalar)),
@@ -255,6 +366,30 @@ class OpenFHECreditSession:
     ) -> EncryptedVector:
         """Ciphertext × visible vector via plaintext ``EvalMult``."""
         self._require_session(encrypted)
+        if self._switching_session is not None:
+            self._switching_session._ops._ensure_multiplication_key()
+            payload = self._switching_payload(encrypted)
+            values = self._public_values(encrypted, public_values)
+            padded = values + [values[0]] * (
+                self.slot_count - len(values)
+            )
+            plaintext = self._switching_context().MakeCKKSPackedPlaintext(
+                padded
+            )
+            result = self._switching_context().EvalMult(
+                payload.ciphertext,
+                plaintext,
+            )
+            wrapped = self._switching_result(
+                encrypted,
+                EncryptedOpenFheColumn(
+                    result,
+                    payload.scale,
+                    payload.valid_count,
+                ),
+            )
+            assert isinstance(wrapped, EncryptedVector)
+            return wrapped
         plaintext = self._public_plaintext(encrypted, public_values)
         return self._vector(
             self._context.EvalMult(encrypted.ciphertext, plaintext),
@@ -267,6 +402,8 @@ class OpenFHECreditSession:
     ) -> EncryptedVector | EncryptedScalar:
         """Ciphertext square implemented as ``EvalMult(x, x)``."""
         self._require_session(encrypted)
+        if self._switching_session is not None:
+            return self.multiply(encrypted, encrypted)
         return self._same_shape(
             encrypted,
             self._context.EvalMult(
@@ -278,6 +415,10 @@ class OpenFHECreditSession:
     def sum(self, encrypted: EncryptedVector) -> EncryptedScalar:
         """Encrypted packed sum via OpenFHE ``EvalSum``."""
         self._require_session(encrypted)
+        if self._switching_session is not None:
+            return self._scalar(
+                self._switching_session.sum(encrypted.ciphertext)
+            )
         return self._scalar(
             self._context.EvalSum(
                 encrypted.ciphertext,
@@ -287,6 +428,11 @@ class OpenFHECreditSession:
 
     def mean(self, encrypted: EncryptedVector) -> EncryptedScalar:
         """Encrypted mean: ``EvalSum(x) × public (1/n)``."""
+        if self._switching_session is not None:
+            self._require_session(encrypted)
+            return self._scalar(
+                self._switching_session.mean(encrypted.ciphertext)
+            )
         encrypted_sum = self.sum(encrypted)
         mean = self.multiply_public_scalar(
             encrypted_sum,
@@ -312,6 +458,11 @@ class OpenFHECreditSession:
         """
         if encrypted.length < 2:
             raise ValueError("sample variance requires at least two values")
+        if self._switching_session is not None:
+            self._require_session(encrypted)
+            return self._scalar(
+                self._switching_session.variance(encrypted.ciphertext)
+            )
         components = self.variance_components(encrypted)
         sum_x_squared = self.square(components.sum_x)
         scaled_sum_x_squared = self.multiply_public_scalar(
@@ -328,6 +479,28 @@ class OpenFHECreditSession:
         )
         assert isinstance(result, EncryptedScalar)
         return result
+
+    def minimum(self, encrypted: EncryptedVector) -> EncryptedScalar:
+        """Encrypted minimum through OpenFHE CKKS↔FHEW switching."""
+        self._require_session(encrypted)
+        if self._switching_session is None:
+            raise RuntimeError(
+                "minimum requires enable_minmax=True when creating session"
+            )
+        return self._scalar(
+            self._switching_session.minimum(encrypted.ciphertext)
+        )
+
+    def maximum(self, encrypted: EncryptedVector) -> EncryptedScalar:
+        """Encrypted maximum through OpenFHE CKKS↔FHEW switching."""
+        self._require_session(encrypted)
+        if self._switching_session is None:
+            raise RuntimeError(
+                "maximum requires enable_minmax=True when creating session"
+            )
+        return self._scalar(
+            self._switching_session.maximum(encrypted.ciphertext)
+        )
 
     def covariance_components(
         self,
@@ -399,12 +572,97 @@ class OpenFHECreditSession:
         encrypted: EncryptedVector,
         public_values: Sequence[float],
     ) -> Any:
+        values = self._public_values(encrypted, public_values)
+        return self._context.MakeCKKSPackedPlaintext(values)
+
+    @staticmethod
+    def _public_values(
+        encrypted: EncryptedVector,
+        public_values: Sequence[float],
+    ) -> list[float]:
         values = [float(value) for value in public_values]
         if len(values) != encrypted.length:
             raise ValueError("public vector length does not match ciphertext")
         if not all(math.isfinite(value) for value in values):
             raise ValueError("public values must not contain NaN or infinity")
-        return self._context.MakeCKKSPackedPlaintext(values)
+        return values
+
+    def _switching_context(self) -> Any:
+        if self._switching_session is None:
+            raise RuntimeError("scheme-switching session is not enabled")
+        return self._switching_session._ops._engine._context
+
+    @staticmethod
+    def _switching_payload(
+        encrypted: EncryptedVector | EncryptedScalar,
+    ) -> EncryptedOpenFheColumn:
+        return encrypted.ciphertext._payload
+
+    def _switching_result(
+        self,
+        template: EncryptedVector | EncryptedScalar,
+        payload: EncryptedOpenFheColumn,
+    ) -> EncryptedVector | EncryptedScalar:
+        if self._switching_session is None:
+            raise RuntimeError("scheme-switching session is not enabled")
+        if isinstance(template, EncryptedVector):
+            return self._vector(
+                self._switching_session._column(payload),
+                template.length,
+            )
+        return self._scalar(
+            self._switching_session._scalar(
+                payload,
+                template.ciphertext.source_count,
+            )
+        )
+
+    def _switching_binary(
+        self,
+        operation: str,
+        left: EncryptedVector | EncryptedScalar,
+        right: EncryptedVector | EncryptedScalar,
+    ) -> EncryptedVector | EncryptedScalar:
+        if self._switching_session is None:
+            raise RuntimeError("scheme-switching session is not enabled")
+        left_payload = self._switching_payload(left)
+        right_payload = self._switching_payload(right)
+        if left_payload.valid_count != right_payload.valid_count:
+            raise ValueError("encrypted columns have different valid counts")
+        if operation in {"add", "subtract"} and (
+            left_payload.scale != right_payload.scale
+        ):
+            raise ValueError("encrypted columns have different scales")
+        context = self._switching_context()
+        if operation == "add":
+            ciphertext = context.EvalAdd(
+                left_payload.ciphertext,
+                right_payload.ciphertext,
+            )
+            scale = left_payload.scale
+        elif operation == "subtract":
+            ciphertext = context.EvalSub(
+                left_payload.ciphertext,
+                right_payload.ciphertext,
+            )
+            scale = left_payload.scale
+        elif operation == "multiply":
+            self._switching_session._ops._ensure_multiplication_key()
+            ciphertext = context.EvalMult(
+                left_payload.ciphertext,
+                right_payload.ciphertext,
+            )
+            scale = left_payload.scale * right_payload.scale
+        else:
+            raise ValueError(f"unsupported switching operation: {operation}")
+        return self._switching_result(
+            left,
+            EncryptedOpenFheColumn(
+                ciphertext,
+                scale,
+                left_payload.valid_count,
+            ),
+        )
 
     def _require_session(
         self,

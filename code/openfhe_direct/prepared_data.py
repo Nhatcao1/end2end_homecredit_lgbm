@@ -25,6 +25,15 @@ class PreparedParentColumns:
     files_used: list[str]
 
 
+def public_power_of_two_scale(values: list[float]) -> float:
+    """Choose a public scale placing finite values inside (-0.5, 0.5]."""
+    if not values or not all(math.isfinite(value) for value in values):
+        raise ValueError("scale values must be non-empty and finite")
+    maximum = max(abs(value) for value in values)
+    required = max(2.0, 2.0 * maximum + 1.0)
+    return float(1 << math.ceil(math.log2(required)))
+
+
 def load_prepared_group(path: Path) -> PreparedPaymentGroup:
     """Read mask-one rows; validate and discard trailing zero padding."""
     with path.open("r", encoding="utf-8-sig", newline="") as handle:

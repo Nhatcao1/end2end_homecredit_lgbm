@@ -14,10 +14,10 @@ prepared parent columns per group
 There is no intermediate decryption. Client grouping and padding have already
 occurred in the prepared input files and are outside the HE latency.
 
-The benchmark uses the existing `CkksSession`, including its OpenFHE-Python
-CKKS↔FHEW MIN/MAX operations. All groups reuse that one live context.
-The direct package re-exports this session for the benchmark; it does not run
-the HEIR compiler or generated C++.
+The benchmark constructs `OpenFHECreditSession(enable_minmax=True)`.
+Its public `minimum()` and `maximum()` methods use OpenFHE-Python CKKS↔FHEW
+switching. All groups reuse that one live context. The benchmark does not
+import OpenFHE, configure keys, run the HEIR compiler, or generate C++.
 
 ## Five-group smoke command
 

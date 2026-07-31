@@ -34,6 +34,8 @@ It has no gateway URL, HTTP client, HEIR compiler, MLIR, or CMake runner.
 | `mean` | `EvalSum` then scalar `EvalMult(1/n)` |
 | `variance_components` | encrypted Σx and Σx² |
 | `variance` | encrypted sample variance from Σx and Σx² |
+| `minimum` | CKKS↔FHEW encrypted minimum |
+| `maximum` | CKKS↔FHEW encrypted maximum |
 | `covariance_components` | encrypted Σx, Σy, and Σxy |
 | `correlation_components` | encrypted sums, squared sums, and product sum |
 | `weighted_sum` | plaintext-vector `EvalMult` then `EvalSum` |
@@ -44,6 +46,10 @@ It has no gateway URL, HTTP client, HEIR compiler, MLIR, or CMake runner.
 The Python interpreter must contain the official `openfhe` binding built for
 the same OpenFHE version as the installed C++ runtime. The class checks that
 every required operation exists before generating keys.
+
+Create the session with `enable_minmax=True` and a public `input_scale` to
+enable the CKKS↔FHEW MIN/MAX context. Basic arithmetic benchmarks leave this
+disabled to avoid paying the scheme-switching setup cost.
 
 ## Run
 

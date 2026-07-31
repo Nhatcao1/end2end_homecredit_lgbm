@@ -98,13 +98,11 @@ risk_score
 | Square/sum/mean/variance | In `code/openfhe_direct/session.py` | Keep |
 | Variance/covariance/correlation components | In `code/openfhe_direct/session.py` | Keep |
 | Weighted sum/risk score | In `code/openfhe_direct/session.py` | Keep |
-| CKKS↔FHEW minimum/maximum | Exposed by the older `CkksSession` | Move behind `OpenFHECreditSession.minimum()` and `.maximum()` |
-| Multi-group benchmark | Calls session methods | Change to the canonical session after MIN/MAX consolidation |
+| CKKS↔FHEW minimum/maximum | Public methods in `code/openfhe_direct/session.py` | Complete |
+| Multi-group benchmark | Calls only `OpenFHECreditSession` methods | Complete |
 
-The older `CkksSession` remains a temporary implementation dependency for
-MIN/MAX. Benchmarks must not copy its scheme-switching code. The next
-refactoring step is to place the public MIN/MAX entry points in
-`code/openfhe_direct/session.py`, while keeping any low-level helper private.
+The low-level scheme-switching helper remains private to the session layer.
+Benchmarks do not import it or copy its configuration.
 
 ## Procedure for adding a new HE function
 

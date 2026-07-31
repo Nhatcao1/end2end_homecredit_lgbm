@@ -27,7 +27,7 @@ class _Scalar:
 
 
 class _NumericSession:
-    def encrypt_column(self, values):
+    def encrypt(self, values):
         return _Column(values)
 
     def subtract(self, left, right):
@@ -51,7 +51,7 @@ class _NumericSession:
     def maximum(self, column):
         return _Scalar(max(column.values))
 
-    def decrypt_scalar(self, scalar):
+    def decrypt(self, scalar):
         return scalar.value
 
 
@@ -84,6 +84,8 @@ class OpenFHEDirectMultigroupE2ETest(unittest.TestCase):
             self.assertTrue(result["scheme_switching_minmax"])
             self.assertEqual(8, result["slot_count"])
             self.assertEqual(1, len(factory_calls))
+            self.assertEqual(8, factory_calls[0]["slot_count"])
+            self.assertTrue(factory_calls[0]["enable_minmax"])
             self.assertEqual(
                 [
                     "PAYMENT_DIFF_SUM",
@@ -113,6 +115,17 @@ class OpenFHEDirectMultigroupE2ETest(unittest.TestCase):
                     overwrite=False,
                     _session_factory=lambda **_: _NumericSession(),
                 )
+
+    def test_benchmark_contains_no_direct_he_implementation(self):
+        source = (
+            ROOT / "code/openfhe_direct/multigroup_e2e_benchmark.py"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("OpenFHECreditSession", source)
+        self.assertNotIn("code.heir", source)
+        self.assertNotIn("import openfhe", source)
+        self.assertNotIn("EvalAdd", source)
+        self.assertNotIn("EvalMin", source)
 
 
 if __name__ == "__main__":

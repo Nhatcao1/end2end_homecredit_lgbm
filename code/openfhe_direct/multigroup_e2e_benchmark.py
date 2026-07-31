@@ -18,13 +18,11 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from code.openfhe_direct import (
-    CkksSession,
-    public_power_of_two_scale,
-)
+from code.openfhe_direct import OpenFHECreditSession
 from code.openfhe_direct.prepared_data import (
     PreparedPaymentGroup,
     load_prepared_group,
+    public_power_of_two_scale,
 )
 
 
@@ -82,7 +80,8 @@ def _write_report(
     lines = [
         "# OpenFHE-Python multi-group PAYMENT_DIFF",
         "",
-        "One shared `CkksSession` processes several client-prepared groups. "
+        "One shared `OpenFHECreditSession` processes several client-prepared "
+        "groups. "
         "For each group it encrypts both parent columns, calculates "
         "`PAYMENT_DIFF`, then encrypted SUM, MEAN, sample VARIANCE, MINIMUM, "
         "and MAXIMUM. No ciphertext is decrypted between operations.",
@@ -218,12 +217,13 @@ def run_multigroup_benchmark(
         raise ValueError(
             "input_scale must place parents and PAYMENT_DIFF in (-0.5, 0.5]"
         )
-    factory = _session_factory or CkksSession.create
+    factory = _session_factory or OpenFHECreditSession
     session, setup_seconds = _timed(
         factory,
-        width=selected_slots,
+        slot_count=selected_slots,
         input_scale=selected_scale,
         ring_dimension=ring_dimension,
+        enable_minmax=True,
     )
     references = {
         group.applicant_id: _python_reference(group)
@@ -251,12 +251,12 @@ def run_multigroup_benchmark(
         }
         for group in groups:
             installment_ct, elapsed = _timed(
-                session.encrypt_column,
+                session.encrypt,
                 group.installment,
             )
             stage["encrypt_seconds"] += elapsed
             payment_ct, elapsed = _timed(
-                session.encrypt_column,
+                session.encrypt,
                 group.payment,
             )
             stage["encrypt_seconds"] += elapsed
@@ -283,10 +283,7 @@ def run_multigroup_benchmark(
 
             observed: dict[str, float] = {}
             for name, encrypted in encrypted_outputs.items():
-                observed[name], elapsed = _timed(
-                    session.decrypt_scalar,
-                    encrypted,
-                )
+                observed[name], elapsed = _timed(session.decrypt, encrypted)
                 stage["audit_decrypt_seconds"] += elapsed
 
             reference = references[group.applicant_id]
