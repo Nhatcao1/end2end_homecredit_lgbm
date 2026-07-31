@@ -80,3 +80,6 @@ For larger prepared row batches and one-function-per-command execution, see
 For one shared-context PAYMENT_DIFF execution over several prepared groups,
 see
 [`OPENFHE_DIRECT_MULTIGROUP_E2E.md`](OPENFHE_DIRECT_MULTIGROUP_E2E.md).
+
+The permanent development rule and MIN/MAX consolidation plan are in
+[`OPENFHE_SESSION_BENCHMARK_PLAN.md`](OPENFHE_SESSION_BENCHMARK_PLAN.md).
