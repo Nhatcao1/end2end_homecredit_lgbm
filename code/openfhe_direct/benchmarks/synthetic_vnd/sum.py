@@ -151,6 +151,7 @@ def _write_report(
     values: list[int],
     slot_count: int,
     repetitions: int,
+    multiplicative_depth: int,
     ring_dimension: int,
     plaintext_modulus: int,
     plaintext_modulus_bits: int,
@@ -175,6 +176,7 @@ def _write_report(
         f"- BGV plaintext modulus: `{plaintext_modulus}`",
         f"- Requested plaintext-modulus bits: `{plaintext_modulus_bits}`",
         f"- Maximum positive centered value: `{plaintext_modulus // 2}`",
+        f"- Multiplicative depth: `{multiplicative_depth}`",
         f"- Ring dimension: `{ring_dimension}`",
         f"- Repetitions: `{repetitions}`",
         f"- Context/key setup: `{setup_seconds:.9f}` seconds",
@@ -271,6 +273,7 @@ def run_sum_count(
         "slot_count": slot_count,
         "plaintext_modulus": plaintext_modulus,
         "plaintext_modulus_bits": plaintext_modulus_bits,
+        "multiplicative_depth": multiplicative_depth,
         "centered_capacity": plaintext_modulus // 2,
         "plaintext_vector_sum": expected_sum,
         "setup_seconds": setup_seconds,
@@ -289,6 +292,7 @@ def run_sum_count(
         values=values,
         slot_count=slot_count,
         repetitions=repetitions,
+        multiplicative_depth=multiplicative_depth,
         ring_dimension=ring_dimension,
         plaintext_modulus=plaintext_modulus,
         plaintext_modulus_bits=plaintext_modulus_bits,
@@ -386,7 +390,7 @@ def main() -> None:
     )
     parser.add_argument("--slot-count", type=int, default=8192)
     parser.add_argument("--repetitions", type=int, default=5)
-    parser.add_argument("--multiplicative-depth", type=int, default=1)
+    parser.add_argument("--multiplicative-depth", type=int, default=0)
     parser.add_argument("--plaintext-modulus-bits", type=int, default=40)
     parser.add_argument("--ring-dimension", type=int, default=16384)
     parser.add_argument("--output-dir", type=Path, required=True)

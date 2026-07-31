@@ -214,6 +214,7 @@ The synthetic VND benchmark additionally must:
 - default to inclusive values from 100,000 through 20,000,000;
 - test one encrypted vector reduction through `OpenFHEBgvSession.sum()`;
 - accept a plaintext-modulus bit budget and select the compatible prime internally;
+- use depth zero and one 60-bit `FIXEDMANUAL` BGV first RNS prime for SUM;
 - use NumPy `int64` SUM as the optimized plaintext reference;
 - require the audited BGV result to equal the full vector SUM exactly;
 - reject a vector whose total exceeds the centered plaintext-modulus capacity;

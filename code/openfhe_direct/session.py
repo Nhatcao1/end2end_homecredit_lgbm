@@ -67,7 +67,9 @@ class OpenFHEBgvSession:
         *,
         slot_count: int,
         plaintext_modulus: int = 137_438_822_401,
-        multiplicative_depth: int = 1,
+        multiplicative_depth: int = 0,
+        scaling_mod_size: int = 59,
+        first_mod_size: int = 60,
         ring_dimension: int = 16_384,
         _openfhe_module: Any | None = None,
     ) -> None:
@@ -75,8 +77,12 @@ class OpenFHEBgvSession:
             raise ValueError("slot_count must be at least two")
         if plaintext_modulus < 3:
             raise ValueError("plaintext_modulus must be at least three")
-        if multiplicative_depth < 1:
-            raise ValueError("multiplicative_depth must be positive")
+        if multiplicative_depth < 0:
+            raise ValueError("multiplicative_depth must not be negative")
+        if not 20 <= scaling_mod_size < 60:
+            raise ValueError("BGV scaling_mod_size must be between 20 and 59")
+        if not 20 <= first_mod_size <= 60:
+            raise ValueError("BGV first_mod_size must be between 20 and 60")
 
         if _openfhe_module is not None:
             of = _openfhe_module
@@ -93,6 +99,13 @@ class OpenFHEBgvSession:
         parameters.SetPlaintextModulus(plaintext_modulus)
         parameters.SetMultiplicativeDepth(multiplicative_depth)
         parameters.SetBatchSize(slot_count)
+        # A large integer plaintext space makes BGV's automatic modulus
+        # estimator request a native prime above OpenFHE's 60-bit limit.
+        # A SUM needs no multiplication levels. FIXEDMANUAL therefore uses
+        # one 60-bit first RNS prime and requests no additional level.
+        parameters.SetScalingTechnique(of.FIXEDMANUAL)
+        parameters.SetScalingModSize(scaling_mod_size)
+        parameters.SetFirstModSize(first_mod_size)
         if ring_dimension:
             parameters.SetRingDim(ring_dimension)
 
@@ -125,6 +138,8 @@ class OpenFHEBgvSession:
         context.EvalSumKeyGen(keys.secretKey)
         self.slot_count = slot_count
         self.plaintext_modulus = plaintext_modulus
+        self.scaling_mod_size = scaling_mod_size
+        self.first_mod_size = first_mod_size
         self.centered_capacity = plaintext_modulus // 2
         self._session_id = id(self)
         self._context = context

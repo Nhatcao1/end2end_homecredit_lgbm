@@ -37,7 +37,7 @@ python3 -m code.openfhe_direct.benchmarks.synthetic_vnd.sum \
   --value-count 50 100 2000 \
   --slot-count 2048 \
   --repetitions 5 \
-  --multiplicative-depth 1 \
+  --multiplicative-depth 0 \
   --plaintext-modulus-bits 40 \
   --ring-dimension 16384 \
   --output-dir benchmark_runs/openfhe_vnd_bgv_sum \
@@ -49,6 +49,11 @@ packed-plaintext prime internally and records the actual modulus in the
 report. It calls only `OpenFHEBgvSession.encrypt()`, `sum()`, and `decrypt()`.
 NumPy `int64` SUM is the plaintext reference. Unsafe totals are rejected before
 encryption rather than allowed to wrap modulo the plaintext modulus.
+
+The 40-bit number is the BGV plaintext space, not an OpenFHE RNS-prime size.
+SUM has no ciphertext multiplication, so the session requests depth `0` and
+uses `FIXEDMANUAL` with one compatible 60-bit first RNS prime. It creates no
+unnecessary multiplication level and stays within OpenFHE's 60-bit limit.
 
 ## Run approximate CKKS SUM on the same vectors
 

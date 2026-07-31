@@ -22,6 +22,15 @@ class _BgvParameters:
     def SetMultiplicativeDepth(self, value):
         self.depth = value
 
+    def SetScalingTechnique(self, value):
+        self.scaling_technique = value
+
+    def SetScalingModSize(self, value):
+        self.scaling_mod_size = value
+
+    def SetFirstModSize(self, value):
+        self.first_mod_size = value
+
     def SetBatchSize(self, value):
         self.batch = value
 
@@ -73,6 +82,7 @@ class _BgvOpenFHE:
     KEYSWITCH = "KEYSWITCH"
     LEVELEDSHE = "LEVELEDSHE"
     ADVANCEDSHE = "ADVANCEDSHE"
+    FIXEDMANUAL = "FIXEDMANUAL"
 
     def __init__(self):
         self.context = _BgvContext()
@@ -127,10 +137,14 @@ class OpenFHEDirectSyntheticVndSumTest(unittest.TestCase):
                 del dtype
                 return sum(values)
 
+        fake_modules = []
+
         def factory(**kwargs):
+            fake = _BgvOpenFHE()
+            fake_modules.append(fake)
             return OpenFHEBgvSession(
                 **kwargs,
-                _openfhe_module=_BgvOpenFHE(),
+                _openfhe_module=fake,
             )
 
         with TemporaryDirectory() as temporary:
@@ -150,7 +164,7 @@ class OpenFHEDirectSyntheticVndSumTest(unittest.TestCase):
                     value_counts=[5],
                     slot_count=8,
                     repetitions=2,
-                    multiplicative_depth=1,
+                    multiplicative_depth=0,
                     plaintext_modulus_bits=40,
                     ring_dimension=8,
                     output_dir=root / "result",
@@ -164,6 +178,12 @@ class OpenFHEDirectSyntheticVndSumTest(unittest.TestCase):
             self.assertIn("Plaintext vector SUM", report)
             self.assertIn("Absolute error (VND)", report)
             self.assertNotIn("Expected-result range", report)
+            self.assertEqual(
+                "FIXEDMANUAL",
+                fake_modules[0].parameters.scaling_technique,
+            )
+            self.assertEqual(59, fake_modules[0].parameters.scaling_mod_size)
+            self.assertEqual(60, fake_modules[0].parameters.first_mod_size)
 
     def test_bit_count_selects_a_packed_plaintext_prime(self):
         modulus = packed_plaintext_modulus(40, 16_384)
