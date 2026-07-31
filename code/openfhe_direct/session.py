@@ -177,38 +177,38 @@ class OpenFHECreditSession:
 
     def add(
         self,
-        left: EncryptedVector,
-        right: EncryptedVector,
-    ) -> EncryptedVector:
+        left: EncryptedVector | EncryptedScalar,
+        right: EncryptedVector | EncryptedScalar,
+    ) -> EncryptedVector | EncryptedScalar:
         """Ciphertext + ciphertext via OpenFHE ``EvalAdd``."""
         self._require_binary(left, right)
-        return self._vector(
+        return self._same_shape(
+            left,
             self._context.EvalAdd(left.ciphertext, right.ciphertext),
-            left.length,
         )
 
     def subtract(
         self,
-        left: EncryptedVector,
-        right: EncryptedVector,
-    ) -> EncryptedVector:
+        left: EncryptedVector | EncryptedScalar,
+        right: EncryptedVector | EncryptedScalar,
+    ) -> EncryptedVector | EncryptedScalar:
         """Ciphertext - ciphertext via OpenFHE ``EvalSub``."""
         self._require_binary(left, right)
-        return self._vector(
+        return self._same_shape(
+            left,
             self._context.EvalSub(left.ciphertext, right.ciphertext),
-            left.length,
         )
 
     def multiply(
         self,
-        left: EncryptedVector,
-        right: EncryptedVector,
-    ) -> EncryptedVector:
+        left: EncryptedVector | EncryptedScalar,
+        right: EncryptedVector | EncryptedScalar,
+    ) -> EncryptedVector | EncryptedScalar:
         """Ciphertext × ciphertext via OpenFHE ``EvalMult``."""
         self._require_binary(left, right)
-        return self._vector(
+        return self._same_shape(
+            left,
             self._context.EvalMult(left.ciphertext, right.ciphertext),
-            left.length,
         )
 
     def add_public_scalar(
@@ -261,15 +261,18 @@ class OpenFHECreditSession:
             encrypted.length,
         )
 
-    def square(self, encrypted: EncryptedVector) -> EncryptedVector:
+    def square(
+        self,
+        encrypted: EncryptedVector | EncryptedScalar,
+    ) -> EncryptedVector | EncryptedScalar:
         """Ciphertext square implemented as ``EvalMult(x, x)``."""
         self._require_session(encrypted)
-        return self._vector(
+        return self._same_shape(
+            encrypted,
             self._context.EvalMult(
                 encrypted.ciphertext,
                 encrypted.ciphertext,
             ),
-            encrypted.length,
         )
 
     def sum(self, encrypted: EncryptedVector) -> EncryptedScalar:
@@ -301,6 +304,30 @@ class OpenFHECreditSession:
             sum_x=self.sum(encrypted),
             sum_x2=self.sum(self.square(encrypted)),
         )
+
+    def variance(self, encrypted: EncryptedVector) -> EncryptedScalar:
+        """Encrypted sample variance using public count ``n``.
+
+        Formula: ``(Σx² - (Σx)² / n) / (n - 1)``.
+        """
+        if encrypted.length < 2:
+            raise ValueError("sample variance requires at least two values")
+        components = self.variance_components(encrypted)
+        sum_x_squared = self.square(components.sum_x)
+        scaled_sum_x_squared = self.multiply_public_scalar(
+            sum_x_squared,
+            1.0 / encrypted.length,
+        )
+        numerator = self.subtract(
+            components.sum_x2,
+            scaled_sum_x_squared,
+        )
+        result = self.multiply_public_scalar(
+            numerator,
+            1.0 / (encrypted.length - 1),
+        )
+        assert isinstance(result, EncryptedScalar)
+        return result
 
     def covariance_components(
         self,
@@ -388,10 +415,16 @@ class OpenFHECreditSession:
 
     def _require_binary(
         self,
-        left: EncryptedVector,
-        right: EncryptedVector,
+        left: EncryptedVector | EncryptedScalar,
+        right: EncryptedVector | EncryptedScalar,
     ) -> None:
         self._require_session(left)
         self._require_session(right)
-        if left.length != right.length:
+        if type(left) is not type(right):
+            raise ValueError("encrypted operand shapes do not match")
+        if (
+            isinstance(left, EncryptedVector)
+            and isinstance(right, EncryptedVector)
+            and left.length != right.length
+        ):
             raise ValueError("encrypted vector lengths do not match")

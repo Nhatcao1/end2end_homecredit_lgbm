@@ -45,6 +45,7 @@ FUNCTIONS = (
     "sum",
     "mean",
     "variance_components",
+    "variance",
     "covariance_components",
     "correlation_components",
     "weighted_sum",
@@ -59,6 +60,7 @@ DIFFERENCE_INPUT_FUNCTIONS = {
     "sum",
     "mean",
     "variance_components",
+    "variance",
     "weighted_sum",
     "risk_score",
 }
@@ -118,6 +120,8 @@ def _call_function(
         return session.mean(difference_ct)
     if function == "variance_components":
         return session.variance_components(difference_ct)
+    if function == "variance":
+        return session.variance(difference_ct)
     if function == "covariance_components":
         return session.covariance_components(
             installment_ct,
@@ -310,6 +314,11 @@ def run_batch_benchmark(
         parents.payment,
         slot_count,
     )
+    if function == "variance" and len(groups[-1].installment) < 2:
+        raise ValueError(
+            "sample variance cannot run on a final one-value chunk; "
+            "change value_count or slot_count"
+        )
     session, setup_seconds = _timed(
         OpenFHECreditSession,
         slot_count=slot_count,

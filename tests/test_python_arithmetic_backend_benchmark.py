@@ -47,6 +47,7 @@ class OpenFHEDirectApiBenchmarkTest(unittest.TestCase):
                     "sum",
                     "mean",
                     "variance_components",
+                    "variance",
                     "covariance_components",
                     "correlation_components",
                     "weighted_sum",

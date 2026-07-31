@@ -121,6 +121,15 @@ def _expected_values(group: PreparedPaymentGroup) -> dict[str, Any]:
             "sum_x": sum_difference,
             "sum_x2": sum_difference2,
         },
+        "variance": (
+            sum(
+                (value - sum_difference / count) ** 2
+                for value in difference
+            )
+            / (count - 1)
+            if count > 1
+            else None
+        ),
         "covariance_components": {
             "sum_x": sum_installment,
             "sum_y": sum_payment,
@@ -184,6 +193,7 @@ def _operation_calls(
         "variance_components": lambda: session.variance_components(
             difference_ct
         ),
+        "variance": lambda: session.variance(difference_ct),
         "covariance_components": lambda: session.covariance_components(
             installment_ct,
             payment_ct,

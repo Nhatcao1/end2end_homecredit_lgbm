@@ -51,6 +51,7 @@ def main() -> None:
     sum_ct = session.sum(payment_diff_ct)
     mean_ct = session.mean(payment_diff_ct)
     variance = session.variance_components(payment_diff_ct)
+    sample_variance_ct = session.variance(payment_diff_ct)
     covariance = session.covariance_components(
         installment_ct,
         payment_ct,
@@ -79,6 +80,7 @@ def main() -> None:
             "sum_x": session.decrypt(variance.sum_x),
             "sum_x2": session.decrypt(variance.sum_x2),
         },
+        "payment_diff_sample_variance": session.decrypt(sample_variance_ct),
         "covariance_components": {
             "sum_x": session.decrypt(covariance.sum_x),
             "sum_y": session.decrypt(covariance.sum_y),

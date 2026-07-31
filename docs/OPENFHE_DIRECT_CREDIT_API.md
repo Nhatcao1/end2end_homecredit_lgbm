@@ -33,6 +33,7 @@ It has no gateway URL, HTTP client, HEIR compiler, MLIR, or CMake runner.
 | `sum` | `EvalSum` |
 | `mean` | `EvalSum` then scalar `EvalMult(1/n)` |
 | `variance_components` | encrypted Σx and Σx² |
+| `variance` | encrypted sample variance from Σx and Σx² |
 | `covariance_components` | encrypted Σx, Σy, and Σxy |
 | `correlation_components` | encrypted sums, squared sums, and product sum |
 | `weighted_sum` | plaintext-vector `EvalMult` then `EvalSum` |
@@ -75,3 +76,7 @@ It reports one median call latency per method plus final audit accuracy.
 
 For larger prepared row batches and one-function-per-command execution, see
 [`OPENFHE_DIRECT_BATCH_BENCHMARK.md`](OPENFHE_DIRECT_BATCH_BENCHMARK.md).
+
+For one shared-context PAYMENT_DIFF execution over several prepared groups,
+see
+[`OPENFHE_DIRECT_MULTIGROUP_E2E.md`](OPENFHE_DIRECT_MULTIGROUP_E2E.md).

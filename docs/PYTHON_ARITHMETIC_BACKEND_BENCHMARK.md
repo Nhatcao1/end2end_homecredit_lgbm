@@ -13,8 +13,8 @@ add_public_vector          multiply_public_scalar
 multiply_public_vector     square
 sum                        mean
 variance_components        covariance_components
-correlation_components     weighted_sum
-risk_score
+variance                   correlation_components
+weighted_sum               risk_score
 ```
 
 One local CKKS context and key set are created. The two parent columns are

@@ -47,11 +47,13 @@ class _Context:
         self.features = []
         self.mult_keys_generated = False
         self.sum_keys_generated = False
+        self.keygen_calls = 0
 
     def Enable(self, feature):
         self.features.append(feature)
 
     def KeyGen(self):
+        self.keygen_calls += 1
         return SimpleNamespace(publicKey="public", secretKey="secret")
 
     def EvalMultKeyGen(self, secret_key):
@@ -139,6 +141,7 @@ class OpenFHEDirectCreditApiTest(unittest.TestCase):
         variance = session.variance_components(difference)
         self.assertEqual(60.0, session.decrypt(variance.sum_x))
         self.assertEqual(35600.0, session.decrypt(variance.sum_x2))
+        self.assertEqual(17200.0, session.decrypt(session.variance(difference)))
 
         covariance = session.covariance_components(installment, payment)
         self.assertEqual(2300.0, session.decrypt(covariance.sum_x))
