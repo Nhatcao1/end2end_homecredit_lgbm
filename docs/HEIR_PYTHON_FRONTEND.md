@@ -191,10 +191,10 @@ The same APIs accept any numeric columns. `OfficialCkksBinaryColumn` exposes
 element-wise `add`, `subtract`, and `multiply` HEIR circuits; no kernel knows
 the names `PAYMENT_DIFF`, `AMT_PAYMENT`, or `AMT_INSTALMENT`.
 
-The checkpoint E2E example does **not** require the optional pip `openfhe`
-wrapper. SUM/MEAN/VAR use the HEIR Python frontend. Its MAX branch is
-orchestrated from Python but compiled against the server's source-built
-OpenFHE installation via `--openfhe-dir /usr/local/lib/OpenFHE`.
+The checkpoint E2E example uses the official HEIR Python frontend for
+SUM/MEAN/VAR and the official `openfhe` Python package for CKKS↔FHEW MAX.
+Activate `.venv-heir-python`; the example does not compile a local C++ runner
+and does not accept an OpenFHE CMake directory as part of its execution path.
 
 ### Conceptual E2E with a checkpoint
 

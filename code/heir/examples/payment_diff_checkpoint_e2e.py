@@ -21,7 +21,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from code.heir.python_api import (
-    SourceBuiltOpenFheColumnMax,
+    OpenFhePythonColumnMaxCheckpoint,
     compile_checkpointable_binary_column_aggregate,
     load_prepared_allowed_group,
     load_binary_column_aggregate_checkpoint,
@@ -108,8 +108,8 @@ def main() -> None:
     parser.add_argument("--max-ring-dimension", type=int, default=16384)
     parser.add_argument(
         "--openfhe-dir",
-        default="/usr/local/lib/OpenFHE",
-        help="CMake package directory for the source-built OpenFHE install",
+        default=None,
+        help=argparse.SUPPRESS,
     )
     parser.add_argument(
         "--checkpoint-dir",
@@ -239,31 +239,28 @@ def main() -> None:
         print(f"[HEIR] saved {aggregate} checkpoint: {branch_dir}", flush=True)
         del branch, encrypted_parents, encrypted_result
 
-    # Exact MAX needs CKKS-to-FHEW switching. Compile the small MAX runner
-    # against the server's source-built OpenFHE installation; no pip
-    # ``openfhe`` Python package is required.
-    maximum = SourceBuiltOpenFheColumnMax(
+    # Exact MAX needs CKKS-to-FHEW switching. It runs directly through the
+    # official OpenFHE Python package; no local C++/CMake runner is built.
+    maximum = OpenFhePythonColumnMaxCheckpoint(
         input_scale=scale,
         ring_dimension=args.max_ring_dimension,
-        openfhe_dir=args.openfhe_dir,
     )
     maximum_dir = args.checkpoint_dir.resolve() / "maximum"
     if args.resume_checkpoints:
         print(f"[OpenFHE] reuse encrypted MAX checkpoint: {maximum_dir}", flush=True)
         max_result = maximum.load_completed(maximum_dir)
     else:
-        print("[OpenFHE] build/run source-installed CKKS-to-FHEW MAX", flush=True)
+        print("[OpenFHE-Python] setup/run CKKS-to-FHEW MAX", flush=True)
         max_result = maximum.run_subtract_max(
             group.installment,
             group.payment,
             output_dir=maximum_dir,
             overwrite=args.overwrite,
         )
-        print("[OpenFHE] encrypted MAX checkpoint ready", flush=True)
+        print("[OpenFHE-Python] encrypted MAX checkpoint ready", flush=True)
 
-    # Final client audit boundary only. The source-built MAX child decrypted
-    # only after maximum.ct was written; the aggregate children now do the
-    # same independently so OpenFHE's process-global key maps begin empty.
+    # Final client audit boundary only. MAX decrypts only after its compatible
+    # context, keys, parent/derived ciphertexts, and maximum.ct are stored.
     payment_diff_sum = _audit_one_checkpoint(branch_dirs["sum"])
     payment_diff_mean = _audit_one_checkpoint(branch_dirs["mean"])
     payment_diff_var = _audit_one_checkpoint(branch_dirs["variance"])

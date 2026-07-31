@@ -108,6 +108,21 @@ python3 code/heir/scripts/run_official_python_var_minmax_trial.py \
 
 This runs VAR with HEIR and MIN/MAX with OpenFHE Python.
 
+Checkpointed PAYMENT_DIFF benchmark:
+
+```bash
+python3 code/heir/scripts/run_payment_diff_checkpoint_e2e_benchmark.py \
+  --installments data/home_credit/installments_payments.csv \
+  --allowed-sk-id-curr 100001 \
+  --max-ring-dimension 16384 \
+  --relative-tolerance 1e-5 \
+  --output-dir benchmark_runs/payment_diff_openfhe_python_100001 \
+  --overwrite
+```
+
+Its MAX branch stores the completed OpenFHE-Python context/key/ciphertext
+bundle. It does not invoke CMake or require `--openfhe-dir`.
+
 Post-PSI PAYMENT_DIFF proof:
 
 ```bash

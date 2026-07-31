@@ -84,17 +84,18 @@ có tài nguyên hạn chế.
 | `OfficialOpenFheMinMax.eval_min()` | Tính encrypted MIN |
 | `OfficialOpenFheMinMax.eval_max()` | Tính encrypted MAX |
 | `OfficialOpenFheColumnOps` | Arithmetic và MIN/MAX trong một OpenFHE context |
-| `SourceBuiltOpenFheColumnMax` | MAX qua OpenFHE C++ được build trực tiếp trên server |
+| `OpenFhePythonColumnMaxCheckpoint` | SUBTRACT → MAX và lưu encrypted checkpoint qua official OpenFHE Python |
+| `SourceBuiltOpenFheColumnMax` | Legacy MAX qua OpenFHE C++ build trực tiếp; không còn dùng trong checkpoint E2E |
 
-Server hiện tại dùng:
+Checkpoint E2E hiện tại dùng:
 
 ```python
-SourceBuiltOpenFheColumnMax
+OpenFhePythonColumnMaxCheckpoint
 ```
 
-Nguyên nhân là package Python `openfhe` không tương thích với bản OpenFHE
-development đang được build và cài trên server. Vì vậy MAX được điều phối từ
-Python nhưng thực thi trong source-built C++ runner.
+Chạy trong `.venv-heir-python`, tách khỏi OpenFHE development được cài tại
+`/usr/local`. MAX được thực thi trực tiếp qua official `openfhe` Python package,
+không tạo CMake project và không build C++ runner.
 
 ## 4. API thuộc vòng đời HE
 
@@ -142,7 +143,7 @@ OfficialCkksBinaryColumnAggregate
 OfficialCkksBinaryColumnStatistics
 OfficialOpenFheMinMax
 OfficialOpenFheColumnOps
-SourceBuiltOpenFheColumnMax
+OpenFhePythonColumnMaxCheckpoint
 ```
 
 Quan hệ tổng quát:
@@ -159,7 +160,7 @@ flowchart LR
     HEIR --> GENERATED[Generated OpenFHE binding]
     GENERATED --> CKKS[OpenFHE CKKS runtime]
 
-    PY --> MAX[SourceBuiltOpenFheColumnMax]
+    PY --> MAX[OpenFhePythonColumnMaxCheckpoint]
     MAX --> SWITCH[OpenFHE CKKS↔FHEW runtime]
 
     CKKS --> RESULT[Encrypted results]

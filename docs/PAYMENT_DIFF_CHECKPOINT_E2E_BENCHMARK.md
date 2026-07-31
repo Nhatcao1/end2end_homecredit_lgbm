@@ -11,7 +11,7 @@ The external probe records the cold path:
 2. public CKKS scale selection;
 3. separate HEIR SUM, MEAN, and VAR compile/setup/encrypt/evaluate/checkpoint
    stages;
-4. source-built OpenFHE CKKS-to-FHEW MAX setup and evaluation;
+4. official OpenFHE-Python CKKS-to-FHEW MAX setup and evaluation;
 5. final isolated audit decrypts;
 6. final feature CSV creation.
 
@@ -58,11 +58,15 @@ python3 code/heir/scripts/run_payment_diff_checkpoint_e2e_benchmark.py \
   --installments data/home_credit/installments_payments.csv \
   --allowed-sk-id-curr 100001 100005 100013 \
   --max-ring-dimension 16384 \
-  --openfhe-dir /usr/local/lib/OpenFHE \
   --relative-tolerance 1e-5 \
   --output-dir benchmark_runs/payment_diff_checkpoint_e2e_benchmark_01 \
   --overwrite
 ```
+
+Activate `.venv-heir-python` first. The MAX branch imports the official
+`openfhe` Python package and does not compile or launch a local C++ runner.
+Its completed checkpoint stores the context, public key, automorphism keys,
+parent and derived ciphertexts, encrypted maximum, and client-only audit key.
 
 Multiple explicitly allowed IDs are executed strictly sequentially. The root
 `REPORT.md` and `accuracy_all_groups.csv` combine every group; each detailed

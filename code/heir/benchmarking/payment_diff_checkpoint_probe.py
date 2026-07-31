@@ -118,7 +118,10 @@ def main() -> None:
     source.add_argument("--prepared-group", type=Path)
     parser.add_argument("--bucket-size", type=int, required=True)
     parser.add_argument("--max-ring-dimension", type=int, required=True)
-    parser.add_argument("--openfhe-dir", required=True)
+    parser.add_argument(
+        "--openfhe-dir",
+        help=argparse.SUPPRESS,
+    )
     parser.add_argument("--checkpoint-dir", type=Path, required=True)
     parser.add_argument("--execution-json", type=Path, required=True)
     parser.add_argument("--overwrite", action="store_true")
@@ -141,7 +144,7 @@ def main() -> None:
         application.compile_checkpointable_binary_column_aggregate
     )
     original_save = application.save_binary_column_aggregate_checkpoint
-    original_maximum = application.SourceBuiltOpenFheColumnMax
+    original_maximum = application.OpenFhePythonColumnMaxCheckpoint
     original_audit = application._audit_one_checkpoint
 
     def timed_prepare(*call_args: Any, **call_kwargs: Any) -> Any:
@@ -232,7 +235,7 @@ def main() -> None:
     application.public_power_of_two_scale = timed_scale
     application.compile_checkpointable_binary_column_aggregate = timed_compile
     application.save_binary_column_aggregate_checkpoint = timed_save
-    application.SourceBuiltOpenFheColumnMax = timed_maximum
+    application.OpenFhePythonColumnMaxCheckpoint = timed_maximum
     application._audit_one_checkpoint = timed_audit
 
     application_argv = [
@@ -241,8 +244,6 @@ def main() -> None:
         str(args.bucket_size),
         "--max-ring-dimension",
         str(args.max_ring_dimension),
-        "--openfhe-dir",
-        args.openfhe_dir,
         "--checkpoint-dir",
         str(args.checkpoint_dir.resolve()),
     ]

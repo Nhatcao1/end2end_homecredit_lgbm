@@ -39,6 +39,9 @@ class PaymentDiffCheckpointE2EBenchmarkTest(unittest.TestCase):
         self.assertIn("_run_multiple_allowed_groups(", source)
         self.assertIn("prepare_allowed_group_csv(", source)
         self.assertIn("subprocess.run(", source)
+        self.assertIn("official OpenFHE Python package", source)
+        self.assertNotIn('"--openfhe-dir", openfhe_dir', source)
+        self.assertNotIn("cmake_configure", source)
         self.assertNotIn(
             "compile_checkpointable_binary_column_aggregate",
             source,

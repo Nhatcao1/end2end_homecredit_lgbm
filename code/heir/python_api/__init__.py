@@ -73,6 +73,9 @@ from code.heir.python_api.backend_policy import (
 from code.heir.python_api.openfhe_python_arithmetic import (
     OpenFhePythonBinaryColumn,
 )
+from code.heir.python_api.openfhe_python_max_checkpoint import (
+    OpenFhePythonColumnMaxCheckpoint,
+)
 
 __all__ = [
     "EncryptedMinMax",
@@ -91,6 +94,7 @@ __all__ = [
     "OfficialOpenFheColumnOps",
     "OfficialOpenFheMinMax",
     "OpenFhePythonBinaryColumn",
+    "OpenFhePythonColumnMaxCheckpoint",
     "OpaquePaymentGroup",
     "PostPsiGroupLayout",
     "PreparedAllowedGroup",

@@ -28,7 +28,7 @@ class PaymentDiffCheckpointE2EExampleTest(unittest.TestCase):
             source,
         )
         self.assertIn('("sum", "mean", "variance")', source)
-        self.assertIn("SourceBuiltOpenFheColumnMax(", source)
+        self.assertIn("OpenFhePythonColumnMaxCheckpoint(", source)
         self.assertIn("maximum.run_subtract_max(", source)
         self.assertIn("maximum.load_completed(", source)
         self.assertIn("PAYMENT_DIFF_MEAN", source)
@@ -39,7 +39,9 @@ class PaymentDiffCheckpointE2EExampleTest(unittest.TestCase):
             source,
         )
         self.assertIn("subprocess.run(", source)
-        self.assertIn("--openfhe-dir", source)
+        self.assertIn("official OpenFHE Python package", source)
+        self.assertNotIn("SourceBuiltOpenFheColumnMax(", source)
+        self.assertNotIn('["cmake"', source.lower())
         self.assertNotIn("import openfhe", source)
         self.assertIn("--resume-checkpoints", source)
         self.assertNotIn("REPORT.md", source)

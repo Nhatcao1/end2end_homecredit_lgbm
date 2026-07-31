@@ -52,7 +52,6 @@ def _run_exact_example(
     execution_json: Path,
     bucket_size: int,
     max_ring_dimension: int,
-    openfhe_dir: str,
     log_path: Path,
 ) -> tuple[float, list[str]]:
     command = [
@@ -62,8 +61,6 @@ def _run_exact_example(
         str(bucket_size),
         "--max-ring-dimension",
         str(max_ring_dimension),
-        "--openfhe-dir",
-        openfhe_dir,
         "--checkpoint-dir",
         str(checkpoint_dir),
         "--execution-json",
@@ -324,7 +321,7 @@ truncated or split.
 | {preparation["source_rows_scanned"]} | {preparation["real_rows"]} | {preparation["bucket_size"]} | {preparation["mask_ones"]} | {preparation["mask_zeroes"]} |"""
         flow = (
             "`client allow + complete mask CSV → HEIR SUM/MEAN/VAR branches → "
-            "encrypted checkpoints → source-built OpenFHE CKKS↔FHEW MAX → "
+            "encrypted checkpoints → OpenFHE-Python CKKS↔FHEW MAX → "
             "final audit CSV`"
         )
         preparation_stage = (
@@ -343,7 +340,7 @@ measurement. Reading its bridge and selecting the applicant group are included.
 | {exact["input"]["source_rows_scanned"]} | {exact["input"]["post_psi_applicants"]} | 1 | {exact["input"]["real_rows"]} | {exact["input"]["bucket_size"]} |"""
         flow = (
             "`post-PSI layout → HEIR SUM/MEAN/VAR branches → encrypted "
-            "checkpoints → source-built OpenFHE CKKS↔FHEW MAX → final audit CSV`"
+            "checkpoints → OpenFHE-Python CKKS↔FHEW MAX → final audit CSV`"
         )
         preparation_stage = (
             f'| Client post-PSI scan/select/pad | '
@@ -419,9 +416,12 @@ only in the final isolated audit process.
 
 ## MAX branch latency
 
-| CMake configure | CMake build | Context/switch-key setup | Parent encrypt | PAYMENT_DIFF | MAX switch | CT serialize | Final audit | MAX branch total |
-|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| {_seconds(maximum, "cmake_configure"):.9f} | {_seconds(maximum, "cmake_build"):.9f} | {_seconds(maximum, "context_and_switching_key_setup"):.9f} | {_seconds(maximum, "parent_encrypt"):.9f} | {_seconds(maximum, "derived_subtraction"):.9f} | {_seconds(maximum, "maximum_switch"):.9f} | {_seconds(maximum, "ciphertext_serialize"):.9f} | {_seconds(maximum, "audit_decrypt"):.9f} | {_seconds(maximum, "branch_total_seconds"):.9f} |
+MAX runs through the official OpenFHE Python package. No local C++ source,
+CMake configure, or CMake build is part of this branch.
+
+| Context/switch-key setup | Parent encrypt | PAYMENT_DIFF | MAX switch | Checkpoint serialize | Final audit | MAX branch total |
+|---:|---:|---:|---:|---:|---:|---:|
+| {_seconds(maximum, "context_and_switching_key_setup"):.9f} | {_seconds(maximum, "parent_encrypt"):.9f} | {_seconds(maximum, "derived_subtraction"):.9f} | {_seconds(maximum, "maximum_switch"):.9f} | {_seconds(maximum, "checkpoint_serialize"):.9f} | {_seconds(maximum, "audit_decrypt"):.9f} | {_seconds(maximum, "branch_total_seconds"):.9f} |
 
 ## Complete workload latency
 
@@ -510,8 +510,8 @@ parallel.
 
 ## HE output-branch latency
 
-Branch time includes final audit for SUM/MEAN/VAR. MAX includes its
-source-built OpenFHE branch and final audit.
+Branch time includes final audit for SUM/MEAN/VAR. MAX includes its official
+OpenFHE-Python branch and final audit.
 
 | Sequence | Allowed SK_ID_CURR | SUM (s) | MEAN (s) | VAR (s) | MAX (s) |
 |---:|---:|---:|---:|---:|---:|
@@ -563,8 +563,6 @@ def _run_multiple_allowed_groups(
             allowed,
             "--max-ring-dimension",
             str(args.max_ring_dimension),
-            "--openfhe-dir",
-            args.openfhe_dir,
             "--relative-tolerance",
             str(args.relative_tolerance),
             "--output-dir",
@@ -728,7 +726,10 @@ def main() -> None:
         help="legacy post-PSI group-selection mode",
     )
     parser.add_argument("--max-ring-dimension", type=int, default=16384)
-    parser.add_argument("--openfhe-dir", default="/usr/local/lib/OpenFHE")
+    parser.add_argument(
+        "--openfhe-dir",
+        help=argparse.SUPPRESS,
+    )
     parser.add_argument("--relative-tolerance", type=float, default=1e-5)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--overwrite", action="store_true")
@@ -833,7 +834,6 @@ def main() -> None:
         execution_json=exact_execution_path,
         bucket_size=effective_bucket_size,
         max_ring_dimension=args.max_ring_dimension,
-        openfhe_dir=args.openfhe_dir,
         log_path=root / "exact_example.log",
     )
     exact_execution = json.loads(
