@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Simple synthetic-VND CT+CT magnitude, latency, and accuracy benchmark."""
+"""Simple synthetic-VND BGV CT+CT latency and exactness benchmark."""
 
 from __future__ import annotations
 
@@ -7,7 +7,6 @@ import argparse
 import csv
 from importlib.metadata import PackageNotFoundError, version
 import json
-import math
 from pathlib import Path
 import shutil
 from statistics import median
@@ -20,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[4]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from code.openfhe_direct import OpenFHECreditSession
+from code.openfhe_direct import OpenFHEBgvSession
 
 
 def _timed(
@@ -33,9 +32,9 @@ def _timed(
     return result, time.perf_counter() - started
 
 
-def _read_pairs(path: Path, expected_count: int) -> tuple[list[float], list[float]]:
-    left: list[float] = []
-    right: list[float] = []
+def _read_pairs(path: Path, expected_count: int) -> tuple[list[int], list[int]]:
+    left: list[int] = []
+    right: list[int] = []
     with path.open("r", encoding="utf-8-sig", newline="") as handle:
         reader = csv.DictReader(handle)
         required = {"LEFT_VALUE", "RIGHT_VALUE"}
@@ -43,10 +42,8 @@ def _read_pairs(path: Path, expected_count: int) -> tuple[list[float], list[floa
         if missing:
             raise ValueError(f"dataset is missing columns: {sorted(missing)}")
         for row in reader:
-            left_value = float(row["LEFT_VALUE"])
-            right_value = float(row["RIGHT_VALUE"])
-            if not math.isfinite(left_value) or not math.isfinite(right_value):
-                raise ValueError(f"dataset contains non-finite values: {path}")
+            left_value = int(row["LEFT_VALUE"])
+            right_value = int(row["RIGHT_VALUE"])
             left.append(left_value)
             right.append(right_value)
     if len(left) != expected_count:
@@ -64,9 +61,9 @@ def _openfhe_version() -> str:
 
 
 def _numpy_reference_add(
-    left: list[float],
-    right: list[float],
-) -> tuple[list[float], float]:
+    left: list[int],
+    right: list[int],
+) -> tuple[list[int], float]:
     """Time only optimized NumPy addition, excluding array preparation."""
     try:
         import numpy as np
@@ -75,8 +72,8 @@ def _numpy_reference_add(
             "the CT+CT plaintext baseline requires NumPy; install it in the "
             "active environment with: python3 -m pip install numpy"
         ) from error
-    left_array = np.asarray(left, dtype=np.float64)
-    right_array = np.asarray(right, dtype=np.float64)
+    left_array = np.asarray(left, dtype=np.int64)
+    right_array = np.asarray(right, dtype=np.int64)
     started = time.perf_counter()
     expected_array = np.add(left_array, right_array)
     return expected_array.tolist(), time.perf_counter() - started
@@ -84,38 +81,36 @@ def _numpy_reference_add(
 
 def _run_repetition(
     *,
-    session: OpenFHECreditSession,
-    left: list[float],
-    right: list[float],
+    session: OpenFHEBgvSession,
+    left: list[int],
+    right: list[int],
     slot_count: int,
     repetition: int,
-    absolute_tolerance: float,
-    relative_tolerance: float,
 ) -> dict[str, Any]:
     # NumPy is the optimized plaintext baseline. Pandas would ultimately use
     # this same vectorized addition but would also time Series/index overhead.
     expected, python_seconds = _numpy_reference_add(left, right)
 
-    observed: list[float] = []
+    observed: list[int] = []
     encrypt_seconds = evaluation_seconds = decrypt_seconds = 0.0
     for start in range(0, len(left), slot_count):
         left_block = left[start : start + slot_count]
         right_block = right[start : start + slot_count]
-        # HE API call: OpenFHECreditSession.encrypt(left values)
+        # HE API call: OpenFHEBgvSession.encrypt(left values)
         left_ct, elapsed = _timed(session.encrypt, left_block)
         encrypt_seconds += elapsed
-        # HE API call: OpenFHECreditSession.encrypt(right values)
+        # HE API call: OpenFHEBgvSession.encrypt(right values)
         right_ct, elapsed = _timed(session.encrypt, right_block)
         encrypt_seconds += elapsed
-        # HE API call: OpenFHECreditSession.add(left_ct, right_ct)
+        # HE API call: OpenFHEBgvSession.add(left_ct, right_ct)
         result_ct, elapsed = _timed(session.add, left_ct, right_ct)
         evaluation_seconds += elapsed
-        # HE API call: OpenFHECreditSession.decrypt(final CT+CT result)
+        # HE API call: OpenFHEBgvSession.decrypt(final CT+CT result)
         result, elapsed = _timed(session.decrypt, result_ct)
         decrypt_seconds += elapsed
         if not isinstance(result, list):
             raise TypeError("CT+CT must decrypt to a vector")
-        observed.extend(float(value) for value in result)
+        observed.extend(int(value) for value in result)
 
     absolute_errors = [
         abs(actual - reference)
@@ -128,10 +123,7 @@ def _run_repetition(
     maximum_absolute = max(absolute_errors)
     maximum_relative = max(relative_errors)
     mean_absolute = sum(absolute_errors) / len(absolute_errors)
-    passed = (
-        maximum_absolute <= absolute_tolerance
-        or maximum_relative <= relative_tolerance
-    )
+    passed = maximum_absolute == 0
     online_seconds = encrypt_seconds + evaluation_seconds
     return {
         "repetition": repetition,
@@ -159,22 +151,21 @@ def _write_report(
     repetitions: int,
     setup_seconds: float,
     ring_dimension: int,
+    plaintext_modulus: int,
     rows: list[dict[str, Any]],
-    left: list[float],
-    right: list[float],
-    expected: list[float],
-    absolute_tolerance: float,
-    relative_tolerance: float,
+    left: list[int],
+    right: list[int],
+    expected: list[int],
 ) -> None:
     def metric(name: str) -> float:
         return median(float(row[name]) for row in rows)
 
     status = "PASS" if all(row["status"] == "PASS" for row in rows) else "FAIL"
     lines = [
-        "# Synthetic VND CT+CT benchmark",
+        "# Synthetic VND BGV CT+CT benchmark",
         "",
-        "This isolated benchmark adds two encrypted synthetic VND vectors "
-        "through `OpenFHECreditSession.add()`. It is unrelated "
+        "This isolated benchmark adds two encrypted integer VND vectors "
+        "through `OpenFHEBgvSession.add()`. It is unrelated "
         "to the credit feature pipeline.",
         "",
         f"- Vector length: `{value_count}` values in A and B",
@@ -182,14 +173,15 @@ def _write_report(
         f"- Ciphertext chunks per vector: "
         f"`{(value_count + slot_count - 1) // slot_count}`",
         f"- Ring dimension: `{ring_dimension or 'OpenFHE-selected'}`",
+        f"- BGV plaintext modulus: `{plaintext_modulus}`",
+        f"- Maximum positive centered value: `{plaintext_modulus // 2}`",
         f"- Repetitions: `{repetitions}`",
         f"- Observed operand range: `{min(min(left), min(right)):.0f}` to "
         f"`{max(max(left), max(right)):.0f}` VND",
         f"- Expected-result range: `{min(expected):.0f}` to "
         f"`{max(expected):.0f}` VND",
-        "- Plaintext reference: `numpy.add(float64)`",
-        f"- Acceptance: absolute error <= `{absolute_tolerance:g}` OR "
-        f"relative error <= `{relative_tolerance:g}`",
+        "- Plaintext reference: `numpy.add(int64)`",
+        "- Acceptance: every decrypted value must exactly equal A+B",
         f"- Context/key setup: `{setup_seconds:.9f}` seconds",
         f"- Python executable: `{sys.executable}`",
         f"- OpenFHE Python: `{_openfhe_version()}`",
@@ -211,10 +203,10 @@ def _write_report(
         "`HE online` is parent encryption plus CT+CT evaluation. Setup and "
         "final audit decryption are reported separately.",
         "",
-        "All generated integer operands and plaintext sums are exactly "
-        "representable in float64 at this configured magnitude. Therefore, "
-        "the reported numerical error measures the approximate CKKS route, "
-        "not integer overflow in the NumPy reference.",
+        "The configured minimum and maximum are generation boundaries, not "
+        "repeated operands. Values are deterministic random integers inside "
+        "that range. BGV is exact while the result remains inside the "
+        "centered plaintext-modulus range.",
     ]
     (root / "REPORT.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -226,11 +218,8 @@ def run_add_count(
     slot_count: int,
     repetitions: int,
     multiplicative_depth: int,
-    scaling_mod_size: int,
-    first_mod_size: int,
+    plaintext_modulus: int,
     ring_dimension: int,
-    absolute_tolerance: float,
-    relative_tolerance: float,
     output_dir: Path,
     overwrite: bool,
     _session_factory: Callable[..., Any] | None = None,
@@ -249,15 +238,19 @@ def run_add_count(
     root.mkdir(parents=True)
     left, right = _read_pairs(dataset_path.resolve(), value_count)
     expected = [a + b for a, b in zip(left, right)]
+    if max(expected) >= plaintext_modulus // 2:
+        raise ValueError(
+            "plaintext_modulus is unsafe: maximum A+B must be below half "
+            "the modulus for positive centered BGV decoding"
+        )
 
-    factory = _session_factory or OpenFHECreditSession
-    # HE API call: OpenFHECreditSession(...) creates context and keys.
+    factory = _session_factory or OpenFHEBgvSession
+    # HE API call: OpenFHEBgvSession(...) creates context and keys.
     session, setup_seconds = _timed(
         factory,
         slot_count=slot_count,
+        plaintext_modulus=plaintext_modulus,
         multiplicative_depth=multiplicative_depth,
-        scaling_mod_size=scaling_mod_size,
-        first_mod_size=first_mod_size,
         ring_dimension=ring_dimension,
     )
     rows = [
@@ -267,20 +260,21 @@ def run_add_count(
             right=right,
             slot_count=slot_count,
             repetition=repetition,
-            absolute_tolerance=absolute_tolerance,
-            relative_tolerance=relative_tolerance,
         )
         for repetition in range(1, repetitions + 1)
     ]
     status = "PASS" if all(row["status"] == "PASS" for row in rows) else "FAIL"
     summary = {
         "status": status,
-        "backend": "official OpenFHE Python via OpenFHECreditSession",
+        "scheme": "BGV",
+        "backend": "official OpenFHE Python via OpenFHEBgvSession",
         "operation": "CT+CT",
         "session_method": "add",
         "credit_feature_workload": False,
         "value_count": value_count,
         "slot_count": slot_count,
+        "plaintext_modulus": plaintext_modulus,
+        "centered_capacity": plaintext_modulus // 2,
         "repetitions": repetitions,
         "setup_seconds": setup_seconds,
         "python_executable": sys.executable,
@@ -307,12 +301,11 @@ def run_add_count(
         repetitions=repetitions,
         setup_seconds=setup_seconds,
         ring_dimension=ring_dimension,
+        plaintext_modulus=plaintext_modulus,
         rows=rows,
         left=left,
         right=right,
         expected=expected,
-        absolute_tolerance=absolute_tolerance,
-        relative_tolerance=relative_tolerance,
     )
     return summary
 
@@ -324,11 +317,8 @@ def run_add_matrix(
     slot_count: int,
     repetitions: int,
     multiplicative_depth: int,
-    scaling_mod_size: int,
-    first_mod_size: int,
+    plaintext_modulus: int,
     ring_dimension: int,
-    absolute_tolerance: float,
-    relative_tolerance: float,
     output_dir: Path,
     overwrite: bool,
     _session_factory: Callable[..., Any] | None = None,
@@ -355,21 +345,18 @@ def run_add_matrix(
             slot_count=slot_count,
             repetitions=repetitions,
             multiplicative_depth=multiplicative_depth,
-            scaling_mod_size=scaling_mod_size,
-            first_mod_size=first_mod_size,
+            plaintext_modulus=plaintext_modulus,
             ring_dimension=ring_dimension,
-            absolute_tolerance=absolute_tolerance,
-            relative_tolerance=relative_tolerance,
             output_dir=child,
             overwrite=False,
             _session_factory=_session_factory,
         )
         runs.append({"value_count": count, "status": result["status"], "directory": child.name})
     overall = "PASS" if all(run["status"] == "PASS" for run in runs) else "FAIL"
-    summary = {"status": overall, "operation": "CT+CT", "runs": runs}
+    summary = {"status": overall, "scheme": "BGV", "operation": "CT+CT", "runs": runs}
     (root / "summary.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
     (root / "REPORT.md").write_text(
-        "# Synthetic VND CT+CT matrix\n\n"
+        "# Synthetic VND BGV CT+CT matrix\n\n"
         + "\n".join(
             f"- Vector length {run['value_count']}: "
             f"[{run['status']}]({run['directory']}/REPORT.md)"
@@ -393,12 +380,9 @@ def main() -> None:
     )
     parser.add_argument("--slot-count", type=int, default=8192)
     parser.add_argument("--repetitions", type=int, default=5)
-    parser.add_argument("--multiplicative-depth", type=int, default=2)
-    parser.add_argument("--scaling-mod-size", type=int, default=50)
-    parser.add_argument("--first-mod-size", type=int, default=60)
+    parser.add_argument("--multiplicative-depth", type=int, default=1)
+    parser.add_argument("--plaintext-modulus", type=int, default=1_000_112_129)
     parser.add_argument("--ring-dimension", type=int, default=16384)
-    parser.add_argument("--absolute-tolerance", type=float, default=1e-6)
-    parser.add_argument("--relative-tolerance", type=float, default=1e-5)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--overwrite", action="store_true")
     args = parser.parse_args()
@@ -409,11 +393,8 @@ def main() -> None:
         slot_count=args.slot_count,
         repetitions=args.repetitions,
         multiplicative_depth=args.multiplicative_depth,
-        scaling_mod_size=args.scaling_mod_size,
-        first_mod_size=args.first_mod_size,
+        plaintext_modulus=args.plaintext_modulus,
         ring_dimension=args.ring_dimension,
-        absolute_tolerance=args.absolute_tolerance,
-        relative_tolerance=args.relative_tolerance,
         output_dir=args.output_dir,
         overwrite=args.overwrite,
     )

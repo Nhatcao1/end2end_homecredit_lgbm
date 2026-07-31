@@ -5,6 +5,7 @@ from code.openfhe_direct.session import (
     CovarianceComponents,
     EncryptedScalar,
     EncryptedVector,
+    OpenFHEBgvSession,
     OpenFHECreditSession,
     VarianceComponents,
 )
@@ -15,6 +16,7 @@ __all__ = [
     "CovarianceComponents",
     "EncryptedScalar",
     "EncryptedVector",
+    "OpenFHEBgvSession",
     "OpenFHECreditSession",
     "PreparedParentColumns",
     "VarianceComponents",

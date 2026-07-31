@@ -138,7 +138,7 @@ risk_score
 | Real-data primitive matrix | `code/openfhe_direct/benchmarks/primitives.py`; calls only session methods | Complete |
 | Raw-installments global SUM/MEAN | `code/openfhe_direct/benchmarks/payment_diff_sum_mean.py`; derives encrypted PAYMENT_DIFF and merges every ciphertext chunk | Complete |
 | Population-backed multi-group benchmark | Selects from all prepared opaque groups, reassembles complete groups, then calls only `OpenFHECreditSession` methods | Complete |
-| Synthetic VND CT+CT | `benchmarks/synthetic_vnd/add.py`; session-only addition with simple magnitude/latency/accuracy report | Complete |
+| Synthetic VND BGV CT+CT | `benchmarks/synthetic_vnd/add.py`; exact-integer session addition with simple magnitude/latency/accuracy report | Complete |
 
 The low-level scheme-switching helper remains private to the session layer.
 Benchmarks do not import it or copy its configuration.
@@ -211,8 +211,10 @@ The synthetic VND benchmark additionally must:
 - remain a separate, non-credit benchmark;
 - generate deterministic aligned integer vector pairs for arbitrary lengths;
 - default to inclusive values from 100,000 through 200,000,000;
-- test CT+CT only through `OpenFHECreditSession.add()`;
-- use NumPy vector addition as the optimized plaintext reference;
+- test CT+CT only through `OpenFHEBgvSession.add()`;
+- use NumPy `int64` vector addition as the optimized plaintext reference;
+- require every audited BGV result to equal A+B exactly;
+- reject ranges whose sums exceed the centered plaintext-modulus capacity;
 - report setup, NumPy, encryption, CT+CT evaluation, audit decryption,
   throughput, slowdown, MAE, maximum error, and pass/fail in a compact file;
 - contain no direct OpenFHE `Eval*` call and no HEIR path.

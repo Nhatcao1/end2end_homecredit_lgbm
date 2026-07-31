@@ -59,6 +59,137 @@ class CorrelationComponents:
     sum_xy: EncryptedScalar
 
 
+class OpenFHEBgvSession:
+    """One exact-integer BGV context for packed ciphertext arithmetic."""
+
+    def __init__(
+        self,
+        *,
+        slot_count: int,
+        plaintext_modulus: int = 1_000_112_129,
+        multiplicative_depth: int = 1,
+        ring_dimension: int = 16_384,
+        _openfhe_module: Any | None = None,
+    ) -> None:
+        if slot_count < 2:
+            raise ValueError("slot_count must be at least two")
+        if plaintext_modulus < 3:
+            raise ValueError("plaintext_modulus must be at least three")
+        if multiplicative_depth < 1:
+            raise ValueError("multiplicative_depth must be positive")
+
+        if _openfhe_module is not None:
+            of = _openfhe_module
+        else:
+            try:
+                of = importlib.import_module("openfhe")
+            except ModuleNotFoundError as error:
+                raise RuntimeError(
+                    "the official OpenFHE Python binding is not installed in "
+                    "this interpreter"
+                ) from error
+
+        parameters = of.CCParamsBGVRNS()
+        parameters.SetPlaintextModulus(plaintext_modulus)
+        parameters.SetMultiplicativeDepth(multiplicative_depth)
+        parameters.SetBatchSize(slot_count)
+        if ring_dimension:
+            parameters.SetRingDim(ring_dimension)
+
+        context = of.GenCryptoContext(parameters)
+        for feature in (of.PKE, of.KEYSWITCH, of.LEVELEDSHE):
+            context.Enable(feature)
+
+        required_methods = (
+            "MakePackedPlaintext",
+            "Encrypt",
+            "Decrypt",
+            "EvalAdd",
+        )
+        missing = [
+            name for name in required_methods if not hasattr(context, name)
+        ]
+        if missing:
+            raise RuntimeError(
+                f"installed OpenFHE Python is missing BGV methods: {missing}"
+            )
+
+        keys = context.KeyGen()
+        self.slot_count = slot_count
+        self.plaintext_modulus = plaintext_modulus
+        self.centered_capacity = plaintext_modulus // 2
+        self._session_id = id(self)
+        self._context = context
+        self._public_key = keys.publicKey
+        self._secret_key = keys.secretKey
+
+    def encrypt(self, values: Sequence[int]) -> EncryptedVector:
+        """Encode and encrypt one packed integer vector."""
+        materialized = []
+        for value in values:
+            integer = int(value)
+            if integer != value:
+                raise ValueError("BGV values must be integers")
+            if abs(integer) >= self.centered_capacity:
+                raise ValueError(
+                    "BGV value exceeds the centered plaintext-modulus range"
+                )
+            materialized.append(integer)
+        if not 1 <= len(materialized) <= self.slot_count:
+            raise ValueError(
+                f"expected 1..{self.slot_count} values; "
+                f"received {len(materialized)}"
+            )
+        plaintext = self._context.MakePackedPlaintext(materialized)
+        return EncryptedVector(
+            self._context.Encrypt(self._public_key, plaintext),
+            len(materialized),
+            self._session_id,
+        )
+
+    def add(
+        self,
+        left: EncryptedVector,
+        right: EncryptedVector,
+    ) -> EncryptedVector:
+        """Exact packed ciphertext + ciphertext modulo plaintext modulus."""
+        self._require_vector_pair(left, right)
+        return EncryptedVector(
+            self._context.EvalAdd(left.ciphertext, right.ciphertext),
+            left.length,
+            self._session_id,
+        )
+
+    def decrypt(self, encrypted: EncryptedVector) -> list[int]:
+        """Decrypt one final packed integer vector for the audit boundary."""
+        self._require_vector(encrypted)
+        plaintext = self._context.Decrypt(
+            self._secret_key,
+            encrypted.ciphertext,
+        )
+        plaintext.SetLength(encrypted.length)
+        return [
+            int(value)
+            for value in plaintext.GetPackedValue()[: encrypted.length]
+        ]
+
+    def _require_vector(self, encrypted: EncryptedVector) -> None:
+        if not isinstance(encrypted, EncryptedVector):
+            raise TypeError("BGV session expects an encrypted vector")
+        if encrypted.session_id != self._session_id:
+            raise ValueError("ciphertext belongs to another OpenFHE session")
+
+    def _require_vector_pair(
+        self,
+        left: EncryptedVector,
+        right: EncryptedVector,
+    ) -> None:
+        self._require_vector(left)
+        self._require_vector(right)
+        if left.length != right.length:
+            raise ValueError("encrypted vector lengths do not match")
+
+
 class OpenFHECreditSession:
     """One local CKKS context exposing small ciphertext operations.
 
