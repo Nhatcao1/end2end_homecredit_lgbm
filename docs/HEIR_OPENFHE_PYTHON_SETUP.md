@@ -81,7 +81,7 @@ each calculation.
 The simplified API benchmark uses only the official OpenFHE Python wrapper:
 
 ```bash
-python3 code/openfhe_direct/benchmark.py \
+python3 code/openfhe_direct/benchmarks/api_latency.py \
   --prepared-group data/prepared/examples/payment_diff_demo_group.csv \
   --repetitions 5 \
   --multiplicative-depth 4 \

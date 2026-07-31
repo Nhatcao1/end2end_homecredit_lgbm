@@ -37,7 +37,7 @@ Audit decryption is excluded from method latency.
 ```bash
 source .venv-heir-python/bin/activate
 
-python3 code/openfhe_direct/benchmark.py \
+python3 code/openfhe_direct/benchmarks/api_latency.py \
   --prepared-group data/prepared/examples/payment_diff_demo_group.csv \
   --repetitions 5 \
   --multiplicative-depth 4 \

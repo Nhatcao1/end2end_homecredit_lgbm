@@ -47,6 +47,27 @@ maximum = session.decrypt(maximum_ct)
 | Benchmark files | Load prepared inputs, call session methods, record latency, audit accuracy, write reports |
 | Example files | Show a readable application flow using the public session API |
 
+## Package layout
+
+```text
+code/openfhe_direct/
+├── session.py                 # the only public HE implementation
+├── prepared_data.py           # reusable client-side input loading
+├── credit_rating_example.py
+└── benchmarks/
+    ├── api_latency.py
+    ├── single_function.py
+    ├── primitives.py
+    ├── payment_diff_sum_mean.py
+    ├── payment_diff_multigroup.py
+    └── synthetic_vnd/
+        ├── generate_dataset.py
+        └── subtract.py
+```
+
+The `synthetic_vnd` package is a niche arithmetic test. It must not import or
+call PAYMENT_DIFF, installments grouping, PSI, or credit-model code.
+
 HEIR-generated MLIR/C++ runners under `code/heir/scripts/` are retained as
 historical experiments. They are not the implementation path for new direct
 OpenFHE-Python benchmarks.
@@ -114,9 +135,10 @@ risk_score
 | Variance/covariance/correlation components | In `code/openfhe_direct/session.py` | Keep |
 | Weighted sum/risk score | In `code/openfhe_direct/session.py` | Keep |
 | CKKS↔FHEW minimum/maximum | Public methods in `code/openfhe_direct/session.py` | Complete |
-| Real-data primitive matrix | `code/openfhe_direct/primitive_benchmark.py`; calls only session methods | Complete |
-| Raw-installments global SUM/MEAN | `code/openfhe_direct/payment_diff_sum_mean_benchmark.py`; derives encrypted PAYMENT_DIFF and merges every ciphertext chunk | Complete |
+| Real-data primitive matrix | `code/openfhe_direct/benchmarks/primitives.py`; calls only session methods | Complete |
+| Raw-installments global SUM/MEAN | `code/openfhe_direct/benchmarks/payment_diff_sum_mean.py`; derives encrypted PAYMENT_DIFF and merges every ciphertext chunk | Complete |
 | Population-backed multi-group benchmark | Selects from all prepared opaque groups, reassembles complete groups, then calls only `OpenFHECreditSession` methods | Complete |
+| Synthetic VND CT−CT | `benchmarks/synthetic_vnd/subtract.py`; session-only subtraction with simple latency/accuracy report | Complete |
 
 The low-level scheme-switching helper remains private to the session layer.
 Benchmarks do not import it or copy its configuration.
@@ -137,12 +159,12 @@ Benchmarks do not import it or copy its configuration.
 ## Benchmark rollout
 
 1. Primitive matrix over real parent columns:
-   `code/openfhe_direct/primitive_benchmark.py` calls `add`, `subtract`,
+   `code/openfhe_direct/benchmarks/primitives.py` calls `add`, `subtract`,
    `multiply`, `add_public_vector`, and `multiply_public_vector`. Each
    operation runs independently through `OpenFHECreditSession`; one shared
    context is reused within each row-count run.
 2. Independent reductions:
-   `code/openfhe_direct/payment_diff_sum_mean_benchmark.py` reads the raw
+   `code/openfhe_direct/benchmarks/payment_diff_sum_mean.py` reads the raw
    installments CSV separately for SUM and MEAN. It derives PAYMENT_DIFF
    after parent encryption and returns one global encrypted result across all
    runtime chunks. Variance remains a separate benchmark.
@@ -183,3 +205,13 @@ The raw-installments SUM/MEAN benchmark additionally must:
 - remove missing/non-finite parent pairs only at the client input boundary;
 - merge all encrypted chunk results into one global result;
 - compare that result with the equivalent Python PAYMENT_DIFF SUM or MEAN.
+
+The synthetic VND benchmark additionally must:
+
+- remain a separate, non-credit benchmark;
+- generate deterministic aligned integer pairs for arbitrary row counts;
+- default to inclusive values from 1,000,000 through 100,000,000;
+- test CT−CT only through `OpenFHECreditSession.subtract()`;
+- report setup, Python, encryption, CT−CT evaluation, audit decryption,
+  throughput, slowdown, MAE, maximum error, and pass/fail in a compact file;
+- contain no direct OpenFHE `Eval*` call and no HEIR path.

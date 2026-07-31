@@ -2,7 +2,9 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from code.openfhe_direct.batch_benchmark import run_batch_benchmark
+from code.openfhe_direct.benchmarks.single_function import (
+    run_batch_benchmark,
+)
 from code.openfhe_direct.prepared_data import load_prepared_parent_columns
 from tests.test_openfhe_direct_credit_api import _OpenFHE
 

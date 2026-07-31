@@ -5,11 +5,12 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 BENCHMARKS = (
-    ROOT / "code/openfhe_direct/benchmark.py",
-    ROOT / "code/openfhe_direct/batch_benchmark.py",
-    ROOT / "code/openfhe_direct/payment_diff_sum_mean_benchmark.py",
-    ROOT / "code/openfhe_direct/primitive_benchmark.py",
-    ROOT / "code/openfhe_direct/multigroup_e2e_benchmark.py",
+    ROOT / "code/openfhe_direct/benchmarks/api_latency.py",
+    ROOT / "code/openfhe_direct/benchmarks/single_function.py",
+    ROOT / "code/openfhe_direct/benchmarks/payment_diff_sum_mean.py",
+    ROOT / "code/openfhe_direct/benchmarks/primitives.py",
+    ROOT / "code/openfhe_direct/benchmarks/payment_diff_multigroup.py",
+    ROOT / "code/openfhe_direct/benchmarks/synthetic_vnd/subtract.py",
 )
 
 

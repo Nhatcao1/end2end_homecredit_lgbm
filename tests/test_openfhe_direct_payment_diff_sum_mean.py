@@ -4,7 +4,7 @@ from tempfile import TemporaryDirectory
 import unittest
 
 from code.openfhe_direct import OpenFHECreditSession
-from code.openfhe_direct.payment_diff_sum_mean_benchmark import (
+from code.openfhe_direct.benchmarks.payment_diff_sum_mean import (
     load_raw_installment_parents,
     run_payment_diff_sum_mean_matrix,
 )
@@ -84,7 +84,7 @@ class OpenFHEDirectPaymentDiffSumMeanTest(unittest.TestCase):
     def test_benchmark_uses_session_api_without_heir_or_eval_calls(self):
         source = (
             Path(__file__).resolve().parents[1]
-            / "code/openfhe_direct/payment_diff_sum_mean_benchmark.py"
+            / "code/openfhe_direct/benchmarks/payment_diff_sum_mean.py"
         ).read_text(encoding="utf-8")
 
         self.assertIn("OpenFHECreditSession", source)

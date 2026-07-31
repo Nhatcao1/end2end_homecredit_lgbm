@@ -4,7 +4,7 @@ from statistics import variance
 from tempfile import TemporaryDirectory
 import unittest
 
-from code.openfhe_direct.multigroup_e2e_benchmark import (
+from code.openfhe_direct.benchmarks.payment_diff_multigroup import (
     run_multigroup_benchmark,
 )
 from code.openfhe_direct.prepared_data import (
@@ -223,7 +223,8 @@ class OpenFHEDirectMultigroupE2ETest(unittest.TestCase):
 
     def test_benchmark_contains_no_direct_he_implementation(self):
         source = (
-            ROOT / "code/openfhe_direct/multigroup_e2e_benchmark.py"
+            ROOT
+            / "code/openfhe_direct/benchmarks/payment_diff_multigroup.py"
         ).read_text(encoding="utf-8")
 
         self.assertIn("OpenFHECreditSession", source)

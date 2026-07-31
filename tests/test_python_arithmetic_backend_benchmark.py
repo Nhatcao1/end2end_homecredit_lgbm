@@ -2,13 +2,13 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from code.openfhe_direct.benchmark import run_benchmark
+from code.openfhe_direct.benchmarks.api_latency import run_benchmark
 from tests.test_openfhe_direct_credit_api import _OpenFHE
 
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = ROOT / "data/prepared/examples/payment_diff_demo_group.csv"
-BENCHMARK = ROOT / "code/openfhe_direct/benchmark.py"
+BENCHMARK = ROOT / "code/openfhe_direct/benchmarks/api_latency.py"
 COMPATIBILITY_ENTRY = (
     ROOT
     / "code/heir/scripts/run_python_arithmetic_backend_benchmark.py"
@@ -75,7 +75,10 @@ class OpenFHEDirectApiBenchmarkTest(unittest.TestCase):
         self.assertNotIn("subprocess", source)
         self.assertNotIn("code.heir", source)
         self.assertNotIn("from heir", source)
-        self.assertIn("code.openfhe_direct.benchmark import main", compatibility)
+        self.assertIn(
+            "code.openfhe_direct.benchmarks.api_latency import main",
+            compatibility,
+        )
 
 
 if __name__ == "__main__":

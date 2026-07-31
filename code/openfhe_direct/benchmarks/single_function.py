@@ -14,12 +14,12 @@ import time
 from typing import Any, Callable
 
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from code.openfhe_direct import OpenFHECreditSession
-from code.openfhe_direct.benchmark import (
+from code.openfhe_direct.benchmarks.api_latency import (
     _decrypt_result,
     _error_values,
     _expected_values,

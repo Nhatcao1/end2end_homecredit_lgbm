@@ -42,7 +42,7 @@ python3 code/heir/scripts/prepare_installments_group_blocks.py \
 ## Select five real groups and run each separately
 
 ```bash
-python3 code/openfhe_direct/multigroup_e2e_benchmark.py \
+python3 code/openfhe_direct/benchmarks/payment_diff_multigroup.py \
   --prepared-population-dir data/prepared/installments_group_population \
   --group-count 5 \
   --selection spread \

@@ -7,7 +7,7 @@ For the five-operation primitive matrix at several row counts, the canonical
 runner is:
 
 ```text
-code/openfhe_direct/primitive_benchmark.py
+code/openfhe_direct/benchmarks/primitives.py
 ```
 
 It maps the reported operations directly to `session.py`:
@@ -23,7 +23,7 @@ It maps the reported operations directly to `session.py`:
 One command can run 1k, 5k, 100k, and 1m real values sequentially:
 
 ```bash
-python3 code/openfhe_direct/primitive_benchmark.py \
+python3 code/openfhe_direct/benchmarks/primitives.py \
   --prepared-dir data/prepared/installments_columns \
   --value-count 1000 5000 100000 1000000 \
   --slot-count 8192 \
@@ -47,7 +47,7 @@ run HEIR or compile generated C++.
 One command runs exactly one public `OpenFHECreditSession` function:
 
 ```text
-code/openfhe_direct/batch_benchmark.py
+code/openfhe_direct/benchmarks/single_function.py
 ```
 
 Rows are packed into ciphertext chunks. For example:
@@ -79,7 +79,7 @@ This is client-side CSV sanitation and packing only. It does not run HEIR.
 Start with 1,000 values and one repetition:
 
 ```bash
-python3 code/openfhe_direct/batch_benchmark.py \
+python3 code/openfhe_direct/benchmarks/single_function.py \
   --function subtract \
   --prepared-dir data/prepared/installments_columns \
   --value-count 1000 \
@@ -93,7 +93,7 @@ python3 code/openfhe_direct/batch_benchmark.py \
 Then run SUM separately:
 
 ```bash
-python3 code/openfhe_direct/batch_benchmark.py \
+python3 code/openfhe_direct/benchmarks/single_function.py \
   --function sum \
   --prepared-dir data/prepared/installments_columns \
   --value-count 1000 \
@@ -107,7 +107,7 @@ python3 code/openfhe_direct/batch_benchmark.py \
 Then MEAN:
 
 ```bash
-python3 code/openfhe_direct/batch_benchmark.py \
+python3 code/openfhe_direct/benchmarks/single_function.py \
   --function mean \
   --prepared-dir data/prepared/installments_columns \
   --value-count 1000 \
@@ -122,7 +122,7 @@ Change only `--function`, `--value-count`, and `--output-dir` for another
 isolated run. Supported function names are shown by:
 
 ```bash
-python3 code/openfhe_direct/batch_benchmark.py --help
+python3 code/openfhe_direct/benchmarks/single_function.py --help
 ```
 
 Each output directory contains:
@@ -140,7 +140,7 @@ independently. Use the following dedicated runner when the required result is
 one global PAYMENT_DIFF SUM or MEAN across 10k/50k raw installment rows:
 
 ```text
-code/openfhe_direct/payment_diff_sum_mean_benchmark.py
+code/openfhe_direct/benchmarks/payment_diff_sum_mean.py
 ```
 
 Activate and verify the OpenFHE-only environment first:
@@ -153,7 +153,7 @@ python3 -c "import openfhe; print(openfhe.__file__)"
 Run global SUM:
 
 ```bash
-python3 code/openfhe_direct/payment_diff_sum_mean_benchmark.py \
+python3 code/openfhe_direct/benchmarks/payment_diff_sum_mean.py \
   --operation sum \
   --installments data/home_credit/installments_payments.csv \
   --value-count 10000 50000 \
@@ -170,7 +170,7 @@ python3 code/openfhe_direct/payment_diff_sum_mean_benchmark.py \
 Run global MEAN separately:
 
 ```bash
-python3 code/openfhe_direct/payment_diff_sum_mean_benchmark.py \
+python3 code/openfhe_direct/benchmarks/payment_diff_sum_mean.py \
   --operation mean \
   --installments data/home_credit/installments_payments.csv \
   --value-count 10000 50000 \
