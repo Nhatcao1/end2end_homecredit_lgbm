@@ -9,7 +9,10 @@ from code.openfhe_direct import OpenFHEBgvSession
 from code.openfhe_direct.benchmarks.synthetic_vnd.generate_dataset import (
     generate_dataset,
 )
-from code.openfhe_direct.benchmarks.synthetic_vnd.sum import run_sum_matrix
+from code.openfhe_direct.benchmarks.synthetic_vnd.sum import (
+    packed_plaintext_modulus,
+    run_sum_matrix,
+)
 
 
 class _BgvParameters:
@@ -148,8 +151,8 @@ class OpenFHEDirectSyntheticVndSumTest(unittest.TestCase):
                     slot_count=8,
                     repetitions=2,
                     multiplicative_depth=1,
-                    plaintext_modulus=100_000_038_913,
-                    ring_dimension=0,
+                    plaintext_modulus_bits=40,
+                    ring_dimension=8,
                     output_dir=root / "result",
                     overwrite=False,
                     _session_factory=factory,
@@ -161,6 +164,12 @@ class OpenFHEDirectSyntheticVndSumTest(unittest.TestCase):
             self.assertIn("Plaintext vector SUM", report)
             self.assertIn("Absolute error (VND)", report)
             self.assertNotIn("Expected-result range", report)
+
+    def test_bit_count_selects_a_packed_plaintext_prime(self):
+        modulus = packed_plaintext_modulus(40, 16_384)
+        self.assertLessEqual(modulus.bit_length(), 40)
+        self.assertEqual(0, (modulus - 1) % (2 * 16_384))
+        self.assertGreater(modulus // 2, 40_000_000_000)
 
     def test_benchmark_calls_session_only(self):
         source = (

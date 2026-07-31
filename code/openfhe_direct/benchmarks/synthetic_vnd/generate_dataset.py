@@ -78,7 +78,7 @@ def generate_dataset(
 
     manifest = {
         "status": "synthetic_vnd_vectors_ready",
-        "purpose": "isolated encrypted BGV SUM latency and exactness benchmark",
+        "purpose": "shared synthetic input for BGV and CKKS SUM benchmarks",
         "seed": seed,
         "configured_value_range_inclusive": [
             minimum_value,

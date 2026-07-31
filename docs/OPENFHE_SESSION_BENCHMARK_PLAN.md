@@ -139,6 +139,7 @@ risk_score
 | Raw-installments global SUM/MEAN | `code/openfhe_direct/benchmarks/payment_diff_sum_mean.py`; derives encrypted PAYMENT_DIFF and merges every ciphertext chunk | Complete |
 | Population-backed multi-group benchmark | Selects from all prepared opaque groups, reassembles complete groups, then calls only `OpenFHECreditSession` methods | Complete |
 | Synthetic VND BGV SUM | `benchmarks/synthetic_vnd/sum.py`; exact encrypted vector reduction with simple latency/accuracy report | Complete |
+| Synthetic VND CKKS SUM | `benchmarks/synthetic_vnd/ckks_sum.py`; normalized approximate reduction over the same generated vector | Complete |
 
 The low-level scheme-switching helper remains private to the session layer.
 Benchmarks do not import it or copy its configuration.
@@ -212,9 +213,14 @@ The synthetic VND benchmark additionally must:
 - generate deterministic aligned integer vector pairs for arbitrary lengths;
 - default to inclusive values from 100,000 through 20,000,000;
 - test one encrypted vector reduction through `OpenFHEBgvSession.sum()`;
+- accept a plaintext-modulus bit budget and select the compatible prime internally;
 - use NumPy `int64` SUM as the optimized plaintext reference;
 - require the audited BGV result to equal the full vector SUM exactly;
 - reject a vector whose total exceeds the centered plaintext-modulus capacity;
 - report setup, NumPy, encryption, CT+CT evaluation, audit decryption,
   throughput, slowdown, MAE, maximum error, and pass/fail in a compact file;
 - contain no direct OpenFHE `Eval*` call and no HEIR path.
+
+The CKKS version uses the same generated vectors, normalizes values before
+encryption, calls `OpenFHECreditSession.sum()`, restores VND only after final
+audit decryption, and reports both absolute VND error and relative error.

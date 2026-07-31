@@ -1,8 +1,8 @@
-# Synthetic VND BGV SUM benchmark
+# Synthetic VND SUM benchmarks
 
-This standalone benchmark reduces one encrypted integer vector to one exact
-encrypted total. It has no relationship to PAYMENT_DIFF, groupby, PSI, or the
-credit model.
+These standalone benchmarks reduce one generated VND vector with exact BGV or
+approximate CKKS. They have no relationship to PAYMENT_DIFF, groupby, PSI, or
+the credit model.
 
 ## Prepare the environment
 
@@ -29,28 +29,50 @@ Every file contains one `VALUE` vector. The endpoints are generation
 boundaries; actual values are deterministic random integers throughout the
 interval. Smaller vectors are exact prefixes of the largest vector.
 
-## Run encrypted BGV SUM
+## Run exact BGV SUM
 
 ```bash
 python3 -m code.openfhe_direct.benchmarks.synthetic_vnd.sum \
   --dataset-dir data/generated/vnd_sum \
   --value-count 50 100 2000 \
-  --slot-count 8192 \
+  --slot-count 2048 \
   --repetitions 5 \
   --multiplicative-depth 1 \
-  --plaintext-modulus 100000038913 \
+  --plaintext-modulus-bits 40 \
   --ring-dimension 16384 \
   --output-dir benchmark_runs/openfhe_vnd_bgv_sum \
   --overwrite
 ```
 
-The benchmark calls only `OpenFHEBgvSession.encrypt()`, `sum()`, and
-`decrypt()`. NumPy `int64` SUM is the optimized plaintext reference. The
-configured 37-bit modulus has positive centered capacity `50000019456`, safely
-above the worst-case 2,000-value total of `40000000000`. Unsafe combinations
-are rejected before encryption rather than allowed to wrap modulo the
-plaintext modulus.
+The command specifies only a bit budget. The benchmark selects a compatible
+packed-plaintext prime internally and records the actual modulus in the
+report. It calls only `OpenFHEBgvSession.encrypt()`, `sum()`, and `decrypt()`.
+NumPy `int64` SUM is the plaintext reference. Unsafe totals are rejected before
+encryption rather than allowed to wrap modulo the plaintext modulus.
 
-Each vector-length directory contains `REPORT.md`, `results.csv`, and
-`summary.json`. The report includes the actual plaintext total, BGV audit
-error, setup, encryption, encrypted reduction, and audit-decryption latency.
+## Run approximate CKKS SUM on the same vectors
+
+```bash
+python3 -m code.openfhe_direct.benchmarks.synthetic_vnd.ckks_sum \
+  --dataset-dir data/generated/vnd_sum \
+  --value-count 50 100 2000 \
+  --slot-count 2048 \
+  --repetitions 5 \
+  --normalization-divisor 10000 \
+  --multiplicative-depth 2 \
+  --scaling-mod-size 50 \
+  --first-mod-size 60 \
+  --ring-dimension 16384 \
+  --absolute-tolerance-vnd 1 \
+  --relative-tolerance 1e-6 \
+  --output-dir benchmark_runs/openfhe_vnd_ckks_sum \
+  --overwrite
+```
+
+CKKS divides each VND value by `10000` before encryption, computes the SUM on
+ciphertext, and multiplies the final decrypted audit scalar by `10000`. The
+encrypted calculation never sees the restored large VND values.
+
+Each scheme and vector-length directory contains `REPORT.md`, `results.csv`,
+and `summary.json`. Reports include the actual plaintext total, audit error,
+setup, encryption, encrypted reduction, and audit-decryption latency.

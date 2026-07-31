@@ -66,7 +66,7 @@ class OpenFHEBgvSession:
         self,
         *,
         slot_count: int,
-        plaintext_modulus: int = 100_000_038_913,
+        plaintext_modulus: int = 137_438_822_401,
         multiplicative_depth: int = 1,
         ring_dimension: int = 16_384,
         _openfhe_module: Any | None = None,

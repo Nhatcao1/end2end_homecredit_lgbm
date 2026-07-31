@@ -68,6 +68,50 @@ def _openfhe_version() -> str:
         return "test-double-or-unavailable"
 
 
+def _is_prime(value: int) -> bool:
+    """Deterministic Miller-Rabin for the supported <=60-bit modulus."""
+    if value < 2:
+        return False
+    for prime in (2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37):
+        if value % prime == 0:
+            return value == prime
+    odd = value - 1
+    shifts = 0
+    while odd % 2 == 0:
+        odd //= 2
+        shifts += 1
+    for base in (2, 325, 9375, 28178, 450775, 9780504, 1795265022):
+        if base % value == 0:
+            continue
+        witness = pow(base, odd, value)
+        if witness in (1, value - 1):
+            continue
+        for _ in range(shifts - 1):
+            witness = witness * witness % value
+            if witness == value - 1:
+                break
+        else:
+            return False
+    return True
+
+
+def packed_plaintext_modulus(bits: int, ring_dimension: int) -> int:
+    """Return the largest <=bits prime equal to one modulo 2N."""
+    if not 3 <= bits <= 60:
+        raise ValueError("plaintext_modulus_bits must be between 3 and 60")
+    if ring_dimension < 2 or ring_dimension & (ring_dimension - 1):
+        raise ValueError("ring_dimension must be a power of two")
+    step = 2 * ring_dimension
+    candidate = ((2**bits - 2) // step) * step + 1
+    while candidate > 2:
+        if _is_prime(candidate):
+            return candidate
+        candidate -= step
+    raise ValueError(
+        "no packed plaintext modulus exists for this bit count and ring"
+    )
+
+
 def _run_repetition(
     *,
     session: OpenFHEBgvSession,
@@ -109,6 +153,7 @@ def _write_report(
     repetitions: int,
     ring_dimension: int,
     plaintext_modulus: int,
+    plaintext_modulus_bits: int,
     expected_sum: int,
     setup_seconds: float,
     rows: list[dict[str, Any]],
@@ -128,6 +173,7 @@ def _write_report(
         f"- Observed value range: `{min(values)}` to `{max(values)}` VND",
         f"- Plaintext vector SUM: `{expected_sum}` VND",
         f"- BGV plaintext modulus: `{plaintext_modulus}`",
+        f"- Requested plaintext-modulus bits: `{plaintext_modulus_bits}`",
         f"- Maximum positive centered value: `{plaintext_modulus // 2}`",
         f"- Ring dimension: `{ring_dimension}`",
         f"- Repetitions: `{repetitions}`",
@@ -162,7 +208,7 @@ def run_sum_count(
     slot_count: int,
     repetitions: int,
     multiplicative_depth: int,
-    plaintext_modulus: int,
+    plaintext_modulus_bits: int,
     ring_dimension: int,
     output_dir: Path,
     overwrite: bool,
@@ -188,6 +234,10 @@ def run_sum_count(
 
     values = _read_values(dataset_path.resolve(), value_count)
     expected_sum = sum(values)
+    plaintext_modulus = packed_plaintext_modulus(
+        plaintext_modulus_bits,
+        ring_dimension,
+    )
     if abs(expected_sum) >= plaintext_modulus // 2:
         raise ValueError(
             "plaintext_modulus is unsafe: absolute vector SUM must be below "
@@ -220,6 +270,7 @@ def run_sum_count(
         "value_count": value_count,
         "slot_count": slot_count,
         "plaintext_modulus": plaintext_modulus,
+        "plaintext_modulus_bits": plaintext_modulus_bits,
         "centered_capacity": plaintext_modulus // 2,
         "plaintext_vector_sum": expected_sum,
         "setup_seconds": setup_seconds,
@@ -240,6 +291,7 @@ def run_sum_count(
         repetitions=repetitions,
         ring_dimension=ring_dimension,
         plaintext_modulus=plaintext_modulus,
+        plaintext_modulus_bits=plaintext_modulus_bits,
         expected_sum=expected_sum,
         setup_seconds=setup_seconds,
         rows=rows,
@@ -254,7 +306,7 @@ def run_sum_matrix(
     slot_count: int,
     repetitions: int,
     multiplicative_depth: int,
-    plaintext_modulus: int,
+    plaintext_modulus_bits: int,
     ring_dimension: int,
     output_dir: Path,
     overwrite: bool,
@@ -283,7 +335,7 @@ def run_sum_matrix(
             slot_count=slot_count,
             repetitions=repetitions,
             multiplicative_depth=multiplicative_depth,
-            plaintext_modulus=plaintext_modulus,
+            plaintext_modulus_bits=plaintext_modulus_bits,
             ring_dimension=ring_dimension,
             output_dir=child,
             overwrite=False,
@@ -335,11 +387,7 @@ def main() -> None:
     parser.add_argument("--slot-count", type=int, default=8192)
     parser.add_argument("--repetitions", type=int, default=5)
     parser.add_argument("--multiplicative-depth", type=int, default=1)
-    parser.add_argument(
-        "--plaintext-modulus",
-        type=int,
-        default=100_000_038_913,
-    )
+    parser.add_argument("--plaintext-modulus-bits", type=int, default=40)
     parser.add_argument("--ring-dimension", type=int, default=16384)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--overwrite", action="store_true")
@@ -351,7 +399,7 @@ def main() -> None:
         slot_count=args.slot_count,
         repetitions=args.repetitions,
         multiplicative_depth=args.multiplicative_depth,
-        plaintext_modulus=args.plaintext_modulus,
+        plaintext_modulus_bits=args.plaintext_modulus_bits,
         ring_dimension=args.ring_dimension,
         output_dir=args.output_dir,
         overwrite=args.overwrite,
