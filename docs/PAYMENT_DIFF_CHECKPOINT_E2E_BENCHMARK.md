@@ -74,3 +74,20 @@ run remains under `groups/group_NNNNNN/`.
 
 The run is intentionally fresh. Do not pass the example's
 `--resume-checkpoints` option when collecting cold benchmark latency.
+
+## Clone-only synthetic smoke run
+
+A small synthetic prepared group is committed so the HE pipeline can run
+without the raw Home Credit files:
+
+```bash
+python3 code/heir/scripts/run_payment_diff_checkpoint_e2e_benchmark.py \
+  --prepared-group data/prepared/examples/payment_diff_demo_group.csv \
+  --max-ring-dimension 16384 \
+  --relative-tolerance 1e-5 \
+  --output-dir benchmark_runs/payment_diff_prepared_demo \
+  --overwrite
+```
+
+The fixture contains three real lanes and one padding lane. It contains no
+real `SK_ID_CURR`; all other `data/` artifacts remain ignored.

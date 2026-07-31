@@ -20,6 +20,9 @@ venv/
 !/data/home_credit/README.md
 !/data/prepared/
 !/data/prepared/.gitkeep
+!/data/prepared/examples/
+!/data/prepared/examples/README.md
+!/data/prepared/examples/payment_diff_demo_group.csv
 
 # HE/HEIR secrets and generated payloads
 /keys/

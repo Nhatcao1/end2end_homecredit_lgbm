@@ -725,6 +725,14 @@ def main() -> None:
         type=Path,
         help="legacy post-PSI group-selection mode",
     )
+    source.add_argument(
+        "--prepared-group",
+        type=Path,
+        help=(
+            "run an already client-prepared one-group CSV; no raw "
+            "installments dataset is required"
+        ),
+    )
     parser.add_argument("--max-ring-dimension", type=int, default=16384)
     parser.add_argument(
         "--openfhe-dir",
@@ -752,13 +760,41 @@ def main() -> None:
 
     installments = args.installments.resolve()
     bridge_dir = args.bridge_dir.resolve() if args.bridge_dir else None
-    prepared_group_path: Path | None = None
+    prepared_group_path: Path | None = (
+        args.prepared_group.resolve()
+        if args.prepared_group is not None
+        else None
+    )
     effective_bucket_size = (
         0 if args.allowed_sk_id_curr is not None else 128
     )
     client_prepare_seconds = 0.0
     client_preparation: dict[str, object] | None = None
-    if args.allowed_sk_id_curr is not None:
+    if args.prepared_group is not None:
+        prepared = load_prepared_allowed_group(prepared_group_path)
+        effective_bucket_size = prepared.bucket_size
+        client_preparation = {
+            "status": "PREPARED_GROUP_REUSED",
+            "allowed_sk_id_curr": prepared.raw_applicant_id,
+            "source_rows_scanned": 0,
+            "allowed_rows_before_null_removal": prepared.group.real_count,
+            "removed_null_rows": prepared.removed_null_rows,
+            "real_rows": prepared.group.real_count,
+            "bucket_size": prepared.bucket_size,
+            "mask_ones": sum(prepared.validity_mask),
+            "mask_zeroes": (
+                prepared.bucket_size - sum(prepared.validity_mask)
+            ),
+            "stable_source_order": True,
+            "complete_group": True,
+            "truncated": False,
+            "split": False,
+            "prepared_csv": str(prepared_group_path),
+            "client_prepare_seconds": 0.0,
+            "preparation_performed_in_this_run": False,
+        }
+        write_json(root / "client_preparation.json", client_preparation)
+    elif args.allowed_sk_id_curr is not None:
         allowed_sk_id_curr = args.allowed_sk_id_curr[0]
         prepared_group_path = (
             root

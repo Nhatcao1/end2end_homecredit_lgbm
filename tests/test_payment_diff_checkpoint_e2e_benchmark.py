@@ -35,6 +35,7 @@ class PaymentDiffCheckpointE2EBenchmarkTest(unittest.TestCase):
         )
         self.assertIn('"--execution-json"', source)
         self.assertIn('"--allowed-sk-id-curr"', source)
+        self.assertIn('"--prepared-group"', source)
         self.assertIn('nargs="+"', source)
         self.assertIn("_run_multiple_allowed_groups(", source)
         self.assertIn("prepare_allowed_group_csv(", source)
