@@ -51,7 +51,7 @@ def _read_pairs(path: Path, expected_count: int) -> tuple[list[float], list[floa
             right.append(right_value)
     if len(left) != expected_count:
         raise ValueError(
-            f"{path} contains {len(left)} rows; expected {expected_count}"
+            f"{path} contains {len(left)} values; expected {expected_count}"
         )
     return left, right
 
@@ -154,7 +154,7 @@ def _run_repetition(
 def _write_report(
     root: Path,
     *,
-    row_count: int,
+    value_count: int,
     slot_count: int,
     repetitions: int,
     setup_seconds: float,
@@ -177,9 +177,10 @@ def _write_report(
         "through `OpenFHECreditSession.add()`. It is unrelated "
         "to the credit feature pipeline.",
         "",
-        f"- Rows: `{row_count}`",
+        f"- Vector length: `{value_count}` values in A and B",
         f"- Slots per ciphertext: `{slot_count}`",
-        f"- Ciphertext chunks: `{(row_count + slot_count - 1) // slot_count}`",
+        f"- Ciphertext chunks per vector: "
+        f"`{(value_count + slot_count - 1) // slot_count}`",
         f"- Ring dimension: `{ring_dimension or 'OpenFHE-selected'}`",
         f"- Repetitions: `{repetitions}`",
         f"- Observed operand range: `{min(min(left), min(right)):.0f}` to "
@@ -221,7 +222,7 @@ def _write_report(
 def run_add_count(
     *,
     dataset_path: Path,
-    row_count: int,
+    value_count: int,
     slot_count: int,
     repetitions: int,
     multiplicative_depth: int,
@@ -246,7 +247,7 @@ def run_add_count(
             raise ValueError(f"refusing to remove broad path: {root}")
         shutil.rmtree(root)
     root.mkdir(parents=True)
-    left, right = _read_pairs(dataset_path.resolve(), row_count)
+    left, right = _read_pairs(dataset_path.resolve(), value_count)
     expected = [a + b for a, b in zip(left, right)]
 
     factory = _session_factory or OpenFHECreditSession
@@ -278,7 +279,7 @@ def run_add_count(
         "operation": "CT+CT",
         "session_method": "add",
         "credit_feature_workload": False,
-        "row_count": row_count,
+        "value_count": value_count,
         "slot_count": slot_count,
         "repetitions": repetitions,
         "setup_seconds": setup_seconds,
@@ -301,7 +302,7 @@ def run_add_count(
     )
     _write_report(
         root,
-        row_count=row_count,
+        value_count=value_count,
         slot_count=slot_count,
         repetitions=repetitions,
         setup_seconds=setup_seconds,
@@ -319,7 +320,7 @@ def run_add_count(
 def run_add_matrix(
     *,
     dataset_dir: Path,
-    row_counts: list[int],
+    value_counts: list[int],
     slot_count: int,
     repetitions: int,
     multiplicative_depth: int,
@@ -332,10 +333,10 @@ def run_add_matrix(
     overwrite: bool,
     _session_factory: Callable[..., Any] | None = None,
 ) -> dict[str, Any]:
-    if not row_counts or any(count < 1 for count in row_counts):
-        raise ValueError("row_counts must be positive")
-    if len(set(row_counts)) != len(row_counts):
-        raise ValueError("row_counts must be unique")
+    if not value_counts or any(count < 1 for count in value_counts):
+        raise ValueError("value_counts must be positive")
+    if len(set(value_counts)) != len(value_counts):
+        raise ValueError("value_counts must be unique")
     root = output_dir.resolve()
     if root.exists():
         if not overwrite:
@@ -346,11 +347,11 @@ def run_add_matrix(
     root.mkdir(parents=True)
 
     runs = []
-    for count in row_counts:
-        child = root / f"rows_{count}"
+    for count in value_counts:
+        child = root / f"values_{count}"
         result = run_add_count(
             dataset_path=dataset_dir / f"vnd_pairs_{count}.csv",
-            row_count=count,
+            value_count=count,
             slot_count=slot_count,
             repetitions=repetitions,
             multiplicative_depth=multiplicative_depth,
@@ -363,14 +364,15 @@ def run_add_matrix(
             overwrite=False,
             _session_factory=_session_factory,
         )
-        runs.append({"row_count": count, "status": result["status"], "directory": child.name})
+        runs.append({"value_count": count, "status": result["status"], "directory": child.name})
     overall = "PASS" if all(run["status"] == "PASS" for run in runs) else "FAIL"
     summary = {"status": overall, "operation": "CT+CT", "runs": runs}
     (root / "summary.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
     (root / "REPORT.md").write_text(
         "# Synthetic VND CT+CT matrix\n\n"
         + "\n".join(
-            f"- {run['row_count']} rows: [{run['status']}]({run['directory']}/REPORT.md)"
+            f"- Vector length {run['value_count']}: "
+            f"[{run['status']}]({run['directory']}/REPORT.md)"
             for run in runs
         )
         + "\n",
@@ -382,7 +384,13 @@ def run_add_matrix(
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset-dir", type=Path, required=True)
-    parser.add_argument("--row-count", dest="row_counts", nargs="+", type=int, required=True)
+    parser.add_argument(
+        "--value-count",
+        dest="value_counts",
+        nargs="+",
+        type=int,
+        required=True,
+    )
     parser.add_argument("--slot-count", type=int, default=8192)
     parser.add_argument("--repetitions", type=int, default=5)
     parser.add_argument("--multiplicative-depth", type=int, default=2)
@@ -397,7 +405,7 @@ def main() -> None:
 
     result = run_add_matrix(
         dataset_dir=args.dataset_dir,
-        row_counts=args.row_counts,
+        value_counts=args.value_counts,
         slot_count=args.slot_count,
         repetitions=args.repetitions,
         multiplicative_depth=args.multiplicative_depth,

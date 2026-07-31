@@ -209,8 +209,8 @@ The raw-installments SUM/MEAN benchmark additionally must:
 The synthetic VND benchmark additionally must:
 
 - remain a separate, non-credit benchmark;
-- generate deterministic aligned integer pairs for arbitrary row counts;
-- default to inclusive values from 1,000,000 through 100,000,000;
+- generate deterministic aligned integer vector pairs for arbitrary lengths;
+- default to inclusive values from 100,000 through 200,000,000;
 - test CT+CT only through `OpenFHECreditSession.add()`;
 - use NumPy vector addition as the optimized plaintext reference;
 - report setup, NumPy, encryption, CT+CT evaluation, audit decryption,

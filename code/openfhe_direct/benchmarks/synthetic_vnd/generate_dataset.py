@@ -23,17 +23,17 @@ def _sha256(path: Path) -> str:
 def generate_dataset(
     *,
     output_dir: Path,
-    row_counts: list[int],
+    value_counts: list[int],
     minimum_value: int,
     maximum_value: int,
     seed: int,
     overwrite: bool,
 ) -> dict[str, object]:
-    """Write one aligned LEFT/RIGHT CSV for every requested row count."""
-    if not row_counts or any(count < 1 for count in row_counts):
-        raise ValueError("row_counts must be positive")
-    if len(set(row_counts)) != len(row_counts):
-        raise ValueError("row_counts must be unique")
+    """Write one aligned LEFT/RIGHT vector pair per requested length."""
+    if not value_counts or any(count < 1 for count in value_counts):
+        raise ValueError("value_counts must be positive")
+    if len(set(value_counts)) != len(value_counts):
+        raise ValueError("value_counts must be unique")
     if minimum_value >= maximum_value:
         raise ValueError("minimum_value must be below maximum_value")
 
@@ -47,8 +47,8 @@ def generate_dataset(
     root.mkdir(parents=True)
 
     # Generate one deterministic master sequence. Smaller files are prefixes
-    # of larger files, so row-count scaling does not change the first rows.
-    maximum_count = max(row_counts)
+    # of larger files, so changing vector length does not change its prefix.
+    maximum_count = max(value_counts)
     generator = random.Random(seed)
     pairs = [
         (
@@ -59,20 +59,20 @@ def generate_dataset(
     ]
 
     files: list[dict[str, object]] = []
-    for count in row_counts:
+    for count in value_counts:
         path = root / f"vnd_pairs_{count}.csv"
         selected = pairs[:count]
         with path.open("w", encoding="utf-8", newline="") as handle:
             writer = csv.writer(handle)
-            writer.writerow(["ROW_ID", "LEFT_VALUE", "RIGHT_VALUE"])
+            writer.writerow(["INDEX", "LEFT_VALUE", "RIGHT_VALUE"])
             writer.writerows(
-                (row_id, left, right)
-                for row_id, (left, right) in enumerate(selected)
+                (index, left, right)
+                for index, (left, right) in enumerate(selected)
             )
         files.append(
             {
                 "file": path.name,
-                "row_count": count,
+                "value_count": count,
                 "sha256": _sha256(path),
                 "observed_left_range": [
                     min(left for left, _ in selected),
@@ -93,7 +93,7 @@ def generate_dataset(
             minimum_value,
             maximum_value,
         ],
-        "row_counts": row_counts,
+        "value_counts": value_counts,
         "prefix_consistent": True,
         "files": files,
     }
@@ -108,21 +108,21 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument(
-        "--row-count",
-        dest="row_counts",
+        "--value-count",
+        dest="value_counts",
         nargs="+",
         type=int,
         required=True,
     )
-    parser.add_argument("--minimum-value", type=int, default=1_000_000)
-    parser.add_argument("--maximum-value", type=int, default=100_000_000)
+    parser.add_argument("--minimum-value", type=int, default=100_000)
+    parser.add_argument("--maximum-value", type=int, default=200_000_000)
     parser.add_argument("--seed", type=int, default=20260731)
     parser.add_argument("--overwrite", action="store_true")
     args = parser.parse_args()
 
     result = generate_dataset(
         output_dir=args.output_dir,
-        row_counts=args.row_counts,
+        value_counts=args.value_counts,
         minimum_value=args.minimum_value,
         maximum_value=args.maximum_value,
         seed=args.seed,

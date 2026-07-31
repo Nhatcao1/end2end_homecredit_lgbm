@@ -20,9 +20,9 @@ class OpenFHEDirectSyntheticVndAddTest(unittest.TestCase):
             root = Path(temporary) / "data"
             result = generate_dataset(
                 output_dir=root,
-                row_counts=[2, 5],
-                minimum_value=1_000_000,
-                maximum_value=100_000_000,
+                value_counts=[2, 5],
+                minimum_value=100_000,
+                maximum_value=200_000_000,
                 seed=123,
                 overwrite=False,
             )
@@ -36,8 +36,8 @@ class OpenFHEDirectSyntheticVndAddTest(unittest.TestCase):
             self.assertEqual(small, large[:2])
             self.assertTrue(result["prefix_consistent"])
             for row in large:
-                self.assertGreaterEqual(int(row["LEFT_VALUE"]), 1_000_000)
-                self.assertLessEqual(int(row["RIGHT_VALUE"]), 100_000_000)
+                self.assertGreaterEqual(int(row["LEFT_VALUE"]), 100_000)
+                self.assertLessEqual(int(row["RIGHT_VALUE"]), 200_000_000)
 
     def test_ct_add_reports_magnitude_latency_and_accuracy(self):
         class Array(list):
@@ -67,16 +67,16 @@ class OpenFHEDirectSyntheticVndAddTest(unittest.TestCase):
             data = root / "data"
             generate_dataset(
                 output_dir=data,
-                row_counts=[5],
-                minimum_value=1_000_000,
-                maximum_value=100_000_000,
+                value_counts=[5],
+                minimum_value=100_000,
+                maximum_value=200_000_000,
                 seed=123,
                 overwrite=False,
             )
             with patch.dict("sys.modules", {"numpy": NumPyDouble()}):
                 result = run_add_matrix(
                     dataset_dir=data,
-                    row_counts=[5],
+                    value_counts=[5],
                     slot_count=4,
                     repetitions=2,
                     multiplicative_depth=2,
@@ -91,7 +91,9 @@ class OpenFHEDirectSyntheticVndAddTest(unittest.TestCase):
                 )
 
             self.assertEqual("PASS", result["status"])
-            report = (root / "result/rows_5/REPORT.md").read_text()
+            report = (root / "result/values_5/REPORT.md").read_text()
+            self.assertIn("Vector length", report)
+            self.assertNotIn("Rows:", report)
             self.assertIn("CT+CT", report)
             self.assertIn("numpy.add(float64)", report)
             self.assertIn("Expected-result range", report)

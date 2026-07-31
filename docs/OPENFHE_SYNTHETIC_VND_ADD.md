@@ -17,22 +17,23 @@ python3 -c "import openfhe; print(openfhe.__file__)"
 ```bash
 python3 -m code.openfhe_direct.benchmarks.synthetic_vnd.generate_dataset \
   --output-dir data/generated/vnd_ct_add \
-  --row-count 50 100 2000 \
-  --minimum-value 1000000 \
-  --maximum-value 100000000 \
+  --value-count 50 100 2000 \
+  --minimum-value 100000 \
+  --maximum-value 200000000 \
   --seed 20260731 \
   --overwrite
 ```
 
-Every file contains `ROW_ID`, `LEFT_VALUE`, and `RIGHT_VALUE`. Smaller files
-are exact prefixes of the largest generated sequence.
+Every file contains `INDEX`, `LEFT_VALUE`, and `RIGHT_VALUE`: two aligned
+numeric vectors, A and B. Smaller vectors are exact prefixes of the largest
+generated sequence.
 
 ## Run CT+CT only
 
 ```bash
 python3 -m code.openfhe_direct.benchmarks.synthetic_vnd.add \
   --dataset-dir data/generated/vnd_ct_add \
-  --row-count 50 100 2000 \
+  --value-count 50 100 2000 \
   --slot-count 8192 \
   --repetitions 5 \
   --multiplicative-depth 2 \
@@ -46,5 +47,5 @@ python3 -m code.openfhe_direct.benchmarks.synthetic_vnd.add \
 The benchmark calls only `OpenFHECreditSession.encrypt()`, `add()`, and
 `decrypt()`. NumPy `float64` vector addition is the plaintext reference because
 it measures the optimized numeric operation without Pandas Series/index
-overhead. Each row-count directory contains a compact `REPORT.md`, raw
+overhead. Each vector-length directory contains a compact `REPORT.md`, raw
 `results.csv`, and `summary.json`.
