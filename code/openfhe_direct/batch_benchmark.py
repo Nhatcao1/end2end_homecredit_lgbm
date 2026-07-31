@@ -97,44 +97,61 @@ def _call_function(
     count = len(group.installment)
     weights = [1.0 / count] * count
     if function == "decrypt":
+        # HE API call: OpenFHECreditSession.decrypt(installment_ct)
         return session.decrypt(installment_ct)
     if function == "add":
+        # HE API call: OpenFHECreditSession.add(parent ciphertexts)
         return session.add(installment_ct, payment_ct)
     if function == "subtract":
+        # HE API call: OpenFHECreditSession.subtract(parent ciphertexts)
         return session.subtract(installment_ct, payment_ct)
     if function == "multiply":
+        # HE API call: OpenFHECreditSession.multiply(parent ciphertexts)
         return session.multiply(installment_ct, payment_ct)
     if function == "add_public_scalar":
+        # HE API call: OpenFHECreditSession.add_public_scalar(diff_ct, 1.5)
         return session.add_public_scalar(difference_ct, 1.5)
     if function == "add_public_vector":
+        # HE API call: OpenFHECreditSession.add_public_vector(payment_ct, tens)
         return session.add_public_vector(payment_ct, [10.0] * count)
     if function == "multiply_public_scalar":
+        # HE API call: OpenFHECreditSession.multiply_public_scalar(diff_ct, 0.5)
         return session.multiply_public_scalar(difference_ct, 0.5)
     if function == "multiply_public_vector":
+        # HE API call: OpenFHECreditSession.multiply_public_vector(diff_ct, weights)
         return session.multiply_public_vector(difference_ct, weights)
     if function == "square":
+        # HE API call: OpenFHECreditSession.square(difference_ct)
         return session.square(difference_ct)
     if function == "sum":
+        # HE API call: OpenFHECreditSession.sum(difference_ct)
         return session.sum(difference_ct)
     if function == "mean":
+        # HE API call: OpenFHECreditSession.mean(difference_ct)
         return session.mean(difference_ct)
     if function == "variance_components":
+        # HE API call: OpenFHECreditSession.variance_components(diff_ct)
         return session.variance_components(difference_ct)
     if function == "variance":
+        # HE API call: OpenFHECreditSession.variance(difference_ct)
         return session.variance(difference_ct)
     if function == "covariance_components":
+        # HE API call: OpenFHECreditSession.covariance_components(parents)
         return session.covariance_components(
             installment_ct,
             payment_ct,
         )
     if function == "correlation_components":
+        # HE API call: OpenFHECreditSession.correlation_components(parents)
         return session.correlation_components(
             installment_ct,
             payment_ct,
         )
     if function == "weighted_sum":
+        # HE API call: OpenFHECreditSession.weighted_sum(diff_ct, weights)
         return session.weighted_sum(difference_ct, weights)
     if function == "risk_score":
+        # HE API call: OpenFHECreditSession.risk_score(diff_ct, weights, bias)
         return session.risk_score(difference_ct, weights, 1.5)
     raise ValueError(f"unsupported function: {function}")
 
@@ -157,6 +174,7 @@ def _run_repetition(
     for group in groups:
         expected = _expected_values(group)[function]
         if function == "encrypt":
+            # HE API call: OpenFHECreditSession.encrypt(AMT_INSTALMENT)
             result, elapsed = _timed(session.encrypt, group.installment)
             function_seconds += elapsed
             observed, elapsed = _timed(_decrypt_result, session, result)
@@ -165,12 +183,14 @@ def _run_repetition(
             installment_ct = None
             payment_ct = None
             if function != "add_public_vector":
+                # HE API call: OpenFHECreditSession.encrypt(AMT_INSTALMENT)
                 installment_ct, elapsed = _timed(
                     session.encrypt,
                     group.installment,
                 )
                 parent_encrypt_seconds += elapsed
             if function != "decrypt":
+                # HE API call: OpenFHECreditSession.encrypt(AMT_PAYMENT)
                 payment_ct, elapsed = _timed(
                     session.encrypt,
                     group.payment,
@@ -178,6 +198,7 @@ def _run_repetition(
                 parent_encrypt_seconds += elapsed
             difference_ct = None
             if function in DIFFERENCE_INPUT_FUNCTIONS:
+                # HE API call: OpenFHECreditSession.subtract(parent ciphertexts)
                 difference_ct, elapsed = _timed(
                     session.subtract,
                     installment_ct,
@@ -319,6 +340,7 @@ def run_batch_benchmark(
             "sample variance cannot run on a final one-value chunk; "
             "change value_count or slot_count"
         )
+    # HE API call: OpenFHECreditSession(...) creates context and keys.
     session, setup_seconds = _timed(
         OpenFHECreditSession,
         slot_count=slot_count,

@@ -43,6 +43,7 @@ def _timed(
 def _decrypt_result(session: OpenFHECreditSession, value: Any) -> Any:
     """Recursively decrypt one API result for the final accuracy audit."""
     if isinstance(value, (EncryptedVector, EncryptedScalar)):
+        # HE API call: OpenFHECreditSession.decrypt(value)
         return session.decrypt(value)
     if isinstance(value, dict):
         return {
@@ -166,46 +167,64 @@ def _operation_calls(
     weights = [1.0 / count] * count
     tens = [10.0] * count
     return {
+        # HE API call: OpenFHECreditSession.encrypt(installment)
         "encrypt": lambda: session.encrypt(group.installment),
+        # HE API call: OpenFHECreditSession.decrypt(installment_ct)
         "decrypt": lambda: session.decrypt(installment_ct),
+        # HE API call: OpenFHECreditSession.add(installment_ct, payment_ct)
         "add": lambda: session.add(installment_ct, payment_ct),
+        # HE API call: OpenFHECreditSession.subtract(parents)
         "subtract": lambda: session.subtract(installment_ct, payment_ct),
+        # HE API call: OpenFHECreditSession.multiply(parents)
         "multiply": lambda: session.multiply(installment_ct, payment_ct),
+        # HE API call: OpenFHECreditSession.add_public_scalar(diff_ct, 1.5)
         "add_public_scalar": lambda: session.add_public_scalar(
             difference_ct,
             1.5,
         ),
+        # HE API call: OpenFHECreditSession.add_public_vector(payment_ct, tens)
         "add_public_vector": lambda: session.add_public_vector(
             payment_ct,
             tens,
         ),
+        # HE API call: OpenFHECreditSession.multiply_public_scalar(diff_ct, 0.5)
         "multiply_public_scalar": lambda: session.multiply_public_scalar(
             difference_ct,
             0.5,
         ),
+        # HE API call: OpenFHECreditSession.multiply_public_vector(diff_ct, weights)
         "multiply_public_vector": lambda: session.multiply_public_vector(
             difference_ct,
             weights,
         ),
+        # HE API call: OpenFHECreditSession.square(difference_ct)
         "square": lambda: session.square(difference_ct),
+        # HE API call: OpenFHECreditSession.sum(difference_ct)
         "sum": lambda: session.sum(difference_ct),
+        # HE API call: OpenFHECreditSession.mean(difference_ct)
         "mean": lambda: session.mean(difference_ct),
+        # HE API call: OpenFHECreditSession.variance_components(difference_ct)
         "variance_components": lambda: session.variance_components(
             difference_ct
         ),
+        # HE API call: OpenFHECreditSession.variance(difference_ct)
         "variance": lambda: session.variance(difference_ct),
+        # HE API call: OpenFHECreditSession.covariance_components(parents)
         "covariance_components": lambda: session.covariance_components(
             installment_ct,
             payment_ct,
         ),
+        # HE API call: OpenFHECreditSession.correlation_components(parents)
         "correlation_components": lambda: session.correlation_components(
             installment_ct,
             payment_ct,
         ),
+        # HE API call: OpenFHECreditSession.weighted_sum(diff_ct, weights)
         "weighted_sum": lambda: session.weighted_sum(
             difference_ct,
             weights,
         ),
+        # HE API call: OpenFHECreditSession.risk_score(diff_ct, weights, bias)
         "risk_score": lambda: session.risk_score(
             difference_ct,
             weights,
@@ -287,6 +306,7 @@ def run_benchmark(
     root.mkdir(parents=True)
 
     group = load_prepared_group(prepared_group.resolve())
+    # HE API call: OpenFHECreditSession(...) creates context and keys.
     session, setup_seconds = _timed(
         OpenFHECreditSession,
         slot_count=group.slot_count,
@@ -294,14 +314,17 @@ def run_benchmark(
         ring_dimension=ring_dimension,
         _openfhe_module=_openfhe_module,
     )
+    # HE API call: OpenFHECreditSession.encrypt(AMT_INSTALMENT)
     installment_ct, installment_encrypt = _timed(
         session.encrypt,
         group.installment,
     )
+    # HE API call: OpenFHECreditSession.encrypt(AMT_PAYMENT)
     payment_ct, payment_encrypt = _timed(
         session.encrypt,
         group.payment,
     )
+    # HE API call: OpenFHECreditSession.subtract(parent ciphertexts)
     difference_ct = session.subtract(installment_ct, payment_ct)
     expected = _expected_values(group)
     calls = _operation_calls(

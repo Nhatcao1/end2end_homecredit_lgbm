@@ -218,6 +218,7 @@ def run_multigroup_benchmark(
             "input_scale must place parents and PAYMENT_DIFF in (-0.5, 0.5]"
         )
     factory = _session_factory or OpenFHECreditSession
+    # HE API call: OpenFHECreditSession(...) creates CKKS/FHEW context and keys.
     session, setup_seconds = _timed(
         factory,
         slot_count=selected_slots,
@@ -250,16 +251,19 @@ def run_multigroup_benchmark(
             "audit_decrypt_seconds": 0.0,
         }
         for group in groups:
+            # HE API call: OpenFHECreditSession.encrypt(AMT_INSTALMENT)
             installment_ct, elapsed = _timed(
                 session.encrypt,
                 group.installment,
             )
             stage["encrypt_seconds"] += elapsed
+            # HE API call: OpenFHECreditSession.encrypt(AMT_PAYMENT)
             payment_ct, elapsed = _timed(
                 session.encrypt,
                 group.payment,
             )
             stage["encrypt_seconds"] += elapsed
+            # HE API call: OpenFHECreditSession.subtract(parent ciphertexts)
             difference_ct, elapsed = _timed(
                 session.subtract,
                 installment_ct,
@@ -269,10 +273,15 @@ def run_multigroup_benchmark(
 
             encrypted_outputs: dict[str, Any] = {}
             for name, method in (
+                # HE API call: OpenFHECreditSession.sum(difference_ct)
                 ("sum", session.sum),
+                # HE API call: OpenFHECreditSession.mean(difference_ct)
                 ("mean", session.mean),
+                # HE API call: OpenFHECreditSession.variance(difference_ct)
                 ("variance", session.variance),
+                # HE API call: OpenFHECreditSession.minimum(difference_ct)
                 ("minimum", session.minimum),
+                # HE API call: OpenFHECreditSession.maximum(difference_ct)
                 ("maximum", session.maximum),
             ):
                 encrypted_outputs[name], elapsed = _timed(
@@ -283,6 +292,7 @@ def run_multigroup_benchmark(
 
             observed: dict[str, float] = {}
             for name, encrypted in encrypted_outputs.items():
+                # HE API call: OpenFHECreditSession.decrypt(final scalar)
                 observed[name], elapsed = _timed(session.decrypt, encrypted)
                 stage["audit_decrypt_seconds"] += elapsed
 

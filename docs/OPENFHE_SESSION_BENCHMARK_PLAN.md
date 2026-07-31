@@ -11,6 +11,17 @@ code/openfhe_direct/session.py
 Benchmark and example files must call those session methods. They must not
 implement cryptographic operations themselves.
 
+Every session invocation in benchmark code must have an adjacent comment that
+names the public function being called:
+
+```python
+# HE API call: OpenFHECreditSession.mean(payment_diff_ct)
+mean_ct = session.mean(payment_diff_ct)
+```
+
+Use the exact prefix `# HE API call:` so this boundary is easy to review and
+can be checked by tests.
+
 The intended usage is:
 
 ```python
@@ -112,9 +123,10 @@ Benchmarks do not import it or copy its configuration.
 3. Add a focused unit test for the session method.
 4. Add the method to the readable example when useful.
 5. Make benchmarks call the method; do not copy its implementation.
-6. Record setup requirements, multiplicative depth, scale/range contract,
+6. Add an adjacent `# HE API call:` comment at every benchmark call site.
+7. Record setup requirements, multiplicative depth, scale/range contract,
    padding behavior, and whether scheme switching is used.
-7. Run a small server smoke test before increasing groups or row counts.
+8. Run a small server smoke test before increasing groups or row counts.
 
 ## Benchmark rollout
 
@@ -133,6 +145,7 @@ Benchmarks do not import it or copy its configuration.
 A new benchmark is acceptable only when:
 
 - its HE calculation is a call to a public session method;
+- every session call has an adjacent `# HE API call:` comment;
 - it contains no direct OpenFHE or HEIR operation;
 - ciphertext remains encrypted between operations;
 - setup, function latency, and audit decryption are clearly separated;
