@@ -7,6 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 BENCHMARKS = (
     ROOT / "code/openfhe_direct/benchmark.py",
     ROOT / "code/openfhe_direct/batch_benchmark.py",
+    ROOT / "code/openfhe_direct/payment_diff_sum_mean_benchmark.py",
     ROOT / "code/openfhe_direct/primitive_benchmark.py",
     ROOT / "code/openfhe_direct/multigroup_e2e_benchmark.py",
 )

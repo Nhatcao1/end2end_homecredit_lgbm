@@ -115,6 +115,7 @@ risk_score
 | Weighted sum/risk score | In `code/openfhe_direct/session.py` | Keep |
 | CKKS↔FHEW minimum/maximum | Public methods in `code/openfhe_direct/session.py` | Complete |
 | Real-data primitive matrix | `code/openfhe_direct/primitive_benchmark.py`; calls only session methods | Complete |
+| Raw-installments global SUM/MEAN | `code/openfhe_direct/payment_diff_sum_mean_benchmark.py`; derives encrypted PAYMENT_DIFF and merges every ciphertext chunk | Complete |
 | Population-backed multi-group benchmark | Selects from all prepared opaque groups, reassembles complete groups, then calls only `OpenFHECreditSession` methods | Complete |
 
 The low-level scheme-switching helper remains private to the session layer.
@@ -141,7 +142,10 @@ Benchmarks do not import it or copy its configuration.
    operation runs independently through `OpenFHECreditSession`; one shared
    context is reused within each row-count run.
 2. Independent reductions:
-   `sum`, `mean`, and `variance`.
+   `code/openfhe_direct/payment_diff_sum_mean_benchmark.py` reads the raw
+   installments CSV separately for SUM and MEAN. It derives PAYMENT_DIFF
+   after parent encryption and returns one global encrypted result across all
+   runtime chunks. Variance remains a separate benchmark.
 3. Independent scheme-switching runs:
    `minimum` and `maximum`.
 4. Prepare the full group population, select two real opaque groups, and
@@ -170,3 +174,12 @@ The primitive benchmark additionally must:
   latency separately;
 - report evaluation-only and online slowdown versus Python;
 - contain no `heir-opt`, generated source, CMake, or direct `Eval*` call.
+
+The raw-installments SUM/MEAN benchmark additionally must:
+
+- take `installments_payments.csv` directly rather than a prepared-column
+  directory;
+- run SUM and MEAN as separate benchmark invocations;
+- remove missing/non-finite parent pairs only at the client input boundary;
+- merge all encrypted chunk results into one global result;
+- compare that result with the equivalent Python PAYMENT_DIFF SUM or MEAN.

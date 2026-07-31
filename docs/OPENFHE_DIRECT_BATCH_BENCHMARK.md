@@ -132,3 +132,59 @@ REPORT.md
 results.csv
 summary.json
 ```
+
+## Raw installments global SUM and MEAN
+
+The single-function batch runner above reduces each ciphertext chunk
+independently. Use the following dedicated runner when the required result is
+one global PAYMENT_DIFF SUM or MEAN across 10k/50k raw installment rows:
+
+```text
+code/openfhe_direct/payment_diff_sum_mean_benchmark.py
+```
+
+Activate and verify the OpenFHE-only environment first:
+
+```bash
+source .venv-openfhe/bin/activate
+python3 -c "import openfhe; print(openfhe.__file__)"
+```
+
+Run global SUM:
+
+```bash
+python3 code/openfhe_direct/payment_diff_sum_mean_benchmark.py \
+  --operation sum \
+  --installments data/home_credit/installments_payments.csv \
+  --value-count 10000 50000 \
+  --slot-count 8192 \
+  --repetitions 5 \
+  --multiplicative-depth 4 \
+  --scaling-mod-size 50 \
+  --first-mod-size 60 \
+  --ring-dimension 16384 \
+  --output-dir benchmark_runs/openfhe_payment_diff_sum \
+  --overwrite
+```
+
+Run global MEAN separately:
+
+```bash
+python3 code/openfhe_direct/payment_diff_sum_mean_benchmark.py \
+  --operation mean \
+  --installments data/home_credit/installments_payments.csv \
+  --value-count 10000 50000 \
+  --slot-count 8192 \
+  --repetitions 5 \
+  --multiplicative-depth 4 \
+  --scaling-mod-size 50 \
+  --first-mod-size 60 \
+  --ring-dimension 16384 \
+  --output-dir benchmark_runs/openfhe_payment_diff_mean \
+  --overwrite
+```
+
+Each row-count run rereads the source CSV, filters only invalid numeric parent
+pairs, creates a new direct OpenFHE-Python context, encrypts both parent
+columns, calculates PAYMENT_DIFF, and merges all encrypted chunk results. No
+intermediate ciphertext is decrypted.
