@@ -51,7 +51,7 @@ class OpenFHEDirectSyntheticVndCkksSumTest(unittest.TestCase):
                     value_counts=[5],
                     slot_count=8,
                     repetitions=2,
-                    normalization_divisor=10_000.0,
+                    normalization_divisor=1_000_000.0,
                     multiplicative_depth=2,
                     scaling_mod_size=50,
                     first_mod_size=60,
@@ -67,6 +67,9 @@ class OpenFHEDirectSyntheticVndCkksSumTest(unittest.TestCase):
             report = (root / "result/values_5/REPORT.md").read_text()
             self.assertIn("CKKS SUM", report)
             self.assertIn("Client normalization divisor", report)
+            self.assertIn("Expected normalized SUM", report)
+            self.assertIn("Decrypted normalized SUM", report)
+            self.assertIn("Restored VND SUM", report)
             self.assertIn("Error (VND)", report)
 
     def test_benchmark_calls_session_only(self):

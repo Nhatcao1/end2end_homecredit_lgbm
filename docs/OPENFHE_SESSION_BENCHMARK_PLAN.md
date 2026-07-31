@@ -211,7 +211,7 @@ The synthetic VND benchmark additionally must:
 
 - remain a separate, non-credit benchmark;
 - generate deterministic aligned integer vector pairs for arbitrary lengths;
-- default to inclusive values from 100,000 through 20,000,000;
+- default to inclusive values from 10,000,000 through 200,000,000;
 - test one encrypted vector reduction through `OpenFHEBgvSession.sum()`;
 - accept a plaintext-modulus bit budget and select the compatible prime internally;
 - use depth zero and one 60-bit `FIXEDMANUAL` BGV first RNS prime for SUM;
@@ -224,4 +224,6 @@ The synthetic VND benchmark additionally must:
 
 The CKKS version uses the same generated vectors, normalizes values before
 encryption, calls `OpenFHECreditSession.sum()`, restores VND only after final
-audit decryption, and reports both absolute VND error and relative error.
+audit decryption, and reports both absolute VND error and relative error. Its
+default public normalization divisor is 1,000,000, and both accuracy
+tolerances must pass.

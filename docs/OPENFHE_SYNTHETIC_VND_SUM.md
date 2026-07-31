@@ -19,8 +19,8 @@ python3 -c "import openfhe; print(openfhe.__file__)"
 python3 -m code.openfhe_direct.benchmarks.synthetic_vnd.generate_dataset \
   --output-dir data/generated/vnd_sum \
   --value-count 50 100 2000 \
-  --minimum-value 100000 \
-  --maximum-value 20000000 \
+  --minimum-value 10000000 \
+  --maximum-value 200000000 \
   --seed 20260731 \
   --overwrite
 ```
@@ -63,7 +63,7 @@ python3 -m code.openfhe_direct.benchmarks.synthetic_vnd.ckks_sum \
   --value-count 50 100 2000 \
   --slot-count 2048 \
   --repetitions 5 \
-  --normalization-divisor 10000 \
+  --normalization-divisor 1000000 \
   --multiplicative-depth 2 \
   --scaling-mod-size 50 \
   --first-mod-size 60 \
@@ -74,9 +74,15 @@ python3 -m code.openfhe_direct.benchmarks.synthetic_vnd.ckks_sum \
   --overwrite
 ```
 
-CKKS divides each VND value by `10000` before encryption, computes the SUM on
-ciphertext, and multiplies the final decrypted audit scalar by `10000`. The
-encrypted calculation never sees the restored large VND values.
+CKKS divides each VND value by `1000000` before encryption, computes the SUM
+on ciphertext, and multiplies the final decrypted audit scalar by `1000000`.
+For the configured data this changes roughly 10–200 million VND into 10–200
+CKKS input values. The encrypted calculation never sees the restored large VND
+values.
+
+The audit reports the expected and decrypted normalized SUM, expected and
+restored VND SUM, absolute VND error, and relative error. Both configured
+tolerances must pass; a small relative error cannot hide a large VND error.
 
 Each scheme and vector-length directory contains `REPORT.md`, `results.csv`,
 and `summary.json`. Reports include the actual plaintext total, audit error,

@@ -105,8 +105,8 @@ def main() -> None:
         type=int,
         required=True,
     )
-    parser.add_argument("--minimum-value", type=int, default=100_000)
-    parser.add_argument("--maximum-value", type=int, default=20_000_000)
+    parser.add_argument("--minimum-value", type=int, default=10_000_000)
+    parser.add_argument("--maximum-value", type=int, default=200_000_000)
     parser.add_argument("--seed", type=int, default=20260731)
     parser.add_argument("--overwrite", action="store_true")
     args = parser.parse_args()

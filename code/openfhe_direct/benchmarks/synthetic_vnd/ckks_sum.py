@@ -66,6 +66,7 @@ def _run_repetition(
 ) -> dict[str, Any]:
     expected, numpy_seconds = _numpy_sum(raw_values)
     normalized = [value / normalization_divisor for value in raw_values]
+    expected_normalized_sum = expected / normalization_divisor
 
     # HE API call: OpenFHECreditSession.encrypt(normalized values)
     encrypted, encrypt_seconds = _timed(session.encrypt, normalized)
@@ -81,7 +82,7 @@ def _run_repetition(
     relative_error = absolute_error / max(1.0, abs(expected))
     passed = (
         absolute_error <= absolute_tolerance_vnd
-        or relative_error <= relative_tolerance
+        and relative_error <= relative_tolerance
     )
     online_seconds = encrypt_seconds + sum_seconds
     return {
@@ -93,7 +94,10 @@ def _run_repetition(
         "audit_decrypt_seconds": decrypt_seconds,
         "sum_slowdown_vs_numpy": sum_seconds / numpy_seconds,
         "online_slowdown_vs_numpy": online_seconds / numpy_seconds,
-        "observed_sum_vnd": observed_vnd,
+        "expected_normalized_sum": expected_normalized_sum,
+        "decrypted_normalized_sum": float(normalized_observed),
+        "expected_sum_vnd": expected,
+        "restored_sum_vnd": observed_vnd,
         "absolute_error_vnd": absolute_error,
         "relative_error": relative_error,
         "status": "PASS" if passed else "FAIL",
@@ -119,6 +123,8 @@ def _write_report(
         return median(float(row[name]) for row in rows)
 
     status = "PASS" if all(row["status"] == "PASS" for row in rows) else "FAIL"
+    median_normalized = med("decrypted_normalized_sum")
+    median_restored = med("restored_sum_vnd")
     lines = [
         "# Synthetic VND CKKS SUM benchmark",
         "",
@@ -128,6 +134,7 @@ def _write_report(
         f"- Client normalization divisor: `{normalization_divisor:g}`",
         f"- Normalized value range: `{min(values) / normalization_divisor:g}` "
         f"to `{max(values) / normalization_divisor:g}`",
+        f"- Expected normalized SUM: `{expected_sum / normalization_divisor:.12g}`",
         f"- Slots: `{slot_count}`",
         f"- Multiplicative depth: `{multiplicative_depth}`",
         f"- Scaling modulus: `{scaling_mod_size}` bits",
@@ -135,6 +142,15 @@ def _write_report(
         f"- Ring dimension: `{ring_dimension}`",
         f"- Repetitions: `{repetitions}`",
         f"- Context/key setup: `{setup_seconds:.9f}` seconds",
+        "- Acceptance: absolute error and relative error must both pass",
+        "",
+        "| Expected normalized SUM | Decrypted normalized SUM | "
+        "Expected VND SUM | Restored VND SUM | Maximum absolute error (VND) |",
+        "|---:|---:|---:|---:|---:|",
+        f"| {expected_sum / normalization_divisor:.12g} | "
+        f"{median_normalized:.12g} | {expected_sum} | "
+        f"{median_restored:.9f} | "
+        f"{max(float(row['absolute_error_vnd']) for row in rows):.9f} |",
         "",
         "| NumPy SUM | Encrypt | HE SUM | HE online | Audit decrypt | "
         "HE SUM / NumPy | Online / NumPy | Error (VND) | Relative error | Status |",
@@ -219,6 +235,10 @@ def run_ckks_sum_count(
         "value_count": value_count,
         "normalization_divisor": normalization_divisor,
         "plaintext_vector_sum": sum(values),
+        "expected_normalized_sum": sum(values) / normalization_divisor,
+        "absolute_tolerance_vnd": absolute_tolerance_vnd,
+        "relative_tolerance": relative_tolerance,
+        "acceptance_rule": "both tolerances must pass",
         "setup_seconds": setup_seconds,
     }
     with (root / "results.csv").open("w", encoding="utf-8", newline="") as handle:
@@ -295,7 +315,11 @@ def main() -> None:
     parser.add_argument("--value-count", nargs="+", type=int, required=True)
     parser.add_argument("--slot-count", type=int, default=2048)
     parser.add_argument("--repetitions", type=int, default=5)
-    parser.add_argument("--normalization-divisor", type=float, default=10_000.0)
+    parser.add_argument(
+        "--normalization-divisor",
+        type=float,
+        default=1_000_000.0,
+    )
     parser.add_argument("--multiplicative-depth", type=int, default=2)
     parser.add_argument("--scaling-mod-size", type=int, default=50)
     parser.add_argument("--first-mod-size", type=int, default=60)
