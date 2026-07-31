@@ -10,7 +10,7 @@ BENCHMARKS = (
     ROOT / "code/openfhe_direct/benchmarks/payment_diff_sum_mean.py",
     ROOT / "code/openfhe_direct/benchmarks/primitives.py",
     ROOT / "code/openfhe_direct/benchmarks/payment_diff_multigroup.py",
-    ROOT / "code/openfhe_direct/benchmarks/synthetic_vnd/subtract.py",
+    ROOT / "code/openfhe_direct/benchmarks/synthetic_vnd/add.py",
 )
 
 

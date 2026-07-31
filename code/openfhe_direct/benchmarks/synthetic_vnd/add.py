@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Simple synthetic-VND CT-CT latency and accuracy benchmark."""
+"""Simple synthetic-VND CT+CT magnitude, latency, and accuracy benchmark."""
 
 from __future__ import annotations
 
@@ -63,6 +63,25 @@ def _openfhe_version() -> str:
         return "test-double-or-unavailable"
 
 
+def _numpy_reference_add(
+    left: list[float],
+    right: list[float],
+) -> tuple[list[float], float]:
+    """Time only optimized NumPy addition, excluding array preparation."""
+    try:
+        import numpy as np
+    except ModuleNotFoundError as error:
+        raise RuntimeError(
+            "the CT+CT plaintext baseline requires NumPy; install it in the "
+            "active environment with: python3 -m pip install numpy"
+        ) from error
+    left_array = np.asarray(left, dtype=np.float64)
+    right_array = np.asarray(right, dtype=np.float64)
+    started = time.perf_counter()
+    expected_array = np.add(left_array, right_array)
+    return expected_array.tolist(), time.perf_counter() - started
+
+
 def _run_repetition(
     *,
     session: OpenFHECreditSession,
@@ -73,9 +92,9 @@ def _run_repetition(
     absolute_tolerance: float,
     relative_tolerance: float,
 ) -> dict[str, Any]:
-    python_started = time.perf_counter()
-    expected = [a - b for a, b in zip(left, right)]
-    python_seconds = time.perf_counter() - python_started
+    # NumPy is the optimized plaintext baseline. Pandas would ultimately use
+    # this same vectorized addition but would also time Series/index overhead.
+    expected, python_seconds = _numpy_reference_add(left, right)
 
     observed: list[float] = []
     encrypt_seconds = evaluation_seconds = decrypt_seconds = 0.0
@@ -88,14 +107,14 @@ def _run_repetition(
         # HE API call: OpenFHECreditSession.encrypt(right values)
         right_ct, elapsed = _timed(session.encrypt, right_block)
         encrypt_seconds += elapsed
-        # HE API call: OpenFHECreditSession.subtract(left_ct, right_ct)
-        result_ct, elapsed = _timed(session.subtract, left_ct, right_ct)
+        # HE API call: OpenFHECreditSession.add(left_ct, right_ct)
+        result_ct, elapsed = _timed(session.add, left_ct, right_ct)
         evaluation_seconds += elapsed
-        # HE API call: OpenFHECreditSession.decrypt(final CT-CT result)
+        # HE API call: OpenFHECreditSession.decrypt(final CT+CT result)
         result, elapsed = _timed(session.decrypt, result_ct)
         decrypt_seconds += elapsed
         if not isinstance(result, list):
-            raise TypeError("CT-CT must decrypt to a vector")
+            raise TypeError("CT+CT must decrypt to a vector")
         observed.extend(float(value) for value in result)
 
     absolute_errors = [
@@ -141,16 +160,21 @@ def _write_report(
     setup_seconds: float,
     ring_dimension: int,
     rows: list[dict[str, Any]],
+    left: list[float],
+    right: list[float],
+    expected: list[float],
+    absolute_tolerance: float,
+    relative_tolerance: float,
 ) -> None:
     def metric(name: str) -> float:
         return median(float(row[name]) for row in rows)
 
     status = "PASS" if all(row["status"] == "PASS" for row in rows) else "FAIL"
     lines = [
-        "# Synthetic VND CT-CT benchmark",
+        "# Synthetic VND CT+CT benchmark",
         "",
-        "This isolated benchmark subtracts two encrypted synthetic VND "
-        "vectors through `OpenFHECreditSession.subtract()`. It is unrelated "
+        "This isolated benchmark adds two encrypted synthetic VND vectors "
+        "through `OpenFHECreditSession.add()`. It is unrelated "
         "to the credit feature pipeline.",
         "",
         f"- Rows: `{row_count}`",
@@ -158,13 +182,20 @@ def _write_report(
         f"- Ciphertext chunks: `{(row_count + slot_count - 1) // slot_count}`",
         f"- Ring dimension: `{ring_dimension or 'OpenFHE-selected'}`",
         f"- Repetitions: `{repetitions}`",
+        f"- Observed operand range: `{min(min(left), min(right)):.0f}` to "
+        f"`{max(max(left), max(right)):.0f}` VND",
+        f"- Expected-result range: `{min(expected):.0f}` to "
+        f"`{max(expected):.0f}` VND",
+        "- Plaintext reference: `numpy.add(float64)`",
+        f"- Acceptance: absolute error <= `{absolute_tolerance:g}` OR "
+        f"relative error <= `{relative_tolerance:g}`",
         f"- Context/key setup: `{setup_seconds:.9f}` seconds",
         f"- Python executable: `{sys.executable}`",
         f"- OpenFHE Python: `{_openfhe_version()}`",
         "",
-        "| Python | Encrypt | HE CT-CT | HE online | Audit decrypt | "
-        "Online / Python | MAE | Max abs. error | Status |",
-        "|---:|---:|---:|---:|---:|---:|---:|---:|---|",
+        "| NumPy add | Encrypt | HE CT+CT | HE online | Audit decrypt | "
+        "Online / NumPy | MAE | Max abs. error | Max relative error | Status |",
+        "|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|",
         f"| {metric('python_seconds'):.9f} | "
         f"{metric('encrypt_seconds'):.9f} | "
         f"{metric('evaluate_seconds'):.9f} | "
@@ -173,15 +204,21 @@ def _write_report(
         f"{metric('online_slowdown_vs_python'):.2f}x | "
         f"{max(float(row['mae']) for row in rows):.12g} | "
         f"{max(float(row['max_abs_error']) for row in rows):.12g} | "
+        f"{max(float(row['max_relative_error']) for row in rows):.12g} | "
         f"{status} |",
         "",
-        "`HE online` is parent encryption plus CT-CT evaluation. Setup and "
+        "`HE online` is parent encryption plus CT+CT evaluation. Setup and "
         "final audit decryption are reported separately.",
+        "",
+        "All generated integer operands and plaintext sums are exactly "
+        "representable in float64 at this configured magnitude. Therefore, "
+        "the reported numerical error measures the approximate CKKS route, "
+        "not integer overflow in the NumPy reference.",
     ]
     (root / "REPORT.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def run_subtract_count(
+def run_add_count(
     *,
     dataset_path: Path,
     row_count: int,
@@ -210,6 +247,7 @@ def run_subtract_count(
         shutil.rmtree(root)
     root.mkdir(parents=True)
     left, right = _read_pairs(dataset_path.resolve(), row_count)
+    expected = [a + b for a, b in zip(left, right)]
 
     factory = _session_factory or OpenFHECreditSession
     # HE API call: OpenFHECreditSession(...) creates context and keys.
@@ -237,8 +275,8 @@ def run_subtract_count(
     summary = {
         "status": status,
         "backend": "official OpenFHE Python via OpenFHECreditSession",
-        "operation": "CT-CT",
-        "session_method": "subtract",
+        "operation": "CT+CT",
+        "session_method": "add",
         "credit_feature_workload": False,
         "row_count": row_count,
         "slot_count": slot_count,
@@ -247,6 +285,11 @@ def run_subtract_count(
         "python_executable": sys.executable,
         "openfhe_python": _openfhe_version(),
         "dataset": str(dataset_path.resolve()),
+        "observed_operand_range": [
+            min(min(left), min(right)),
+            max(max(left), max(right)),
+        ],
+        "expected_result_range": [min(expected), max(expected)],
     }
     with (root / "results.csv").open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
@@ -264,11 +307,16 @@ def run_subtract_count(
         setup_seconds=setup_seconds,
         ring_dimension=ring_dimension,
         rows=rows,
+        left=left,
+        right=right,
+        expected=expected,
+        absolute_tolerance=absolute_tolerance,
+        relative_tolerance=relative_tolerance,
     )
     return summary
 
 
-def run_subtract_matrix(
+def run_add_matrix(
     *,
     dataset_dir: Path,
     row_counts: list[int],
@@ -300,7 +348,7 @@ def run_subtract_matrix(
     runs = []
     for count in row_counts:
         child = root / f"rows_{count}"
-        result = run_subtract_count(
+        result = run_add_count(
             dataset_path=dataset_dir / f"vnd_pairs_{count}.csv",
             row_count=count,
             slot_count=slot_count,
@@ -317,10 +365,10 @@ def run_subtract_matrix(
         )
         runs.append({"row_count": count, "status": result["status"], "directory": child.name})
     overall = "PASS" if all(run["status"] == "PASS" for run in runs) else "FAIL"
-    summary = {"status": overall, "operation": "CT-CT", "runs": runs}
+    summary = {"status": overall, "operation": "CT+CT", "runs": runs}
     (root / "summary.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
     (root / "REPORT.md").write_text(
-        "# Synthetic VND CT-CT matrix\n\n"
+        "# Synthetic VND CT+CT matrix\n\n"
         + "\n".join(
             f"- {run['row_count']} rows: [{run['status']}]({run['directory']}/REPORT.md)"
             for run in runs
@@ -347,7 +395,7 @@ def main() -> None:
     parser.add_argument("--overwrite", action="store_true")
     args = parser.parse_args()
 
-    result = run_subtract_matrix(
+    result = run_add_matrix(
         dataset_dir=args.dataset_dir,
         row_counts=args.row_counts,
         slot_count=args.slot_count,

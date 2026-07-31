@@ -62,7 +62,7 @@ code/openfhe_direct/
     ├── payment_diff_multigroup.py
     └── synthetic_vnd/
         ├── generate_dataset.py
-        └── subtract.py
+        └── add.py
 ```
 
 The `synthetic_vnd` package is a niche arithmetic test. It must not import or
@@ -138,7 +138,7 @@ risk_score
 | Real-data primitive matrix | `code/openfhe_direct/benchmarks/primitives.py`; calls only session methods | Complete |
 | Raw-installments global SUM/MEAN | `code/openfhe_direct/benchmarks/payment_diff_sum_mean.py`; derives encrypted PAYMENT_DIFF and merges every ciphertext chunk | Complete |
 | Population-backed multi-group benchmark | Selects from all prepared opaque groups, reassembles complete groups, then calls only `OpenFHECreditSession` methods | Complete |
-| Synthetic VND CT−CT | `benchmarks/synthetic_vnd/subtract.py`; session-only subtraction with simple latency/accuracy report | Complete |
+| Synthetic VND CT+CT | `benchmarks/synthetic_vnd/add.py`; session-only addition with simple magnitude/latency/accuracy report | Complete |
 
 The low-level scheme-switching helper remains private to the session layer.
 Benchmarks do not import it or copy its configuration.
@@ -211,7 +211,8 @@ The synthetic VND benchmark additionally must:
 - remain a separate, non-credit benchmark;
 - generate deterministic aligned integer pairs for arbitrary row counts;
 - default to inclusive values from 1,000,000 through 100,000,000;
-- test CT−CT only through `OpenFHECreditSession.subtract()`;
-- report setup, Python, encryption, CT−CT evaluation, audit decryption,
+- test CT+CT only through `OpenFHECreditSession.add()`;
+- use NumPy vector addition as the optimized plaintext reference;
+- report setup, NumPy, encryption, CT+CT evaluation, audit decryption,
   throughput, slowdown, MAE, maximum error, and pass/fail in a compact file;
 - contain no direct OpenFHE `Eval*` call and no HEIR path.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate deterministic synthetic VND pairs for an isolated CT-CT test."""
+"""Generate deterministic synthetic VND pairs for an isolated CT+CT test."""
 
 from __future__ import annotations
 
@@ -87,7 +87,7 @@ def generate_dataset(
 
     manifest = {
         "status": "synthetic_vnd_pairs_ready",
-        "purpose": "isolated CT-CT latency and accuracy benchmark",
+        "purpose": "isolated CT+CT magnitude, latency, and accuracy benchmark",
         "seed": seed,
         "configured_value_range_inclusive": [
             minimum_value,
