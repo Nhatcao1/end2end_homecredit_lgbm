@@ -9,9 +9,7 @@ from code.openfhe_direct import OpenFHEBgvSession
 from code.openfhe_direct.benchmarks.synthetic_vnd.generate_dataset import (
     generate_dataset,
 )
-from code.openfhe_direct.benchmarks.synthetic_vnd.add import (
-    run_add_matrix,
-)
+from code.openfhe_direct.benchmarks.synthetic_vnd.sum import run_sum_matrix
 
 
 class _BgvParameters:
@@ -46,6 +44,9 @@ class _BgvContext:
     def KeyGen(self):
         return SimpleNamespace(publicKey="public", secretKey="secret")
 
+    def EvalSumKeyGen(self, secret_key):
+        self.sum_key = secret_key
+
     def MakePackedPlaintext(self, values):
         return _BgvPlaintext(values)
 
@@ -56,6 +57,9 @@ class _BgvContext:
     def EvalAdd(self, left, right):
         return [a + b for a, b in zip(left, right)]
 
+    def EvalSum(self, ciphertext, count):
+        return [sum(ciphertext[:count])]
+
     def Decrypt(self, secret_key, ciphertext):
         assert secret_key == "secret"
         return _BgvPlaintext(ciphertext)
@@ -65,6 +69,7 @@ class _BgvOpenFHE:
     PKE = "PKE"
     KEYSWITCH = "KEYSWITCH"
     LEVELEDSHE = "LEVELEDSHE"
+    ADVANCEDSHE = "ADVANCEDSHE"
 
     def __init__(self):
         self.context = _BgvContext()
@@ -78,8 +83,8 @@ class _BgvOpenFHE:
         return self.context
 
 
-class OpenFHEDirectSyntheticVndAddTest(unittest.TestCase):
-    def test_generator_is_prefix_consistent_and_within_vnd_range(self):
+class OpenFHEDirectSyntheticVndSumTest(unittest.TestCase):
+    def test_generator_writes_prefix_consistent_random_vectors(self):
         with TemporaryDirectory() as temporary:
             root = Path(temporary) / "data"
             result = generate_dataset(
@@ -95,36 +100,27 @@ class OpenFHEDirectSyntheticVndAddTest(unittest.TestCase):
                 with path.open("r", encoding="utf-8", newline="") as handle:
                     return list(csv.DictReader(handle))
 
-            small = rows(root / "vnd_pairs_2.csv")
-            large = rows(root / "vnd_pairs_5.csv")
+            small = rows(root / "vnd_values_2.csv")
+            large = rows(root / "vnd_values_5.csv")
             self.assertEqual(small, large[:2])
             self.assertTrue(result["prefix_consistent"])
-            generated_values = {
-                int(row[column])
-                for row in large
-                for column in ("LEFT_VALUE", "RIGHT_VALUE")
-            }
-            self.assertGreater(len(generated_values), 2)
-            for row in large:
-                self.assertGreaterEqual(int(row["LEFT_VALUE"]), 100_000)
-                self.assertLessEqual(int(row["RIGHT_VALUE"]), 200_000_000)
+            generated = {int(row["VALUE"]) for row in large}
+            self.assertGreater(len(generated), 2)
+            self.assertTrue(all(100_000 <= value <= 200_000_000 for value in generated))
 
-    def test_ct_add_reports_magnitude_latency_and_accuracy(self):
-        class Array(list):
-            def tolist(self):
-                return list(self)
-
+    def test_bgv_sum_reports_latency_and_exact_total(self):
         class NumPyDouble:
             int64 = int
 
             @staticmethod
             def asarray(values, dtype):
                 del dtype
-                return Array(values)
+                return list(values)
 
             @staticmethod
-            def add(left, right):
-                return Array(a + b for a, b in zip(left, right))
+            def sum(values, dtype):
+                del dtype
+                return sum(values)
 
         def factory(**kwargs):
             return OpenFHEBgvSession(
@@ -144,13 +140,13 @@ class OpenFHEDirectSyntheticVndAddTest(unittest.TestCase):
                 overwrite=False,
             )
             with patch.dict("sys.modules", {"numpy": NumPyDouble()}):
-                result = run_add_matrix(
+                result = run_sum_matrix(
                     dataset_dir=data,
                     value_counts=[5],
-                    slot_count=4,
+                    slot_count=8,
                     repetitions=2,
                     multiplicative_depth=1,
-                    plaintext_modulus=1_000_112_129,
+                    plaintext_modulus=1_000_000_552_961,
                     ring_dimension=0,
                     output_dir=root / "result",
                     overwrite=False,
@@ -159,24 +155,20 @@ class OpenFHEDirectSyntheticVndAddTest(unittest.TestCase):
 
             self.assertEqual("PASS", result["status"])
             report = (root / "result/values_5/REPORT.md").read_text()
-            self.assertIn("Vector length", report)
-            self.assertNotIn("Rows:", report)
-            self.assertIn("BGV", report)
-            self.assertIn("CT+CT", report)
-            self.assertIn("numpy.add(int64)", report)
-            self.assertIn("Expected-result range", report)
-            self.assertIn("MAE", report)
-            self.assertIn("HE online", report)
+            self.assertIn("BGV SUM", report)
+            self.assertIn("Plaintext vector SUM", report)
+            self.assertIn("Absolute error (VND)", report)
+            self.assertNotIn("Expected-result range", report)
 
     def test_benchmark_calls_session_only(self):
         source = (
             Path(__file__).resolve().parents[1]
-            / "code/openfhe_direct/benchmarks/synthetic_vnd/add.py"
+            / "code/openfhe_direct/benchmarks/synthetic_vnd/sum.py"
         ).read_text(encoding="utf-8")
 
         self.assertIn("OpenFHEBgvSession", source)
         self.assertNotIn("import openfhe", source)
-        self.assertNotIn("EvalAdd", source)
+        self.assertNotIn("EvalSum", source)
         self.assertNotIn("heir-opt", source)
         self.assertNotIn("PAYMENT_DIFF", source)
 

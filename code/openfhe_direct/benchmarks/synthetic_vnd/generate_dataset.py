@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate deterministic synthetic VND pairs for an isolated CT+CT test."""
+"""Generate deterministic synthetic VND vectors for an encrypted SUM test."""
 
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ def generate_dataset(
     seed: int,
     overwrite: bool,
 ) -> dict[str, object]:
-    """Write one aligned LEFT/RIGHT vector pair per requested length."""
+    """Write one deterministic integer vector per requested length."""
     if not value_counts or any(count < 1 for count in value_counts):
         raise ValueError("value_counts must be positive")
     if len(set(value_counts)) != len(value_counts):
@@ -50,44 +50,35 @@ def generate_dataset(
     # of larger files, so changing vector length does not change its prefix.
     maximum_count = max(value_counts)
     generator = random.Random(seed)
-    pairs = [
-        (
-            generator.randint(minimum_value, maximum_value),
-            generator.randint(minimum_value, maximum_value),
-        )
+    values = [
+        generator.randint(minimum_value, maximum_value)
         for _ in range(maximum_count)
     ]
 
     files: list[dict[str, object]] = []
     for count in value_counts:
-        path = root / f"vnd_pairs_{count}.csv"
-        selected = pairs[:count]
+        path = root / f"vnd_values_{count}.csv"
+        selected = values[:count]
         with path.open("w", encoding="utf-8", newline="") as handle:
             writer = csv.writer(handle)
-            writer.writerow(["INDEX", "LEFT_VALUE", "RIGHT_VALUE"])
+            writer.writerow(["INDEX", "VALUE"])
             writer.writerows(
-                (index, left, right)
-                for index, (left, right) in enumerate(selected)
+                (index, value)
+                for index, value in enumerate(selected)
             )
         files.append(
             {
                 "file": path.name,
                 "value_count": count,
                 "sha256": _sha256(path),
-                "observed_left_range": [
-                    min(left for left, _ in selected),
-                    max(left for left, _ in selected),
-                ],
-                "observed_right_range": [
-                    min(right for _, right in selected),
-                    max(right for _, right in selected),
-                ],
+                "observed_value_range": [min(selected), max(selected)],
+                "plaintext_vector_sum": sum(selected),
             }
         )
 
     manifest = {
-        "status": "synthetic_vnd_pairs_ready",
-        "purpose": "isolated CT+CT magnitude, latency, and accuracy benchmark",
+        "status": "synthetic_vnd_vectors_ready",
+        "purpose": "isolated encrypted BGV SUM latency and exactness benchmark",
         "seed": seed,
         "configured_value_range_inclusive": [
             minimum_value,

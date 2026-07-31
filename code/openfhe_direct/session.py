@@ -66,7 +66,7 @@ class OpenFHEBgvSession:
         self,
         *,
         slot_count: int,
-        plaintext_modulus: int = 1_000_112_129,
+        plaintext_modulus: int = 1_000_000_552_961,
         multiplicative_depth: int = 1,
         ring_dimension: int = 16_384,
         _openfhe_module: Any | None = None,
@@ -97,7 +97,12 @@ class OpenFHEBgvSession:
             parameters.SetRingDim(ring_dimension)
 
         context = of.GenCryptoContext(parameters)
-        for feature in (of.PKE, of.KEYSWITCH, of.LEVELEDSHE):
+        for feature in (
+            of.PKE,
+            of.KEYSWITCH,
+            of.LEVELEDSHE,
+            of.ADVANCEDSHE,
+        ):
             context.Enable(feature)
 
         required_methods = (
@@ -105,6 +110,8 @@ class OpenFHEBgvSession:
             "Encrypt",
             "Decrypt",
             "EvalAdd",
+            "EvalSum",
+            "EvalSumKeyGen",
         )
         missing = [
             name for name in required_methods if not hasattr(context, name)
@@ -115,6 +122,7 @@ class OpenFHEBgvSession:
             )
 
         keys = context.KeyGen()
+        context.EvalSumKeyGen(keys.secretKey)
         self.slot_count = slot_count
         self.plaintext_modulus = plaintext_modulus
         self.centered_capacity = plaintext_modulus // 2
@@ -160,24 +168,48 @@ class OpenFHEBgvSession:
             self._session_id,
         )
 
-    def decrypt(self, encrypted: EncryptedVector) -> list[int]:
-        """Decrypt one final packed integer vector for the audit boundary."""
+    def sum(self, encrypted: EncryptedVector) -> EncryptedScalar:
+        """Reduce one encrypted integer vector to an encrypted total."""
         self._require_vector(encrypted)
+        return EncryptedScalar(
+            self._context.EvalSum(
+                encrypted.ciphertext,
+                encrypted.length,
+            ),
+            self._session_id,
+        )
+
+    def decrypt(
+        self,
+        encrypted: EncryptedVector | EncryptedScalar,
+    ) -> list[int] | int:
+        """Decrypt one final integer result for the audit boundary."""
+        self._require_encrypted(encrypted)
         plaintext = self._context.Decrypt(
             self._secret_key,
             encrypted.ciphertext,
         )
-        plaintext.SetLength(encrypted.length)
-        return [
+        length = encrypted.length if isinstance(encrypted, EncryptedVector) else 1
+        plaintext.SetLength(length)
+        values = [
             int(value)
-            for value in plaintext.GetPackedValue()[: encrypted.length]
+            for value in plaintext.GetPackedValue()[:length]
         ]
+        return values if isinstance(encrypted, EncryptedVector) else values[0]
+
+    def _require_encrypted(
+        self,
+        encrypted: EncryptedVector | EncryptedScalar,
+    ) -> None:
+        if not isinstance(encrypted, (EncryptedVector, EncryptedScalar)):
+            raise TypeError("BGV session expects an encrypted value")
+        if encrypted.session_id != self._session_id:
+            raise ValueError("ciphertext belongs to another OpenFHE session")
 
     def _require_vector(self, encrypted: EncryptedVector) -> None:
         if not isinstance(encrypted, EncryptedVector):
             raise TypeError("BGV session expects an encrypted vector")
-        if encrypted.session_id != self._session_id:
-            raise ValueError("ciphertext belongs to another OpenFHE session")
+        self._require_encrypted(encrypted)
 
     def _require_vector_pair(
         self,
