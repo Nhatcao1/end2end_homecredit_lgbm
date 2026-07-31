@@ -72,3 +72,6 @@ python3 code/openfhe_direct/benchmark.py \
 ```
 
 It reports one median call latency per method plus final audit accuracy.
+
+For larger prepared row batches and one-function-per-command execution, see
+[`OPENFHE_DIRECT_BATCH_BENCHMARK.md`](OPENFHE_DIRECT_BATCH_BENCHMARK.md).

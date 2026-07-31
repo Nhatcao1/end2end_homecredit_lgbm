@@ -8,6 +8,7 @@ from code.openfhe_direct.session import (
     OpenFHECreditSession,
     VarianceComponents,
 )
+from code.openfhe_direct.prepared_data import PreparedParentColumns
 
 __all__ = [
     "CorrelationComponents",
@@ -15,5 +16,6 @@ __all__ = [
     "EncryptedScalar",
     "EncryptedVector",
     "OpenFHECreditSession",
+    "PreparedParentColumns",
     "VarianceComponents",
 ]

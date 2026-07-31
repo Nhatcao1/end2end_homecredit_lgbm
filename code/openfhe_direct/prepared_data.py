@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 from dataclasses import dataclass
+import math
 from pathlib import Path
 
 
@@ -13,6 +14,15 @@ class PreparedPaymentGroup:
     slot_count: int
     installment: list[float]
     payment: list[float]
+
+
+@dataclass(frozen=True)
+class PreparedParentColumns:
+    """Sanitized parent columns loaded from client-prepared batch files."""
+
+    installment: list[float]
+    payment: list[float]
+    files_used: list[str]
 
 
 def load_prepared_group(path: Path) -> PreparedPaymentGroup:
@@ -49,4 +59,55 @@ def load_prepared_group(path: Path) -> PreparedPaymentGroup:
         slot_count=len(rows),
         installment=installment,
         payment=payment,
+    )
+
+
+def load_prepared_parent_columns(
+    prepared_dir: Path,
+    value_count: int,
+) -> PreparedParentColumns:
+    """Load the first N valid parent rows from fixed-width prepared batches."""
+    if value_count < 1:
+        raise ValueError("value_count must be positive")
+    batches = prepared_dir / "batches"
+    paths = sorted(batches.glob("batch_*.csv"))
+    if not paths:
+        raise FileNotFoundError(
+            f"no prepared installments batches under {batches}"
+        )
+
+    installment: list[float] = []
+    payment: list[float] = []
+    files_used: list[str] = []
+    for path in paths:
+        used = False
+        with path.open("r", encoding="utf-8-sig", newline="") as handle:
+            for row in csv.DictReader(handle):
+                if float(row["valid"]) != 1.0:
+                    continue
+                due = float(row["AMT_INSTALMENT"])
+                paid = float(row["AMT_PAYMENT"])
+                if not math.isfinite(due) or not math.isfinite(paid):
+                    raise ValueError(
+                        f"non-finite value in prepared batch: {path}"
+                    )
+                installment.append(due)
+                payment.append(paid)
+                used = True
+                if len(installment) == value_count:
+                    break
+        if used:
+            files_used.append(str(path.relative_to(prepared_dir)))
+        if len(installment) == value_count:
+            break
+
+    if len(installment) != value_count:
+        raise ValueError(
+            f"prepared data has {len(installment)} valid rows; "
+            f"requested {value_count}"
+        )
+    return PreparedParentColumns(
+        installment=installment,
+        payment=payment,
+        files_used=files_used,
     )
