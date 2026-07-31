@@ -47,6 +47,10 @@ maximum = session.decrypt(maximum_ct)
 | Benchmark files | Load prepared inputs, call session methods, record latency, audit accuracy, write reports |
 | Example files | Show a readable application flow using the public session API |
 
+HEIR-generated MLIR/C++ runners under `code/heir/scripts/` are retained as
+historical experiments. They are not the implementation path for new direct
+OpenFHE-Python benchmarks.
+
 ## What benchmarks may do
 
 Benchmark files may:
@@ -110,6 +114,7 @@ risk_score
 | Variance/covariance/correlation components | In `code/openfhe_direct/session.py` | Keep |
 | Weighted sum/risk score | In `code/openfhe_direct/session.py` | Keep |
 | CKKS↔FHEW minimum/maximum | Public methods in `code/openfhe_direct/session.py` | Complete |
+| Real-data primitive matrix | `code/openfhe_direct/primitive_benchmark.py`; calls only session methods | Complete |
 | Population-backed multi-group benchmark | Selects from all prepared opaque groups, reassembles complete groups, then calls only `OpenFHECreditSession` methods | Complete |
 
 The low-level scheme-switching helper remains private to the session layer.
@@ -130,8 +135,11 @@ Benchmarks do not import it or copy its configuration.
 
 ## Benchmark rollout
 
-1. Primitive single-function batch runs:
-   `encrypt`, `decrypt`, `add`, `subtract`, and `multiply`.
+1. Primitive matrix over real parent columns:
+   `code/openfhe_direct/primitive_benchmark.py` calls `add`, `subtract`,
+   `multiply`, `add_public_vector`, and `multiply_public_vector`. Each
+   operation runs independently through `OpenFHECreditSession`; one shared
+   context is reused within each row-count run.
 2. Independent reductions:
    `sum`, `mean`, and `variance`.
 3. Independent scheme-switching runs:
@@ -153,3 +161,12 @@ A new benchmark is acceptable only when:
 - Python reference values and HE audit errors are reported;
 - unsupported functionality is marked explicitly rather than approximated
   silently.
+
+The primitive benchmark additionally must:
+
+- accept several runtime row counts without regenerating a kernel;
+- read sanitized real installment parents;
+- report Python, encryption, session-method evaluation, and audit-decryption
+  latency separately;
+- report evaluation-only and online slowdown versus Python;
+- contain no `heir-opt`, generated source, CMake, or direct `Eval*` call.
