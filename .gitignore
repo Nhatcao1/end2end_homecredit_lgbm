@@ -23,6 +23,7 @@ venv/
 !/data/prepared/examples/
 !/data/prepared/examples/README.md
 !/data/prepared/examples/payment_diff_demo_group.csv
+!/data/prepared/examples/payment_diff_demo_group_*.csv
 
 # HE/HEIR secrets and generated payloads
 /keys/
