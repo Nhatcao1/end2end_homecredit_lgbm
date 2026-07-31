@@ -110,7 +110,7 @@ risk_score
 | Variance/covariance/correlation components | In `code/openfhe_direct/session.py` | Keep |
 | Weighted sum/risk score | In `code/openfhe_direct/session.py` | Keep |
 | CKKS↔FHEW minimum/maximum | Public methods in `code/openfhe_direct/session.py` | Complete |
-| Multi-group benchmark | Calls only `OpenFHECreditSession` methods | Complete |
+| Population-backed multi-group benchmark | Selects from all prepared opaque groups, reassembles complete groups, then calls only `OpenFHECreditSession` methods | Complete |
 
 The low-level scheme-switching helper remains private to the session layer.
 Benchmarks do not import it or copy its configuration.
@@ -136,7 +136,8 @@ Benchmarks do not import it or copy its configuration.
    `sum`, `mean`, and `variance`.
 3. Independent scheme-switching runs:
    `minimum` and `maximum`.
-4. Small multi-group execution with two prepared groups.
+4. Prepare the full group population, select two real opaque groups, and
+   execute each group separately in one shared session.
 5. Increase to five groups only after the two-group accuracy report passes.
 6. Larger row batches and global chunk merging are separate future work.
 

@@ -22,6 +22,7 @@ from code.openfhe_direct import OpenFHECreditSession
 from code.openfhe_direct.prepared_data import (
     PreparedPaymentGroup,
     load_prepared_group,
+    load_prepared_group_population,
     public_power_of_two_scale,
 )
 
@@ -76,18 +77,26 @@ def _write_report(
     timing: dict[str, float],
     final_audits: list[dict[str, Any]],
     status: str,
+    selection: dict[str, Any],
 ) -> None:
     lines = [
         "# OpenFHE-Python multi-group PAYMENT_DIFF",
         "",
         "One shared `OpenFHECreditSession` processes several client-prepared "
-        "groups. "
-        "For each group it encrypts both parent columns, calculates "
+        "groups selected from one run set. Each selected group is evaluated "
+        "separately; values from different groups are never mixed. For each "
+        "group it encrypts both parent columns, calculates "
         "`PAYMENT_DIFF`, then encrypted SUM, MEAN, sample VARIANCE, MINIMUM, "
         "and MAXIMUM. No ciphertext is decrypted between operations.",
         "",
         f"- Groups: `{len(groups)}`",
+        f"- Input mode: `{selection['input_mode']}`",
+        f"- Selection policy: `{selection['selection_policy']}`",
+        f"- Population groups available: "
+        f"`{selection['population_group_count']}`",
         f"- Real rows: `{sum(len(group.installment) for group in groups)}`",
+        f"- Client-invalid rows removed: "
+        f"`{sum(group.dropped_invalid_rows for group in groups)}`",
         f"- Shared CKKS width: `{slot_count}`",
         f"- Public input scale: `{input_scale:g}`",
         f"- Repetitions: `{repetitions}`",
@@ -156,7 +165,11 @@ def _write_report(
 
 def run_multigroup_benchmark(
     *,
-    prepared_groups: list[Path],
+    prepared_groups: list[Path] | None = None,
+    prepared_population_dir: Path | None = None,
+    group_count: int = 5,
+    opaque_group_ids: list[int] | None = None,
+    selection_policy: str = "spread",
     output_dir: Path,
     repetitions: int,
     ring_dimension: int,
@@ -168,8 +181,11 @@ def run_multigroup_benchmark(
     _session_factory: Callable[..., Any] | None = None,
 ) -> dict[str, Any]:
     """Run all five encrypted reductions over at least two prepared groups."""
-    if len(prepared_groups) < 2:
-        raise ValueError("provide at least two prepared groups")
+    if (prepared_groups is None) == (prepared_population_dir is None):
+        raise ValueError(
+            "provide exactly one of prepared_groups or "
+            "prepared_population_dir"
+        )
     if repetitions < 1:
         raise ValueError("repetitions must be positive")
 
@@ -182,10 +198,37 @@ def run_multigroup_benchmark(
         shutil.rmtree(root)
     root.mkdir(parents=True)
 
-    groups = [
-        load_prepared_group(path.resolve())
-        for path in prepared_groups
-    ]
+    preparation_started = time.perf_counter()
+    if prepared_population_dir is not None:
+        population = load_prepared_group_population(
+            prepared_population_dir,
+            group_count=group_count,
+            opaque_group_ids=opaque_group_ids,
+            selection_policy=selection_policy,
+        )
+        groups = population.groups
+        selection = {
+            "input_mode": "prepared_population",
+            "selection_policy": population.selection_policy,
+            "population_group_count": population.population_group_count,
+            "eligible_group_count": population.eligible_group_count,
+            "source_directory": population.source_directory,
+        }
+    else:
+        groups = [
+            load_prepared_group(path.resolve())
+            for path in (prepared_groups or [])
+        ]
+        selection = {
+            "input_mode": "individual_smoke_fixtures",
+            "selection_policy": "explicit_files",
+            "population_group_count": len(groups),
+            "eligible_group_count": len(groups),
+            "source_directory": None,
+        }
+    client_load_seconds = time.perf_counter() - preparation_started
+    if len(groups) < 2:
+        raise ValueError("provide or select at least two prepared groups")
     identifiers = [group.applicant_id for group in groups]
     if len(set(identifiers)) != len(identifiers):
         raise ValueError("prepared group identifiers must be unique")
@@ -363,9 +406,16 @@ def run_multigroup_benchmark(
         "status": status,
         "backend": "official OpenFHE Python",
         "one_shared_context": True,
+        "independent_group_execution": True,
         "scheme_switching_minmax": True,
         "group_count": len(groups),
+        "selected_opaque_groups": identifiers,
+        "selection": selection,
         "real_rows": sum(len(group.installment) for group in groups),
+        "dropped_invalid_rows": sum(
+            group.dropped_invalid_rows for group in groups
+        ),
+        "client_population_load_seconds": client_load_seconds,
         "slot_count": selected_slots,
         "ring_dimension": ring_dimension,
         "input_scale": selected_scale,
@@ -400,17 +450,45 @@ def run_multigroup_benchmark(
             if int(row["repetition"]) == repetitions
         ],
         status=status,
+        selection=selection,
     )
     return summary
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
+    inputs = parser.add_mutually_exclusive_group(required=True)
+    inputs.add_argument(
         "--prepared-group",
         nargs="+",
         type=Path,
-        required=True,
+        help="individual prepared CSVs; intended only for smoke fixtures",
+    )
+    inputs.add_argument(
+        "--prepared-population-dir",
+        type=Path,
+        help=(
+            "population-wide output from "
+            "prepare_installments_group_blocks.py"
+        ),
+    )
+    parser.add_argument(
+        "--group-count",
+        type=int,
+        default=5,
+        help="number selected from the full population; 0 selects all",
+    )
+    parser.add_argument(
+        "--opaque-group-id",
+        nargs="+",
+        type=int,
+        help="explicit opaque IDs; overrides --group-count and --selection",
+    )
+    parser.add_argument(
+        "--selection",
+        choices=("spread", "largest", "first"),
+        default="spread",
+        help="deterministic selection from the complete group population",
     )
     parser.add_argument("--repetitions", type=int, default=1)
     parser.add_argument("--ring-dimension", type=int, default=16384)
@@ -434,6 +512,10 @@ def main() -> None:
 
     result = run_multigroup_benchmark(
         prepared_groups=args.prepared_group,
+        prepared_population_dir=args.prepared_population_dir,
+        group_count=args.group_count,
+        opaque_group_ids=args.opaque_group_id,
+        selection_policy=args.selection,
         output_dir=args.output_dir,
         repetitions=args.repetitions,
         ring_dimension=args.ring_dimension,
