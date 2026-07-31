@@ -10,6 +10,7 @@ from pathlib import Path
 @dataclass(frozen=True)
 class PreparedPaymentGroup:
     applicant_id: str
+    slot_count: int
     installment: list[float]
     payment: list[float]
 
@@ -45,6 +46,7 @@ def load_prepared_group(path: Path) -> PreparedPaymentGroup:
         raise ValueError(f"expected one group with at least two rows in {path}")
     return PreparedPaymentGroup(
         applicant_id=applicants.pop(),
+        slot_count=len(rows),
         installment=installment,
         payment=payment,
     )

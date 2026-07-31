@@ -26,7 +26,7 @@ def main() -> None:
 
     group = load_prepared_group(args.prepared_group.resolve())
     session = OpenFHECreditSession(
-        slot_count=len(group.installment),
+        slot_count=group.slot_count,
         multiplicative_depth=args.multiplicative_depth,
         ring_dimension=args.ring_dimension,
     )

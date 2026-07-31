@@ -76,23 +76,23 @@ python3 code/heir/scripts/check_heir_openfhe_python.py \
 The output includes the package versions and the approved backend route for
 each calculation.
 
-## Canonical benchmarks
+## Direct OpenFHE-Python API benchmark
 
-Primitive HEIR versus optional OpenFHE-Python comparison:
+The simplified API benchmark uses only the official OpenFHE Python wrapper:
 
 ```bash
-python3 code/heir/scripts/run_python_arithmetic_backend_benchmark.py \
-  --backend both \
-  --value-count 1000 \
-  --slot-count 1024 \
-  --ring-dimension 16384 \
-  --repetitions 1 \
-  --output-dir benchmark_runs/python_arithmetic_smoke \
+python3 code/openfhe_direct/benchmark.py \
+  --prepared-group data/prepared/examples/payment_diff_demo_group.csv \
+  --repetitions 5 \
+  --multiplicative-depth 4 \
+  --output-dir benchmark_runs/openfhe_direct_api \
   --overwrite
 ```
 
-Its full metric contract and larger command are documented in
+Its small latency contract is documented in
 [`PYTHON_ARITHMETIC_BACKEND_BENCHMARK.md`](PYTHON_ARITHMETIC_BACKEND_BENCHMARK.md).
+
+## Existing HEIR and mixed-backend proofs
 
 Small independent routing proof:
 

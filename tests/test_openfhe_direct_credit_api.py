@@ -119,6 +119,7 @@ class OpenFHEDirectCreditApiTest(unittest.TestCase):
             _openfhe_module=fake_openfhe,
         )
         group = load_prepared_group(FIXTURE)
+        self.assertEqual(4, group.slot_count)
         installment = session.encrypt(group.installment)
         payment = session.encrypt(group.payment)
         difference = session.subtract(installment, payment)

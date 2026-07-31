@@ -278,7 +278,7 @@ class OpenFHECreditSession:
         return self._scalar(
             self._context.EvalSum(
                 encrypted.ciphertext,
-                encrypted.length,
+                self.slot_count,
             )
         )
 

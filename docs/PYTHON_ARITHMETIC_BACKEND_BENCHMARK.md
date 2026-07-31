@@ -1,68 +1,60 @@
-# Python arithmetic backend comparison
+# Direct OpenFHE-Python API benchmark
 
-This benchmark runs primitive encrypted arithmetic with either:
+This benchmark calls the public methods on `OpenFHECreditSession` directly.
+It does not use HEIR, generated C++, CMake, a gateway, or an HTTP client.
 
-- HEIR Python, the canonical backend;
-- OpenFHE Python, an optional comparison backend;
-- both backends on identical deterministic inputs.
-
-Operations:
+The timed functions are:
 
 ```text
-CT + CT
-CT - CT
-CT × CT
+encrypt                    decrypt
+add                        subtract
+multiply                   add_public_scalar
+add_public_vector          multiply_public_scalar
+multiply_public_vector     square
+sum                        mean
+variance_components        covariance_components
+correlation_components     weighted_sum
+risk_score
 ```
 
-Metrics:
+One local CKKS context and key set are created. The two parent columns are
+encrypted once. `PAYMENT_DIFF` is produced as ciphertext subtraction and is
+the encrypted input for the aggregate methods.
 
-| Category | Recorded values |
+The report intentionally stays small:
+
+| Result | Meaning |
 |---|---|
-| One-time cost | HEIR compilation, context/key setup |
-| Latency | Python, encryption, HE evaluation, decryption, online total |
-| Throughput | Evaluation values/s and online values/s |
-| Accuracy | MAE, maximum absolute error, mean/max relative error |
+| Setup seconds | One context and key-generation cost |
+| Parent encryption seconds | Encrypt both input columns |
+| Median method latency | Only the named API call |
+| Error/status | Final decryption used for correctness audit |
 
-`Online` means encryption + encrypted evaluation + final audit decryption.
-Compilation/setup is reported separately and is not silently amortized.
+Audit decryption is excluded from method latency.
 
-The logical inputs, packing width, public normalization scale, and requested
-ring dimension are matched. The report records the actual runtime ring
-dimension when the backend exposes it. HEIR still chooses its generated
-modulus chain, so the result is an implementation-path comparison, not a
-claim that the two backends have byte-identical cryptographic parameters.
-
-## Run both backends
+## Run
 
 ```bash
 source .venv-heir-python/bin/activate
 
-python3 code/heir/scripts/run_python_arithmetic_backend_benchmark.py \
-  --backend both \
-  --value-count 1000 50000 \
-  --slot-count 8192 \
-  --ring-dimension 16384 \
-  --decimal-places 3 \
+python3 code/openfhe_direct/benchmark.py \
+  --prepared-group data/prepared/examples/payment_diff_demo_group.csv \
   --repetitions 5 \
-  --output-dir benchmark_runs/python_arithmetic_both \
+  --multiplicative-depth 4 \
+  --output-dir benchmark_runs/openfhe_direct_api \
   --overwrite
 ```
 
-For a first smoke test:
+The previous command path remains as a compatibility entry point:
 
 ```bash
 python3 code/heir/scripts/run_python_arithmetic_backend_benchmark.py \
-  --backend both \
-  --value-count 1000 \
-  --slot-count 1024 \
-  --ring-dimension 16384 \
-  --repetitions 1 \
-  --output-dir benchmark_runs/python_arithmetic_smoke \
+  --prepared-group data/prepared/examples/payment_diff_demo_group.csv \
+  --repetitions 5 \
+  --multiplicative-depth 4 \
+  --output-dir benchmark_runs/openfhe_direct_api \
   --overwrite
 ```
-
-Run only one backend by changing `--backend` to `heir` or
-`openfhe-python`.
 
 Artifacts:
 
@@ -71,11 +63,3 @@ results.csv
 summary.json
 REPORT.md
 ```
-
-The report includes direct OpenFHE/HEIR evaluation and online latency ratios
-when both backends run.
-
-OpenFHE Python is an explicit comparison override for these primitive
-operations. It does not change the canonical policy: production-oriented
-benchmark routes continue to prefer HEIR whenever HEIR supports the
-calculation.

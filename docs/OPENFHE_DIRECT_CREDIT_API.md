@@ -57,3 +57,18 @@ python3 code/openfhe_direct/credit_rating_example.py \
 
 The example calculates `PAYMENT_DIFF = AMT_INSTALMENT - AMT_PAYMENT` after
 both parent columns are encrypted.
+
+## Latency benchmark
+
+The matching benchmark calls these same public methods directly:
+
+```bash
+python3 code/openfhe_direct/benchmark.py \
+  --prepared-group data/prepared/examples/payment_diff_demo_group.csv \
+  --repetitions 5 \
+  --multiplicative-depth 4 \
+  --output-dir benchmark_runs/openfhe_direct_api \
+  --overwrite
+```
+
+It reports one median call latency per method plus final audit accuracy.
