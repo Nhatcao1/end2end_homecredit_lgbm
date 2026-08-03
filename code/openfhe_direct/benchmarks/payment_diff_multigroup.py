@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from code.openfhe_direct import OpenFHECreditSession
+from code.openfhe_direct import CKKS_CREDIT_PROFILE, OpenFHECreditSession
 from code.openfhe_direct.prepared_data import (
     PreparedPaymentGroup,
     load_prepared_group,
@@ -499,21 +499,6 @@ def main() -> None:
         help="deterministic selection from the complete group population",
     )
     parser.add_argument("--repetitions", type=int, default=1)
-    parser.add_argument("--ring-dimension", type=int, default=16384)
-    parser.add_argument(
-        "--slot-count",
-        type=int,
-        default=0,
-        help="0 chooses the smallest power of two covering every group",
-    )
-    parser.add_argument(
-        "--input-scale",
-        type=float,
-        default=0.0,
-        help="0 chooses a public power-of-two scale from parent columns",
-    )
-    parser.add_argument("--absolute-tolerance", type=float, default=1e-6)
-    parser.add_argument("--relative-tolerance", type=float, default=1e-5)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--overwrite", action="store_true")
     args = parser.parse_args()
@@ -526,11 +511,11 @@ def main() -> None:
         selection_policy=args.selection,
         output_dir=args.output_dir,
         repetitions=args.repetitions,
-        ring_dimension=args.ring_dimension,
-        slot_count=args.slot_count,
-        input_scale=args.input_scale,
-        absolute_tolerance=args.absolute_tolerance,
-        relative_tolerance=args.relative_tolerance,
+        ring_dimension=CKKS_CREDIT_PROFILE.ring_dimension,
+        slot_count=0,
+        input_scale=0.0,
+        absolute_tolerance=CKKS_CREDIT_PROFILE.absolute_tolerance,
+        relative_tolerance=CKKS_CREDIT_PROFILE.relative_tolerance,
         overwrite=args.overwrite,
     )
     print(json.dumps(result, indent=2))

@@ -219,17 +219,18 @@ Benchmarks do not import it or copy its configuration.
 
 | Item | Required final state | Status |
 |---|---|---|
-| CKKS ring/modulus/scaling defaults | `profiles.py` | In progress |
+| CKKS ring/modulus/scaling defaults | `profiles.py` | Implemented |
 | DAG multiplicative depth | `planner.py` | Implemented for v1 operations |
 | Evaluation-key selection | Planner → session | Implemented for v1 operations |
-| Primitive benchmark HE flags | Removed from CLI | Pending |
-| SUM/MEAN/VAR benchmark HE flags | Removed from CLI | Pending |
-| Synthetic VND BGV/CKKS HE flags | Removed from CLI | Pending |
-| MIN/MAX ring/range configuration | Backend derives from data/profile | Pending |
-| Multi-group slot width/input scale | Client/backend derives automatically | Partially implemented |
+| Primitive benchmark HE flags | Removed from CLI | Implemented |
+| SUM/MEAN/VAR benchmark HE flags | Removed from CLI | Implemented |
+| Synthetic VND BGV/CKKS HE flags | Removed from CLI | Implemented |
+| MIN/MAX ring/range configuration | Backend derives from data/profile | Implemented |
+| Multi-group slot width/input scale | Client/backend derives automatically | Implemented |
 
-Do not mark the benchmark migration complete or publish new run commands until
-every normal benchmark command satisfies the user-facing contract above.
+Every normal direct OpenFHE-Python benchmark now satisfies the user-facing
+contract above. Parameter-sensitivity research must use a separately labelled
+tool and must not change these normal commands.
 
 ## Benchmark rollout
 

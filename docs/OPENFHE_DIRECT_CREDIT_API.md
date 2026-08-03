@@ -85,7 +85,6 @@ The matching benchmark calls these same public methods directly:
 python3 code/openfhe_direct/benchmarks/api_latency.py \
   --prepared-group data/prepared/examples/payment_diff_demo_group.csv \
   --repetitions 5 \
-  --multiplicative-depth 4 \
   --output-dir benchmark_runs/openfhe_direct_api \
   --overwrite
 ```

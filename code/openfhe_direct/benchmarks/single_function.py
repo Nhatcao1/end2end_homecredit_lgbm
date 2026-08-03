@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from code.openfhe_direct import OpenFHECreditSession
+from code.openfhe_direct import CKKS_CREDIT_PROFILE, OpenFHECreditSession
 from code.openfhe_direct.benchmarks.api_latency import (
     _decrypt_result,
     _error_values,
@@ -481,26 +481,35 @@ def main() -> None:
         default=Path("data/prepared/installments_columns"),
     )
     parser.add_argument("--value-count", type=int, required=True)
-    parser.add_argument("--slot-count", type=int, default=8192)
     parser.add_argument("--repetitions", type=int, default=1)
-    parser.add_argument("--multiplicative-depth", type=int, default=4)
-    parser.add_argument("--ring-dimension", type=int, default=0)
-    parser.add_argument("--absolute-tolerance", type=float, default=1e-6)
-    parser.add_argument("--relative-tolerance", type=float, default=1e-5)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--overwrite", action="store_true")
     args = parser.parse_args()
+
+    # MIN/MAX compares one complete candidate vector. Other functions stream
+    # through the fixed deployment capacity selected by the backend profile.
+    slot_count = (
+        max(2, 1 << (args.value_count - 1).bit_length())
+        if args.function in {"minimum", "maximum"}
+        else CKKS_CREDIT_PROFILE.slot_count
+    )
+    if slot_count > CKKS_CREDIT_PROFILE.slot_count:
+        raise ValueError(
+            f"{args.function} needs {slot_count} slots, above the reviewed "
+            f"backend capacity {CKKS_CREDIT_PROFILE.slot_count}; split the "
+            "research case or add and review a larger backend profile"
+        )
 
     result = run_batch_benchmark(
         function=args.function,
         prepared_dir=args.prepared_dir,
         value_count=args.value_count,
-        slot_count=args.slot_count,
+        slot_count=slot_count,
         repetitions=args.repetitions,
-        multiplicative_depth=args.multiplicative_depth,
-        ring_dimension=args.ring_dimension,
-        absolute_tolerance=args.absolute_tolerance,
-        relative_tolerance=args.relative_tolerance,
+        multiplicative_depth=CKKS_CREDIT_PROFILE.benchmark_depth,
+        ring_dimension=CKKS_CREDIT_PROFILE.ring_dimension,
+        absolute_tolerance=CKKS_CREDIT_PROFILE.absolute_tolerance,
+        relative_tolerance=CKKS_CREDIT_PROFILE.relative_tolerance,
         output_dir=args.output_dir,
         overwrite=args.overwrite,
     )

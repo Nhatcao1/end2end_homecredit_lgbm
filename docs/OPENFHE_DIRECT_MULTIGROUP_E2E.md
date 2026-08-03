@@ -53,7 +53,6 @@ python3 code/openfhe_direct/benchmarks/payment_diff_multigroup.py \
   --group-count 5 \
   --selection spread \
   --repetitions 1 \
-  --ring-dimension 16384 \
   --output-dir benchmark_runs/openfhe_payment_diff_e2e_real_5groups \
   --overwrite
 ```
@@ -69,8 +68,8 @@ The runner scans the prepared parent shards once, retains only the selected
 groups, and removes invalid numeric parent rows at the client boundary. It
 chooses one shared slot width that covers the largest complete selected group.
 It also chooses a public power-of-two scale covering both parents and the
-derived `PAYMENT_DIFF` comparison range. Use `--slot-count` or `--input-scale`
-only when an explicit public contract is required.
+derived `PAYMENT_DIFF` comparison range. Ring dimension and maximum slot
+capacity come from the reviewed backend profile rather than this command.
 
 The old `--prepared-group ...` path remains available only for small committed
 smoke fixtures.

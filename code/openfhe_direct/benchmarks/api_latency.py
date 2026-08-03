@@ -20,6 +20,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from code.openfhe_direct import (
+    CKKS_CREDIT_PROFILE,
     EncryptedScalar,
     EncryptedVector,
     OpenFHECreditSession,
@@ -410,10 +411,6 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--prepared-group", type=Path, required=True)
     parser.add_argument("--repetitions", type=int, default=5)
-    parser.add_argument("--multiplicative-depth", type=int, default=4)
-    parser.add_argument("--ring-dimension", type=int, default=0)
-    parser.add_argument("--absolute-tolerance", type=float, default=1e-6)
-    parser.add_argument("--relative-tolerance", type=float, default=1e-6)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--overwrite", action="store_true")
     args = parser.parse_args()
@@ -422,10 +419,10 @@ def main() -> None:
         prepared_group=args.prepared_group,
         output_dir=args.output_dir,
         repetitions=args.repetitions,
-        multiplicative_depth=args.multiplicative_depth,
-        ring_dimension=args.ring_dimension,
-        absolute_tolerance=args.absolute_tolerance,
-        relative_tolerance=args.relative_tolerance,
+        multiplicative_depth=CKKS_CREDIT_PROFILE.benchmark_depth,
+        ring_dimension=CKKS_CREDIT_PROFILE.ring_dimension,
+        absolute_tolerance=CKKS_CREDIT_PROFILE.absolute_tolerance,
+        relative_tolerance=CKKS_CREDIT_PROFILE.relative_tolerance,
         overwrite=args.overwrite,
     )
     print(json.dumps(summary, indent=2))

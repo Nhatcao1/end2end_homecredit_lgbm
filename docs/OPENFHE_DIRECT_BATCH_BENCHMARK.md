@@ -27,12 +27,7 @@ One command can run 1k, 5k, 100k, and 1m real values sequentially:
 python3 code/openfhe_direct/benchmarks/primitives.py \
   --prepared-dir data/prepared/installments_columns \
   --value-count 1000 5000 100000 1000000 \
-  --slot-count 8192 \
   --repetitions 5 \
-  --multiplicative-depth 4 \
-  --scaling-mod-size 50 \
-  --first-mod-size 60 \
-  --ring-dimension 16384 \
   --output-dir benchmark_runs/openfhe_direct_primitives \
   --overwrite
 ```
@@ -43,6 +38,11 @@ encryption, so their outputs are not chained. The report includes Python
 latency, client encryption, evaluator-method
 evaluation, audit decryption, throughput, accuracy, and slowdown. It does not
 run HEIR or compile generated C++.
+
+All commands in this runbook use the reviewed profiles in
+`code/openfhe_direct/profiles.py`. Ring dimension, slot capacity, depth,
+modulus sizes, tolerances, and MIN/MAX comparison width are intentionally not
+command-line options.
 
 ## Single-function runner
 
@@ -85,9 +85,7 @@ python3 code/openfhe_direct/benchmarks/single_function.py \
   --function subtract \
   --prepared-dir data/prepared/installments_columns \
   --value-count 1000 \
-  --slot-count 8192 \
   --repetitions 1 \
-  --multiplicative-depth 4 \
   --output-dir benchmark_runs/openfhe_batch_subtract_1k \
   --overwrite
 ```
@@ -99,9 +97,7 @@ python3 code/openfhe_direct/benchmarks/single_function.py \
   --function sum \
   --prepared-dir data/prepared/installments_columns \
   --value-count 1000 \
-  --slot-count 8192 \
   --repetitions 1 \
-  --multiplicative-depth 4 \
   --output-dir benchmark_runs/openfhe_batch_sum_1k \
   --overwrite
 ```
@@ -113,9 +109,7 @@ python3 code/openfhe_direct/benchmarks/single_function.py \
   --function mean \
   --prepared-dir data/prepared/installments_columns \
   --value-count 1000 \
-  --slot-count 8192 \
   --repetitions 1 \
-  --multiplicative-depth 4 \
   --output-dir benchmark_runs/openfhe_batch_mean_1k \
   --overwrite
 ```
@@ -129,10 +123,7 @@ python3 -m code.openfhe_direct.benchmarks.single_function \
   --function minimum \
   --prepared-dir data/prepared/installments_columns \
   --value-count 16 \
-  --slot-count 16 \
   --repetitions 1 \
-  --multiplicative-depth 4 \
-  --ring-dimension 16384 \
   --output-dir benchmark_runs/openfhe_minimum_16 \
   --overwrite
 ```
@@ -142,10 +133,7 @@ python3 -m code.openfhe_direct.benchmarks.single_function \
   --function maximum \
   --prepared-dir data/prepared/installments_columns \
   --value-count 16 \
-  --slot-count 16 \
   --repetitions 1 \
-  --multiplicative-depth 4 \
-  --ring-dimension 16384 \
   --output-dir benchmark_runs/openfhe_maximum_16 \
   --overwrite
 ```
@@ -189,12 +177,7 @@ python3 code/openfhe_direct/benchmarks/payment_diff_sum_mean.py \
   --operation sum \
   --installments data/home_credit/installments_payments.csv \
   --value-count 10000 50000 \
-  --slot-count 8192 \
   --repetitions 5 \
-  --multiplicative-depth 4 \
-  --scaling-mod-size 50 \
-  --first-mod-size 60 \
-  --ring-dimension 16384 \
   --output-dir benchmark_runs/openfhe_payment_diff_sum \
   --overwrite
 ```
@@ -206,12 +189,7 @@ python3 code/openfhe_direct/benchmarks/payment_diff_sum_mean.py \
   --operation mean \
   --installments data/home_credit/installments_payments.csv \
   --value-count 10000 50000 \
-  --slot-count 8192 \
   --repetitions 5 \
-  --multiplicative-depth 4 \
-  --scaling-mod-size 50 \
-  --first-mod-size 60 \
-  --ring-dimension 16384 \
   --output-dir benchmark_runs/openfhe_payment_diff_mean \
   --overwrite
 ```

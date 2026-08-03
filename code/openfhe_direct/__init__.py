@@ -17,16 +17,22 @@ from code.openfhe_direct.api import (
     HEWorkflow,
 )
 from code.openfhe_direct.planner import OPERATION_RULES, PhysicalPlan
+from code.openfhe_direct.profiles import (
+    BGV_VND_SUM_PROFILE,
+    CKKS_CREDIT_PROFILE,
+)
 
 __all__ = [
     "CorrelationComponents",
     "CompiledHEWorkflow",
+    "BGV_VND_SUM_PROFILE",
     "CovarianceComponents",
     "EncryptedScalar",
     "EncryptedInputBundle",
     "EncryptedVector",
     "HEEvaluator",
     "HEWorkflow",
+    "CKKS_CREDIT_PROFILE",
     "OPERATION_RULES",
     "OpenFHEBgvSession",
     "OpenFHECreditSession",

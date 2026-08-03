@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from code.openfhe_direct import OpenFHECreditSession
+from code.openfhe_direct import CKKS_CREDIT_PROFILE, OpenFHECreditSession
 
 
 OPERATIONS = ("sum", "mean")
@@ -525,14 +525,7 @@ def main() -> None:
         type=int,
         required=True,
     )
-    parser.add_argument("--slot-count", type=int, default=8192)
     parser.add_argument("--repetitions", type=int, default=5)
-    parser.add_argument("--multiplicative-depth", type=int, default=4)
-    parser.add_argument("--scaling-mod-size", type=int, default=50)
-    parser.add_argument("--first-mod-size", type=int, default=60)
-    parser.add_argument("--ring-dimension", type=int, default=16384)
-    parser.add_argument("--absolute-tolerance", type=float, default=1e-6)
-    parser.add_argument("--relative-tolerance", type=float, default=1e-5)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--overwrite", action="store_true")
     args = parser.parse_args()
@@ -541,14 +534,14 @@ def main() -> None:
         operation=args.operation,
         installments_csv=args.installments,
         value_counts=args.value_counts,
-        slot_count=args.slot_count,
+        slot_count=CKKS_CREDIT_PROFILE.slot_count,
         repetitions=args.repetitions,
-        multiplicative_depth=args.multiplicative_depth,
-        scaling_mod_size=args.scaling_mod_size,
-        first_mod_size=args.first_mod_size,
-        ring_dimension=args.ring_dimension,
-        absolute_tolerance=args.absolute_tolerance,
-        relative_tolerance=args.relative_tolerance,
+        multiplicative_depth=CKKS_CREDIT_PROFILE.benchmark_depth,
+        scaling_mod_size=CKKS_CREDIT_PROFILE.scaling_mod_size,
+        first_mod_size=CKKS_CREDIT_PROFILE.first_mod_size,
+        ring_dimension=CKKS_CREDIT_PROFILE.ring_dimension,
+        absolute_tolerance=CKKS_CREDIT_PROFILE.absolute_tolerance,
+        relative_tolerance=CKKS_CREDIT_PROFILE.relative_tolerance,
         output_dir=args.output_dir,
         overwrite=args.overwrite,
     )

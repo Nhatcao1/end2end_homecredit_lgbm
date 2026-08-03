@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[4]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from code.openfhe_direct import OpenFHEBgvSession
+from code.openfhe_direct import BGV_VND_SUM_PROFILE, OpenFHEBgvSession
 
 
 def _timed(
@@ -393,11 +393,7 @@ def main() -> None:
         type=int,
         required=True,
     )
-    parser.add_argument("--slot-count", type=int, default=8192)
     parser.add_argument("--repetitions", type=int, default=5)
-    parser.add_argument("--multiplicative-depth", type=int, default=0)
-    parser.add_argument("--plaintext-modulus-bits", type=int, default=40)
-    parser.add_argument("--ring-dimension", type=int, default=16384)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--overwrite", action="store_true")
     args = parser.parse_args()
@@ -405,11 +401,11 @@ def main() -> None:
     result = run_sum_matrix(
         dataset_dir=args.dataset_dir,
         value_counts=args.value_counts,
-        slot_count=args.slot_count,
+        slot_count=BGV_VND_SUM_PROFILE.slot_count,
         repetitions=args.repetitions,
-        multiplicative_depth=args.multiplicative_depth,
-        plaintext_modulus_bits=args.plaintext_modulus_bits,
-        ring_dimension=args.ring_dimension,
+        multiplicative_depth=BGV_VND_SUM_PROFILE.multiplicative_depth,
+        plaintext_modulus_bits=BGV_VND_SUM_PROFILE.plaintext_modulus_bits,
+        ring_dimension=BGV_VND_SUM_PROFILE.ring_dimension,
         output_dir=args.output_dir,
         overwrite=args.overwrite,
     )

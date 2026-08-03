@@ -8,6 +8,11 @@ import importlib
 import math
 from typing import Any
 
+from code.openfhe_direct.profiles import (
+    BGV_VND_SUM_PROFILE,
+    CKKS_CREDIT_PROFILE,
+)
+
 from code.heir.python_api.official_openfhe_minmax import (
     EncryptedOpenFheColumn,
 )
@@ -67,10 +72,10 @@ class OpenFHEBgvSession:
         *,
         slot_count: int,
         plaintext_modulus: int = 137_438_822_401,
-        multiplicative_depth: int = 0,
+        multiplicative_depth: int = BGV_VND_SUM_PROFILE.multiplicative_depth,
         scaling_mod_size: int = 59,
         first_mod_size: int = 60,
-        ring_dimension: int = 16_384,
+        ring_dimension: int = BGV_VND_SUM_PROFILE.ring_dimension,
         _openfhe_module: Any | None = None,
     ) -> None:
         if slot_count < 2:
@@ -275,10 +280,10 @@ class OpenFHECreditSession:
         self,
         *,
         slot_count: int,
-        multiplicative_depth: int = 4,
-        scaling_mod_size: int = 50,
-        first_mod_size: int = 60,
-        ring_dimension: int = 0,
+        multiplicative_depth: int = CKKS_CREDIT_PROFILE.benchmark_depth,
+        scaling_mod_size: int = CKKS_CREDIT_PROFILE.scaling_mod_size,
+        first_mod_size: int = CKKS_CREDIT_PROFILE.first_mod_size,
+        ring_dimension: int = CKKS_CREDIT_PROFILE.ring_dimension,
         input_scale: float = 1.0,
         enable_minmax: bool = False,
         _needs_eval_mult_key: bool = True,

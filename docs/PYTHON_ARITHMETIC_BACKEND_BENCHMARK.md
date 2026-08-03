@@ -37,12 +37,11 @@ Audit decryption is excluded from method latency.
 ## Run
 
 ```bash
-source .venv-heir-python/bin/activate
+source .venv-openfhe/bin/activate
 
 python3 code/openfhe_direct/benchmarks/api_latency.py \
   --prepared-group data/prepared/examples/payment_diff_demo_group.csv \
   --repetitions 5 \
-  --multiplicative-depth 4 \
   --output-dir benchmark_runs/openfhe_direct_api \
   --overwrite
 ```
@@ -53,7 +52,6 @@ The previous command path remains as a compatibility entry point:
 python3 code/heir/scripts/run_python_arithmetic_backend_benchmark.py \
   --prepared-group data/prepared/examples/payment_diff_demo_group.csv \
   --repetitions 5 \
-  --multiplicative-depth 4 \
   --output-dir benchmark_runs/openfhe_direct_api \
   --overwrite
 ```

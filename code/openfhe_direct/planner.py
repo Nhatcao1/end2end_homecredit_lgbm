@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
+from .profiles import CKKS_CREDIT_PROFILE
+
 
 Operation = Literal[
     "input",
@@ -161,7 +163,7 @@ def build_physical_plan(outputs: tuple[Expression, ...]) -> PhysicalPlan:
         operations=tuple(sorted(operations)),
         required_depth=required_depth,
         # The existing, tested CKKS session requires a minimum depth of two.
-        context_depth=max(2, required_depth),
+        context_depth=max(CKKS_CREDIT_PROFILE.minimum_depth, required_depth),
         needs_eval_mult_key=needs_mult,
         needs_eval_sum_key=needs_sum,
     )
