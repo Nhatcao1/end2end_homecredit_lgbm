@@ -67,6 +67,15 @@ This is a preference, not a claim that HEIR and direct OpenFHE ciphertexts are
 interchangeable. A combined workload may require separately encrypted branches
 until HEIR-Python exposes a shared-context/multi-output route.
 
+## Shared-context experiment
+
+`code/heir_python/experiments/shared_payment_diff_statistics/` tests the
+possible improvement without changing the stable API. It compiles one credit
+feature program that derives encrypted `PAYMENT_DIFF` from its two encrypted
+parents, shares that derived value across the three aggregates, and returns one
+encrypted `[SUM, MEAN, VARIANCE]` tensor. See the experiment README for the
+server command and the known HEIR tensor-lowering risk.
+
 ## Run
 
 ```bash
