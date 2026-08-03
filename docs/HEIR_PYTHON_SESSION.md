@@ -83,8 +83,7 @@ source .venv-heir/bin/activate
 
 python3 -m code.heir_python.example_sum_mean \
   --values 160 -100 0 \
-  --width 8 \
-  --debug
+  --width 8
 ```
 
 The package owns its official `heir.compile(..., scheme="ckks")` wrappers and

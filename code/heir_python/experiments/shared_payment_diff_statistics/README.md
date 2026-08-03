@@ -23,9 +23,11 @@ source .venv-heir/bin/activate
 python3 -m code.heir_python.experiments.shared_payment_diff_statistics.run \
   --input data/prepared/examples/payment_diff_demo_group.csv \
   --width 8 \
-  --input-scale 2048 \
-  --debug
+  --input-scale 2048
 ```
+
+Do not add `--debug` with HEIR-Python 2026.7.1 for this circuit. That option
+adds `--view-op-graph`, whose graph-generation path crashes in `heir-opt`.
 
 Expected plaintext values for the committed fixture are SUM `60`, MEAN `20`,
 and sample VARIANCE `17200`.
