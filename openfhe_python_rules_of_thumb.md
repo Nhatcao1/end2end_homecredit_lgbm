@@ -2,7 +2,21 @@
 
 This is the version-1 contract. A non-HE user declares calculations before
 encryption. The planner chooses the CKKS depth and required evaluation keys.
-Public calculation functions accept ciphertext operands only.
+Parent encryption and final decryption belong to the remote data owner.
+Public evaluator functions accept ciphertext operands only.
+
+```text
+Remote data owner
+  plan → context/key setup → encrypt parent columns
+  sends: context + evaluation keys + ciphertexts
+                         ↓
+Untrusted evaluator
+  ciphertext-only calculation; no secret key
+  returns: result ciphertexts
+                         ↓
+Remote data owner
+  final decryption
+```
 
 ## Front-facing functions
 
@@ -38,6 +52,9 @@ relinearization decisions, rescale calls, or bootstrap positions.
 11. Reject incompatible contexts and unsupported/over-depth workflows before
     evaluation.
 12. Decrypt only at the explicit application audit/output boundary.
+13. Never send the secret key to the evaluator. A production transport sends
+    only the compatible context, required evaluation keys, public ciphertext
+    metadata, and ciphertext artifacts.
 
 ## Conservative operation manifest
 
@@ -87,6 +104,12 @@ not silently enter a normal CKKS workflow.
 | `code/openfhe_direct/planner.py` | Operation rules, depth analysis, key manifest |
 | `code/openfhe_direct/session.py` | The only normal OpenFHE-Python execution layer |
 | `code/openfhe_direct/credit_rating_example.py` | Minimal PAYMENT_DIFF example |
+
+The example models the client/evaluator handoff with separate Python objects
+inside one process so it remains easy to review. In deployment, serialize that
+same evaluator context, evaluation keys, and ciphertext bundle across the
+process or machine boundary. The evaluator view deliberately contains no
+public encryption key and no secret decryption key.
 
 ## Primary references
 

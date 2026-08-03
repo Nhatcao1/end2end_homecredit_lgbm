@@ -45,7 +45,13 @@ class OpenFHEDirectPlannerTest(unittest.TestCase):
                 "payment": [640.0, 600.0, 1000.0],
             }
         )
-        results = runtime.evaluate(parents)
+        results = runtime.evaluator.evaluate(parents)
+
+        self.assertFalse(runtime.evaluator._session.can_decrypt)
+        with self.assertRaisesRegex(RuntimeError, "cannot decrypt"):
+            runtime.evaluator._session.decrypt(results["sum"])
+        with self.assertRaisesRegex(RuntimeError, "cannot encrypt"):
+            runtime.evaluator._session.encrypt([1.0, 2.0, 3.0])
 
         self.assertEqual(
             [160.0, -100.0, 0.0],

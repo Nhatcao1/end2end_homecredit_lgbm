@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from .planner import Expression, PhysicalPlan, build_physical_plan
@@ -10,6 +11,13 @@ from .session import EncryptedScalar, EncryptedVector, OpenFHECreditSession
 
 
 EncryptedValue = EncryptedVector | EncryptedScalar
+
+
+@dataclass(frozen=True)
+class EncryptedInputBundle:
+    """Ciphertext parents sent from the data owner to the evaluator."""
+
+    ciphertexts: dict[str, EncryptedVector]
 
 
 class HEWorkflow:
@@ -64,7 +72,8 @@ class HEWorkflow:
     ) -> "CompiledHEWorkflow":
         """Plan the whole DAG, then create one compatible CKKS session."""
         physical_plan = build_physical_plan(tuple(self._outputs.values()))
-        session = OpenFHECreditSession(
+        # Context/key setup and parent encryption belong to the data owner.
+        client_session = OpenFHECreditSession(
             slot_count=slot_count,
             multiplicative_depth=physical_plan.context_depth,
             _needs_eval_mult_key=physical_plan.needs_eval_mult_key,
@@ -75,47 +84,41 @@ class HEWorkflow:
             inputs=dict(self._inputs),
             outputs=dict(self._outputs),
             physical_plan=physical_plan,
-            session=session,
+            client_session=client_session,
         )
 
 
-class CompiledHEWorkflow:
-    """Execute one planned workflow using ciphertext-only calculations."""
+class HEEvaluator:
+    """Calculation-only receiver of ciphertexts and evaluation components.
+
+    This object has a compatible CKKS context and evaluation keys, but it has
+    neither the public encryption key nor the client secret key.
+    """
 
     def __init__(
         self,
         *,
         inputs: dict[str, Expression],
         outputs: dict[str, Expression],
-        physical_plan: PhysicalPlan,
         session: OpenFHECreditSession,
     ) -> None:
         self.inputs = inputs
         self.outputs = outputs
-        self.physical_plan = physical_plan
         self._session = session
-
-    def encrypt_inputs(
-        self,
-        clear_inputs: Mapping[str, Sequence[float]],
-    ) -> dict[str, EncryptedVector]:
-        missing = set(self.inputs) - set(clear_inputs)
-        extra = set(clear_inputs) - set(self.inputs)
-        if missing or extra:
-            raise ValueError(
-                f"input names do not match; missing={sorted(missing)}, "
-                f"extra={sorted(extra)}"
-            )
-        return {
-            name: self._session.encrypt(clear_inputs[name])
-            for name in self.inputs
-        }
 
     def evaluate(
         self,
-        encrypted_inputs: Mapping[str, EncryptedVector],
+        received: EncryptedInputBundle,
     ) -> dict[str, EncryptedValue]:
-        """Evaluate the immutable DAG without intermediate decryption."""
+        """Evaluate received ciphertexts without plaintext or a secret key."""
+        encrypted_inputs = received.ciphertexts
+        missing = set(self.inputs) - set(encrypted_inputs)
+        extra = set(encrypted_inputs) - set(self.inputs)
+        if missing or extra:
+            raise ValueError(
+                f"ciphertext names do not match; missing={sorted(missing)}, "
+                f"extra={sorted(extra)}"
+            )
         cache: dict[Expression, EncryptedValue] = {}
 
         def evaluate_one(expression: Expression) -> EncryptedValue:
@@ -170,5 +173,47 @@ class CompiledHEWorkflow:
     def variance(self, encrypted: EncryptedVector) -> EncryptedScalar:
         return self._session.variance(encrypted)
 
+
+class CompiledHEWorkflow:
+    """Client cryptography plus a logically separate evaluator view."""
+
+    def __init__(
+        self,
+        *,
+        inputs: dict[str, Expression],
+        outputs: dict[str, Expression],
+        physical_plan: PhysicalPlan,
+        client_session: OpenFHECreditSession,
+    ) -> None:
+        self.inputs = inputs
+        self.outputs = outputs
+        self.physical_plan = physical_plan
+        self._client_session = client_session
+        self.evaluator = HEEvaluator(
+            inputs=inputs,
+            outputs=outputs,
+            session=client_session.evaluator_view(),
+        )
+
+    def encrypt_inputs(
+        self,
+        clear_inputs: Mapping[str, Sequence[float]],
+    ) -> EncryptedInputBundle:
+        """Client-only: encrypt parents for transport to the evaluator."""
+        missing = set(self.inputs) - set(clear_inputs)
+        extra = set(clear_inputs) - set(self.inputs)
+        if missing or extra:
+            raise ValueError(
+                f"input names do not match; missing={sorted(missing)}, "
+                f"extra={sorted(extra)}"
+            )
+        return EncryptedInputBundle(
+            {
+                name: self._client_session.encrypt(clear_inputs[name])
+                for name in self.inputs
+            }
+        )
+
     def decrypt(self, encrypted: EncryptedValue) -> list[float] | float:
-        return self._session.decrypt(encrypted)
+        """Client-only: decrypt a final ciphertext returned by evaluator."""
+        return self._client_session.decrypt(encrypted)

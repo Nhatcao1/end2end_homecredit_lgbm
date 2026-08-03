@@ -10,7 +10,12 @@ from code.openfhe_direct.session import (
     VarianceComponents,
 )
 from code.openfhe_direct.prepared_data import PreparedParentColumns
-from code.openfhe_direct.api import CompiledHEWorkflow, HEWorkflow
+from code.openfhe_direct.api import (
+    CompiledHEWorkflow,
+    EncryptedInputBundle,
+    HEEvaluator,
+    HEWorkflow,
+)
 from code.openfhe_direct.planner import OPERATION_RULES, PhysicalPlan
 
 __all__ = [
@@ -18,7 +23,9 @@ __all__ = [
     "CompiledHEWorkflow",
     "CovarianceComponents",
     "EncryptedScalar",
+    "EncryptedInputBundle",
     "EncryptedVector",
+    "HEEvaluator",
     "HEWorkflow",
     "OPERATION_RULES",
     "OpenFHEBgvSession",

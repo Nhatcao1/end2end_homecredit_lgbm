@@ -3,7 +3,11 @@
 This is the small application path:
 
 ```text
-prepared credit CSV → local OpenFHE Python → encrypt → calculate → decrypt
+remote data owner: prepared CSV → encrypt
+                                 ↓
+evaluator: context + evaluation keys + ciphertexts → calculate
+                                 ↓
+remote data owner: result ciphertexts → decrypt
 ```
 
 It has no gateway URL, HTTP client, HEIR compiler, MLIR, or CMake runner.
@@ -68,7 +72,10 @@ python3 code/openfhe_direct/credit_rating_example.py \
 The example calculates `PAYMENT_DIFF = AMT_INSTALMENT - AMT_PAYMENT` after
 both parent columns are encrypted. It also returns encrypted SUM, MEAN, and
 sample VARIANCE. The planner selects the CKKS depth and key requirements; the
-application does not pass them.
+application does not pass them. For reviewability this example hands objects
+between client and evaluator roles in one process. Production transports the
+serialized context, evaluation keys, ciphertext metadata, and ciphertexts;
+the secret key remains with the remote data owner.
 
 ## Latency benchmark
 

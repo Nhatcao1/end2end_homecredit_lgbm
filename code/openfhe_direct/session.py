@@ -354,8 +354,44 @@ class OpenFHECreditSession:
         """Whether this session supports encrypted MIN/MAX."""
         return self._switching_session is not None
 
+    @property
+    def can_decrypt(self) -> bool:
+        """Whether this process owns the client-only secret key."""
+        return (
+            self._secret_key is not None
+            or self._switching_session is not None
+        )
+
+    def evaluator_view(self) -> "OpenFHECreditSession":
+        """Return a calculation-only view with no public or secret key.
+
+        The view reuses the compatible crypto context and its registered
+        evaluation keys. It can calculate over received ciphertexts but it
+        cannot encrypt new parent data or decrypt a result. A deployment can
+        serialize the same context, evaluation keys, and ciphertexts when the
+        evaluator runs in another process or machine.
+        """
+        if self._switching_session is not None:
+            raise RuntimeError(
+                "the normal evaluator view does not support MIN/MAX switching"
+            )
+        evaluator = object.__new__(OpenFHECreditSession)
+        evaluator.slot_count = self.slot_count
+        # Keep the ID because ciphertext wrappers use it to reject values from
+        # an incompatible context.
+        evaluator._session_id = self._session_id
+        evaluator._switching_session = None
+        evaluator._context = self._context
+        evaluator._public_key = None
+        evaluator._secret_key = None
+        return evaluator
+
     def encrypt(self, values: Sequence[float]) -> EncryptedVector:
         """Encode and encrypt one numeric vector."""
+        if self._public_key is None and self._switching_session is None:
+            raise RuntimeError(
+                "the evaluator received no public key and cannot encrypt"
+            )
         materialized = [float(value) for value in values]
         if not 1 <= len(materialized) <= self.slot_count:
             raise ValueError(
@@ -385,6 +421,10 @@ class OpenFHECreditSession:
     ) -> list[float] | float:
         """Decrypt only at the application-controlled final boundary."""
         self._require_session(encrypted)
+        if self._secret_key is None and self._switching_session is None:
+            raise RuntimeError(
+                "the evaluator received no secret key and cannot decrypt"
+            )
         if self._switching_session is not None:
             if isinstance(encrypted, EncryptedVector):
                 return list(

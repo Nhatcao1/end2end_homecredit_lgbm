@@ -42,15 +42,20 @@ def main() -> None:
     # OpenFHE context before any value is encrypted.
     runtime = build_workflow().compile(slot_count=group.slot_count)
 
+    # CLIENT / DATA OWNER: the parent columns are available only here. The
+    # result is a ciphertext bundle intended for transport to the evaluator.
     encrypted_inputs = runtime.encrypt_inputs(
         {
             "AMT_INSTALMENT": group.installment,
             "AMT_PAYMENT": group.payment,
         }
     )
-    encrypted_outputs = runtime.evaluate(encrypted_inputs)
+    # EVALUATOR: receives ciphertexts plus compatible context/evaluation-key
+    # components. Its view has no secret key and cannot decrypt these values.
+    encrypted_outputs = runtime.evaluator.evaluate(encrypted_inputs)
 
-    # Explicit final audit boundary. No intermediate result was decrypted.
+    # CLIENT / DATA OWNER: final ciphertexts return here for explicit audit.
+    # No intermediate result was decrypted by either role.
     result = {
         "applicant_id": group.applicant_id,
         "physical_plan": runtime.physical_plan.as_dict(),
