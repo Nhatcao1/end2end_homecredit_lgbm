@@ -2,6 +2,48 @@
 
 ## Permanent rule
 
+### User-facing benchmark contract
+
+Benchmark commands must expose only workload concerns:
+
+```text
+function / operation
+input dataset or prepared-data directory
+value count or group count
+repetitions
+output directory / overwrite
+```
+
+They must **not** expose cryptographic tuning flags such as:
+
+```text
+ring dimension
+multiplicative depth
+first/scaling modulus sizes
+plaintext-modulus bit count
+scaling technique
+key-switch technique
+rotation indices
+bootstrapping configuration
+```
+
+Those settings belong to `code/openfhe_direct/profiles.py`, the planner, and
+the session backend. A benchmark calls a function; the backend selects its
+reviewed profile and required keys. Do not add a cryptographic CLI flag as a
+quick fix for a failing benchmark. Update and test the backend rule/profile,
+then rerun the unchanged benchmark command.
+
+The only allowed command-line layout controls are genuinely data-dependent
+choices such as value/group count. Slot capacity, padding width, MIN/MAX
+candidate width, and public normalization/range scale must be derived by the
+client preparer or backend unless a separate research benchmark is explicitly
+labelled as a parameter-sensitivity experiment.
+
+This rule also applies to examples: business/application code must never pass
+HE depth, modulus, ring, rescale, relinearization, or evaluation-key options.
+
+### HE implementation boundary
+
 All homomorphic-encryption functionality must be exposed as a public method in:
 
 ```text
@@ -22,35 +64,47 @@ mean_ct = session.mean(payment_diff_ct)
 Use the exact prefix `# HE API call:` so this boundary is easy to review and
 can be checked by tests.
 
-The intended usage is:
+The intended usage is split by role:
 
 ```python
-session = OpenFHECreditSession(...)
+workflow = HEWorkflow()
+left = workflow.input("left")
+right = workflow.input("right")
+result = workflow.subtract(left, right)
+workflow.output("result", result)
 
-left_ct = session.encrypt(left)
-right_ct = session.encrypt(right)
+# Backend profile and planner choose HE parameters here.
+runtime = workflow.compile(slot_count=prepared_layout.slot_count)
 
-difference_ct = session.subtract(left_ct, right_ct)
-mean_ct = session.mean(difference_ct)
-maximum_ct = session.maximum(difference_ct)
+# Remote data owner only.
+input_bundle = runtime.encrypt_inputs({"left": left_values, "right": right_values})
 
-mean = session.decrypt(mean_ct)
-maximum = session.decrypt(maximum_ct)
+# Evaluator only: no secret key and no plaintext parents.
+encrypted_results = runtime.evaluator.evaluate(input_bundle)
+
+# Remote data owner only.
+result = runtime.decrypt(encrypted_results["result"])
 ```
 
 ## Layer ownership
 
 | Layer | Responsibility |
 |---|---|
-| `session.py` | Context creation, keys, encryption, ciphertext operations, scheme switching, decryption |
+| `profiles.py` | Reviewed fixed HE backend parameters; never business or benchmark CLI options |
+| `planner.py` | Inspect the complete DAG; derive depth and required evaluation keys before encryption |
+| `api.py` | Public workflow plus separate client-encryption/evaluator/final-decryption roles |
+| `session.py` | OpenFHE context, key, ciphertext, and operation implementation |
 | Prepared-data modules | Numeric sanitation, masks, padding, and public group layout |
-| Benchmark files | Load prepared inputs, call session methods, record latency, audit accuracy, write reports |
-| Example files | Show a readable application flow using the public session API |
+| Benchmark files | Select workload/data only, call the public API, record latency/accuracy, write reports |
+| Example files | Show business calculations without cryptographic parameters |
 
 ## Package layout
 
 ```text
 code/openfhe_direct/
+├── profiles.py                # fixed reviewed backend profiles
+├── planner.py                 # DAG depth and evaluation-key planning
+├── api.py                     # client/evaluator application boundary
 ├── session.py                 # the only public HE implementation
 ├── prepared_data.py           # reusable client-side input loading
 ├── credit_rating_example.py
@@ -77,8 +131,8 @@ OpenFHE-Python benchmarks.
 Benchmark files may:
 
 - load prepared numeric columns;
-- create one session through the public constructor;
-- call `session.encrypt()` and other public session methods;
+- request a planned runtime through the public API;
+- call client encryption, evaluator calculation, and final client audit;
 - measure setup, encryption, function, and audit latency;
 - calculate a plaintext Python reference;
 - decrypt only at the final accuracy boundary;
@@ -90,6 +144,8 @@ Benchmark files must not:
 - call `EvalAdd`, `EvalSub`, `EvalMult`, `EvalSum`, scheme-switching methods,
   or key-generation methods;
 - configure CKKS/FHEW contexts directly;
+- accept HE context/key/modulus/ring/depth options from their CLI;
+- hard-code cryptographic parameters locally in the benchmark file;
 - generate MLIR, C++, or CMake projects;
 - contain a second implementation of SUM, MEAN, VARIANCE, MIN, or MAX.
 
@@ -153,9 +209,27 @@ Benchmarks do not import it or copy its configuration.
 4. Add the method to the readable example when useful.
 5. Make benchmarks call the method; do not copy its implementation.
 6. Add an adjacent `# HE API call:` comment at every benchmark call site.
-7. Record setup requirements, multiplicative depth, scale/range contract,
-   padding behavior, and whether scheme switching is used.
-8. Run a small server smoke test before increasing groups or row counts.
+7. Add or update its rule in `planner.py` and reviewed defaults in
+   `profiles.py`; do not add corresponding benchmark CLI flags.
+8. Record setup requirements, scale/range contract, padding behavior, and
+   whether scheme switching is used in the backend/report metadata.
+9. Run a small server smoke test before increasing groups or row counts.
+
+## Parameter-ownership migration status
+
+| Item | Required final state | Status |
+|---|---|---|
+| CKKS ring/modulus/scaling defaults | `profiles.py` | In progress |
+| DAG multiplicative depth | `planner.py` | Implemented for v1 operations |
+| Evaluation-key selection | Planner → session | Implemented for v1 operations |
+| Primitive benchmark HE flags | Removed from CLI | Pending |
+| SUM/MEAN/VAR benchmark HE flags | Removed from CLI | Pending |
+| Synthetic VND BGV/CKKS HE flags | Removed from CLI | Pending |
+| MIN/MAX ring/range configuration | Backend derives from data/profile | Pending |
+| Multi-group slot width/input scale | Client/backend derives automatically | Partially implemented |
+
+Do not mark the benchmark migration complete or publish new run commands until
+every normal benchmark command satisfies the user-facing contract above.
 
 ## Benchmark rollout
 
@@ -188,6 +262,7 @@ A new benchmark is acceptable only when:
 - Python reference values and HE audit errors are reported;
 - unsupported functionality is marked explicitly rather than approximated
   silently.
+- its normal CLI contains no cryptographic parameter knobs.
 
 The primitive benchmark additionally must:
 
