@@ -4,15 +4,15 @@ This is capability-test code, not a benchmark. One HEIR-Python CKKS program:
 
 1. encrypts aligned `AMT_INSTALMENT` and `AMT_PAYMENT` parents once;
 2. calculates encrypted `PAYMENT_DIFF = AMT_INSTALMENT - AMT_PAYMENT`;
-3. shares that derived ciphertext across SUM, MEAN, and sample VARIANCE;
-4. returns one encrypted `tensor<3xf64>`;
-5. decrypts only that final tensor for review.
+3. reuses the same parent ciphertexts and context for three evaluations;
+4. selects SUM, MEAN, or sample VARIANCE using public one-hot weights;
+5. decrypts only the three final scalar ciphertexts for review.
 
 ```text
 AMT_INSTALMENT CT ─┐
-                   ├─ CT subtraction ─ PAYMENT_DIFF CT ─┬─ SUM ─────┐
-AMT_PAYMENT CT ────┘                                    ├─ MEAN ────┼─ encrypted tensor<3>
-                                                       └─ VARIANCE ┘
+                   ├─ same HEIR program ─┬─ select SUM ────── SUM CT
+AMT_PAYMENT CT ────┘                     ├─ select MEAN ───── MEAN CT
+                                         └─ select VARIANCE ─ VARIANCE CT
 ```
 
 Run from the repository root:
@@ -30,6 +30,7 @@ python3 -m code.heir_python.experiments.shared_payment_diff_statistics.run \
 Expected plaintext values for the committed fixture are SUM `60`, MEAN `20`,
 and sample VARIANCE `17200`.
 
-The experiment may expose a current HEIR-Python lowering limitation around the
-single tensor result. Failure is kept isolated here and does not change the
-stable scalar-per-program session API.
+HEIR-Python currently exposes one result decryptor (`result0`). Returning a
+`tensor<3xf64>` failed after secret lowering because each encrypted scalar had
+already become a packed ciphertext tensor. This experiment therefore keeps one
+program/context and one parent encryption, but performs three evaluations.

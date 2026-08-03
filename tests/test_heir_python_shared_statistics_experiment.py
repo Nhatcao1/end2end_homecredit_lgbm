@@ -1,5 +1,5 @@
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -28,23 +28,35 @@ class _Program:
     def encrypt_arg1(self, values):
         return values
 
-    def eval(self, installment, payment):
+    def eval(
+        self,
+        installment,
+        payment,
+        sum_weight,
+        mean_weight,
+        variance_weight,
+    ):
         differences = [a - b for a, b in zip(installment, payment)]
         total = sum(differences)
         mean = total / 3
         variance = sum((value - mean) ** 2 for value in differences[:3]) / 2
-        return [total, mean, variance]
+        return (
+            total * sum_weight
+            + mean * mean_weight
+            + variance * variance_weight
+        )
 
     def decrypt_result(self, result):
         return result
 
 
 class SharedStatisticsExperimentTest(unittest.TestCase):
-    def test_mlir_has_one_shared_feature_and_one_tensor_result(self):
+    def test_mlir_has_one_shared_feature_and_scalar_result(self):
         source = payment_diff_statistics_mlir(8, 3)
         self.assertEqual(1, source.count("%payment_diff = arith.subf"))
-        self.assertIn("tensor.from_elements", source)
-        self.assertIn("return %statistics : tensor<3xf64>", source)
+        self.assertNotIn("tensor.from_elements", source)
+        self.assertIn("%sum_weight: f64", source)
+        self.assertIn("return %selected_result : f64", source)
 
     def test_credit_fixture_runs_through_one_program(self):
         installment, payment = read_prepared_payment_group(FIXTURE)
@@ -62,11 +74,12 @@ class SharedStatisticsExperimentTest(unittest.TestCase):
                 del dtype
                 return list(values)
 
-        with patch(
-            "code.heir_python.experiments.shared_payment_diff_statistics."
-            "program._load_heir_compile",
-            return_value=lambda **_: _Program(),
-        ), patch.dict("sys.modules", {"numpy": NumPyDouble()}):
+        fake_heir = ModuleType("heir")
+        fake_heir.compile = lambda **_: _Program()
+        with patch.dict(
+            "sys.modules",
+            {"heir": fake_heir, "numpy": NumPyDouble()},
+        ):
             program = SharedPaymentDiffStatisticsProgram(
                 width=8,
                 valid_count=3,

@@ -17,18 +17,6 @@ from .kernels import (
 Operation = Literal["sum", "mean", "variance"]
 
 
-def _load_heir_compile() -> Any:
-    try:
-        from heir import compile as heir_compile
-    except ImportError as error:
-        raise RuntimeError(
-            "Install official HEIR-Python in the active Python 3.12 "
-            "environment with: python3 -m pip install "
-            "'heir_py[python,openfhe]==2026.7.1'"
-        ) from error
-    return heir_compile
-
-
 def _pack(values: Sequence[float], *, width: int, valid_count: int) -> Any:
     materialized = [float(value) for value in values]
     if len(materialized) != valid_count:
@@ -61,6 +49,13 @@ class HeirCkksAggregateProgram:
     _is_setup: bool = field(init=False, default=False, repr=False)
 
     def __post_init__(self) -> None:
+        try:
+            from heir import compile as heir_compile
+        except ImportError as error:
+            raise RuntimeError(
+                "Install official HEIR-Python in the active environment"
+            ) from error
+
         self._source = self._mlir_source()
         options = {
             "mlir_str": self._source,
@@ -69,7 +64,7 @@ class HeirCkksAggregateProgram:
         }
         if self.backend is not None:
             options["backend"] = self.backend
-        self._program = _load_heir_compile()(**options)
+        self._program = heir_compile(**options)
 
     @property
     def mlir(self) -> str:

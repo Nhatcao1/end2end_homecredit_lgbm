@@ -52,7 +52,8 @@ def main() -> None:
     print(f"HEIR PAYMENT_DIFF sample VARIANCE: {observed.sample_variance}")
     print("Shared HEIR context: True")
     print("Parent ciphertexts encrypted once: True")
-    print("Encrypted result tensor: [SUM, MEAN, VARIANCE]")
+    print("Same encrypted parents reused for three evaluations: True")
+    print("Final encrypted scalar results: SUM, MEAN, VARIANCE")
 
 
 if __name__ == "__main__":

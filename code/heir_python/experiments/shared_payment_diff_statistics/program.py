@@ -44,14 +44,17 @@ def _balanced_reduce(values: list[str], result: str, prefix: str) -> list[str]:
 
 
 def payment_diff_statistics_mlir(width: int, valid_count: int) -> str:
-    """Return one encrypted tensor containing SUM, MEAN, sample VARIANCE."""
+    """Return one selected encrypted PAYMENT_DIFF statistic."""
     _validate(width, valid_count)
     tensor = f"tensor<{width}xf64>"
     lines = [
         "func.func @payment_diff_shared_statistics(",
         f"    %installment: {tensor} {{secret.secret}},",
-        f"    %payment: {tensor} {{secret.secret}}",
-        ") -> tensor<3xf64> {",
+        f"    %payment: {tensor} {{secret.secret}},",
+        "    %sum_weight: f64,",
+        "    %mean_weight: f64,",
+        "    %variance_weight: f64",
+        ") -> f64 {",
         f"  %payment_diff = arith.subf %installment, %payment : {tensor}",
         f"  %squares = arith.mulf %payment_diff, %payment_diff : {tensor}",
     ]
@@ -92,23 +95,21 @@ def payment_diff_statistics_mlir(width: int, valid_count: int) -> str:
             f"{inverse_sample_count:.17g} : f64",
             "  %variance_result = arith.mulf "
             "%centered_square_sum, %inverse_sample_count : f64",
-            "  %statistics = tensor.from_elements "
-            "%sum_result, %mean_result, %variance_result : tensor<3xf64>",
-            "  return %statistics : tensor<3xf64>",
+            "  %selected_sum = arith.mulf "
+            "%sum_result, %sum_weight : f64",
+            "  %selected_mean = arith.mulf "
+            "%mean_result, %mean_weight : f64",
+            "  %selected_variance = arith.mulf "
+            "%variance_result, %variance_weight : f64",
+            "  %selected_sum_mean = arith.addf "
+            "%selected_sum, %selected_mean : f64",
+            "  %selected_result = arith.addf "
+            "%selected_sum_mean, %selected_variance : f64",
+            "  return %selected_result : f64",
             "}",
         ]
     )
     return "\n".join(lines) + "\n"
-
-
-def _load_heir_compile() -> Any:
-    try:
-        from heir import compile as heir_compile
-    except ImportError as error:
-        raise RuntimeError(
-            "activate .venv-heir and install heir_py[python,openfhe]"
-        ) from error
-    return heir_compile
 
 
 def _pack(values: Sequence[float], width: int, scale: float) -> Any:
@@ -153,6 +154,13 @@ class SharedPaymentDiffStatisticsProgram:
         input_scale: float = 2048.0,
         debug: bool = False,
     ) -> None:
+        try:
+            from heir import compile as heir_compile
+        except ImportError as error:
+            raise RuntimeError(
+                "Install official HEIR-Python in the active environment"
+            ) from error
+
         _validate(width, valid_count)
         if input_scale <= 0 or not math.isfinite(input_scale):
             raise ValueError("input_scale must be finite and positive")
@@ -160,7 +168,7 @@ class SharedPaymentDiffStatisticsProgram:
         self.valid_count = valid_count
         self.input_scale = input_scale
         self.mlir = payment_diff_statistics_mlir(width, valid_count)
-        self._program = _load_heir_compile()(
+        self._program = heir_compile(
             mlir_str=self.mlir,
             scheme="ckks",
             debug=debug,
@@ -196,17 +204,24 @@ class SharedPaymentDiffStatisticsProgram:
             getattr(self._program, f"encrypt_{names[1]}")(packed_payment),
         )
 
-    def eval(self, encrypted_parents: tuple[Any, Any]) -> Any:
-        """Return one encrypted tensor; do not decrypt intermediate values."""
+    def eval(self, encrypted_parents: tuple[Any, Any]) -> tuple[Any, Any, Any]:
+        """Evaluate three scalar outputs using the same encrypted parents."""
         self._require_setup()
-        return self._program.eval(*encrypted_parents)
+        return (
+            self._program.eval(*encrypted_parents, 1.0, 0.0, 0.0),
+            self._program.eval(*encrypted_parents, 0.0, 1.0, 0.0),
+            self._program.eval(*encrypted_parents, 0.0, 0.0, 1.0),
+        )
 
-    def decrypt(self, encrypted_statistics: Any) -> PaymentDiffStatistics:
-        """Decrypt only the final [SUM, MEAN, VARIANCE] audit tensor."""
+    def decrypt(
+        self,
+        encrypted_statistics: tuple[Any, Any, Any],
+    ) -> PaymentDiffStatistics:
+        """Decrypt only the three final aggregate ciphertexts."""
         self._require_setup()
         decoded = [
-            float(value)
-            for value in self._program.decrypt_result(encrypted_statistics)
+            float(self._program.decrypt_result(value))
+            for value in encrypted_statistics
         ]
         if len(decoded) != 3:
             raise RuntimeError("expected three decoded statistics")

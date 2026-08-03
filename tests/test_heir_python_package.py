@@ -1,5 +1,5 @@
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -34,10 +34,9 @@ class HeirPythonPackageTest(unittest.TestCase):
             calls.append(options)
             return _CompiledProgram()
 
-        with patch(
-            "code.heir_python.aggregates._load_heir_compile",
-            return_value=fake_compile,
-        ):
+        fake_heir = ModuleType("heir")
+        fake_heir.compile = fake_compile
+        with patch.dict("sys.modules", {"heir": fake_heir}):
             programs = [
                 compile_sum(width=8, valid_count=3),
                 compile_mean(width=8, valid_count=3),

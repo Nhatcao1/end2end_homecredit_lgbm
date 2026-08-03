@@ -71,10 +71,9 @@ until HEIR-Python exposes a shared-context/multi-output route.
 
 `code/heir_python/experiments/shared_payment_diff_statistics/` tests the
 possible improvement without changing the stable API. It compiles one credit
-feature program that derives encrypted `PAYMENT_DIFF` from its two encrypted
-parents, shares that derived value across the three aggregates, and returns one
-encrypted `[SUM, MEAN, VARIANCE]` tensor. See the experiment README for the
-server command and the known HEIR tensor-lowering risk.
+feature program and encrypts its two parents once. Because the current Python
+backend exposes only one result decryptor, the program is evaluated three times
+with public selectors to produce encrypted SUM, MEAN, and VARIANCE scalars.
 
 ## Run
 
