@@ -24,6 +24,9 @@ class _Parameters:
     def SetFirstModSize(self, value):
         self.first = value
 
+    def SetScalingTechnique(self, value):
+        self.scaling_technique = value
+
     def SetBatchSize(self, value):
         self.batch = value
 
@@ -99,6 +102,7 @@ class _OpenFHE:
     KEYSWITCH = "KEYSWITCH"
     LEVELEDSHE = "LEVELEDSHE"
     ADVANCEDSHE = "ADVANCEDSHE"
+    FLEXIBLEAUTO = "FLEXIBLEAUTO"
 
     def __init__(self):
         self.context = _Context()
@@ -201,8 +205,9 @@ class OpenFHEDirectCreditApiTest(unittest.TestCase):
 
     def test_example_has_no_gateway_or_heir_path(self):
         source = EXAMPLE.read_text(encoding="utf-8")
-        self.assertIn("OpenFHECreditSession(", source)
-        self.assertIn("session.subtract(", source)
+        self.assertIn("HEWorkflow", source)
+        self.assertIn("workflow.subtract(", source)
+        self.assertIn("workflow.variance(", source)
         self.assertNotIn("gateway", source.lower())
         self.assertNotIn("he_client", source)
         self.assertNotIn("heir", source.lower())

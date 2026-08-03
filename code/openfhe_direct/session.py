@@ -254,6 +254,8 @@ class OpenFHECreditSession:
         ring_dimension: int = 0,
         input_scale: float = 1.0,
         enable_minmax: bool = False,
+        _needs_eval_mult_key: bool = True,
+        _needs_eval_sum_key: bool = True,
         _openfhe_module: Any | None = None,
         _switching_session: Any | None = None,
     ) -> None:
@@ -302,6 +304,7 @@ class OpenFHECreditSession:
         parameters.SetMultiplicativeDepth(multiplicative_depth)
         parameters.SetScalingModSize(scaling_mod_size)
         parameters.SetFirstModSize(first_mod_size)
+        parameters.SetScalingTechnique(of.FLEXIBLEAUTO)
         parameters.SetBatchSize(slot_count)
         if ring_dimension:
             parameters.SetRingDim(ring_dimension)
@@ -315,7 +318,7 @@ class OpenFHECreditSession:
         ):
             context.Enable(feature)
 
-        required_methods = (
+        required_methods = [
             "MakeCKKSPackedPlaintext",
             "Encrypt",
             "Decrypt",
@@ -323,9 +326,11 @@ class OpenFHECreditSession:
             "EvalSub",
             "EvalMult",
             "EvalSum",
-            "EvalMultKeyGen",
-            "EvalSumKeyGen",
-        )
+        ]
+        if _needs_eval_mult_key:
+            required_methods.append("EvalMultKeyGen")
+        if _needs_eval_sum_key:
+            required_methods.append("EvalSumKeyGen")
         missing = [
             name for name in required_methods if not hasattr(context, name)
         ]
@@ -335,8 +340,10 @@ class OpenFHECreditSession:
             )
 
         keys = context.KeyGen()
-        context.EvalMultKeyGen(keys.secretKey)
-        context.EvalSumKeyGen(keys.secretKey)
+        if _needs_eval_mult_key:
+            context.EvalMultKeyGen(keys.secretKey)
+        if _needs_eval_sum_key:
+            context.EvalSumKeyGen(keys.secretKey)
 
         self._context = context
         self._public_key = keys.publicKey
