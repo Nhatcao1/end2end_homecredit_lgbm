@@ -19,7 +19,14 @@ class _FakeProgram:
 
     def eval(self, encrypted):
         total = sum(encrypted)
-        return total if self.operation == "sum" else total / len(encrypted)
+        if self.operation == "sum":
+            return total
+        mean = total / len(encrypted)
+        if self.operation == "mean":
+            return mean
+        return sum((value - mean) ** 2 for value in encrypted) / (
+            len(encrypted) - 1
+        )
 
     def decrypt(self, encrypted):
         return encrypted
@@ -40,19 +47,22 @@ class HeirPythonSessionTest(unittest.TestCase):
             _program_factory=factory,
         )
 
-    def test_sum_and_mean_are_encrypted_until_explicit_decrypt(self):
+    def test_aggregates_are_encrypted_until_explicit_decrypt(self):
         self.session.setup()
         encrypted = self.session.encrypt([160.0, -100.0, 0.0])
         encrypted_sum = self.session.sum(encrypted)
         encrypted_mean = self.session.mean(encrypted)
+        encrypted_variance = self.session.variance(encrypted)
 
         self.assertEqual(60.0, self.session.decrypt(encrypted_sum))
         self.assertEqual(20.0, self.session.decrypt(encrypted_mean))
+        self.assertEqual(17200.0, self.session.decrypt(encrypted_variance))
         self.assertFalse(
-            self.session.uses_one_ciphertext_for_both_aggregates
+            self.session.uses_one_ciphertext_for_all_aggregates
         )
         self.assertEqual(1, self.programs["sum"].encrypt_calls)
         self.assertEqual(1, self.programs["mean"].encrypt_calls)
+        self.assertEqual(1, self.programs["variance"].encrypt_calls)
 
     def test_setup_is_required_and_idempotent(self):
         with self.assertRaisesRegex(RuntimeError, "call setup"):
@@ -61,6 +71,15 @@ class HeirPythonSessionTest(unittest.TestCase):
         self.session.setup()
         self.assertEqual(1, self.programs["sum"].setup_calls)
         self.assertEqual(1, self.programs["mean"].setup_calls)
+        self.assertEqual(1, self.programs["variance"].setup_calls)
+
+    def test_minimum_and_maximum_route_to_openfhe_python(self):
+        self.session.setup()
+        encrypted = self.session.encrypt([1.0, 2.0, 3.0])
+        with self.assertRaisesRegex(NotImplementedError, "OpenFHECreditSession"):
+            self.session.minimum(encrypted)
+        with self.assertRaisesRegex(NotImplementedError, "OpenFHECreditSession"):
+            self.session.maximum(encrypted)
 
     def test_rejects_foreign_ciphertext(self):
         self.session.setup()
@@ -84,6 +103,7 @@ class HeirPythonSessionTest(unittest.TestCase):
         self.assertIn("HeirCkksSession", source)
         self.assertIn("session.sum(encrypted_values)", source)
         self.assertIn("session.mean(encrypted_values)", source)
+        self.assertIn("session.variance(encrypted_values)", source)
         self.assertNotIn("import openfhe", source)
         self.assertNotIn("subprocess", source)
 

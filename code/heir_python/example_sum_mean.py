@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run SUM and MEAN through the small HEIR-Python session API."""
+"""Run SUM, MEAN, and VARIANCE through the HEIR-Python session API."""
 
 from __future__ import annotations
 
@@ -27,24 +27,31 @@ def main() -> None:
     )
     session.setup()
 
-    # One logical input, represented by two HEIR-owned encrypted branches.
+    # One logical input represented by HEIR-program-owned encrypted branches.
     encrypted_values = session.encrypt(args.values)
     encrypted_sum = session.sum(encrypted_values)
     encrypted_mean = session.mean(encrypted_values)
+    encrypted_variance = session.variance(encrypted_values)
 
     # Decryption is explicit and occurs only at this final audit boundary.
     observed_sum = session.decrypt(encrypted_sum)
     observed_mean = session.decrypt(encrypted_mean)
+    observed_variance = session.decrypt(encrypted_variance)
     expected_sum = sum(args.values)
     expected_mean = expected_sum / len(args.values)
+    expected_variance = sum(
+        (value - expected_mean) ** 2 for value in args.values
+    ) / (len(args.values) - 1)
 
     print(f"Python SUM: {expected_sum}")
     print(f"HEIR CKKS SUM: {observed_sum}")
     print(f"Python MEAN: {expected_mean}")
     print(f"HEIR CKKS MEAN: {observed_mean}")
+    print(f"Python sample VARIANCE: {expected_variance}")
+    print(f"HEIR CKKS sample VARIANCE: {observed_variance}")
     print(
-        "One ciphertext shared by SUM and MEAN: "
-        f"{session.uses_one_ciphertext_for_both_aggregates}"
+        "One physical ciphertext shared by all aggregates: "
+        f"{session.uses_one_ciphertext_for_all_aggregates}"
     )
 
 

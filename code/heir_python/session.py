@@ -1,11 +1,11 @@
-"""Session-style SUM and MEAN API using official HEIR-Python compilation.
+"""Session-style CKKS aggregates using official HEIR-Python compilation.
 
 This module deliberately does not import OpenFHE directly. HEIR compiles each
 aggregate for its OpenFHE backend and owns that program's context and keys.
 
-Current HEIR-Python exposes SUM and MEAN as separate compiled programs. Their
-ciphertexts are not interchangeable. ``encrypt()`` therefore creates one
-encrypted branch per program and keeps that fact visible in the data type.
+Current HEIR-Python exposes SUM, MEAN, and VARIANCE as separate compiled
+programs. Their ciphertexts are not interchangeable. ``encrypt()`` therefore
+creates one encrypted branch per program and keeps that fact visible.
 """
 
 from __future__ import annotations
@@ -18,10 +18,11 @@ from typing import Any, Literal
 from code.heir.python_api.official_ckks_aggregates import (
     compile_mean,
     compile_sum,
+    compile_variance,
 )
 
 
-Aggregate = Literal["sum", "mean"]
+Aggregate = Literal["sum", "mean", "variance"]
 ProgramFactory = Callable[..., Any]
 
 
@@ -31,6 +32,7 @@ class EncryptedColumn:
 
     sum_branch: Any
     mean_branch: Any
+    variance_branch: Any
     length: int
     session_id: int
 
@@ -45,7 +47,7 @@ class EncryptedScalar:
 
 
 class HeirCkksSession:
-    """Compile and reuse official HEIR CKKS SUM and MEAN programs.
+    """Compile and reuse official HEIR CKKS aggregate programs.
 
     ``width`` is the public packed width and ``valid_count`` is the public
     number of real values. These are compile-time circuit properties.
@@ -72,24 +74,25 @@ class HeirCkksSession:
         self._is_setup = False
 
     @property
-    def uses_one_ciphertext_for_both_aggregates(self) -> bool:
+    def uses_one_ciphertext_for_all_aggregates(self) -> bool:
         """False because current HEIR programs own separate contexts."""
         return False
 
     def setup(self) -> None:
-        """Compile both HEIR programs and create both contexts/key sets."""
+        """Compile HEIR programs and create their contexts/key sets."""
         if self._is_setup:
             return
         self._programs = {
             "sum": self._create_program("sum"),
             "mean": self._create_program("mean"),
+            "variance": self._create_program("variance"),
         }
         for program in self._programs.values():
             program.setup()
         self._is_setup = True
 
     def encrypt(self, values: Sequence[float]) -> EncryptedColumn:
-        """Encrypt one logical column into its SUM and MEAN branches."""
+        """Encrypt one logical column into aggregate-owned branches."""
         self._require_setup()
         materialized = [float(value) for value in values]
         if len(materialized) != self.valid_count:
@@ -102,6 +105,7 @@ class HeirCkksSession:
         return EncryptedColumn(
             sum_branch=self._programs["sum"].encrypt(materialized),
             mean_branch=self._programs["mean"].encrypt(materialized),
+            variance_branch=self._programs["variance"].encrypt(materialized),
             length=len(materialized),
             session_id=self._session_id,
         )
@@ -124,6 +128,33 @@ class HeirCkksSession:
             session_id=self._session_id,
         )
 
+    def variance(self, encrypted: EncryptedColumn) -> EncryptedScalar:
+        """Return encrypted sample variance from its HEIR-owned branch."""
+        self._require_column(encrypted)
+        return EncryptedScalar(
+            ciphertext=self._programs["variance"].eval(
+                encrypted.variance_branch
+            ),
+            operation="variance",
+            session_id=self._session_id,
+        )
+
+    def minimum(self, encrypted: EncryptedColumn) -> EncryptedScalar:
+        """Explain the required OpenFHE-Python scheme-switching route."""
+        self._require_column(encrypted)
+        raise NotImplementedError(
+            "HEIR-Python CKKS does not currently expose the CKKS-to-FHEW "
+            "minimum route; select OpenFHECreditSession before encryption"
+        )
+
+    def maximum(self, encrypted: EncryptedColumn) -> EncryptedScalar:
+        """Explain the required OpenFHE-Python scheme-switching route."""
+        self._require_column(encrypted)
+        raise NotImplementedError(
+            "HEIR-Python CKKS does not currently expose the CKKS-to-FHEW "
+            "maximum route; select OpenFHECreditSession before encryption"
+        )
+
     def decrypt(self, encrypted: EncryptedScalar) -> float:
         """Decrypt one final scalar with its owning HEIR program."""
         self._require_scalar(encrypted)
@@ -138,9 +169,11 @@ class HeirCkksSession:
         encrypted = self.encrypt(values)
         encrypted_sum = self.sum(encrypted)
         encrypted_mean = self.mean(encrypted)
+        encrypted_variance = self.variance(encrypted)
         return {
             "sum": self.decrypt(encrypted_sum),
             "mean": self.decrypt(encrypted_mean),
+            "variance": self.decrypt(encrypted_variance),
         }
 
     def _create_program(self, operation: Aggregate) -> Any:
@@ -151,7 +184,12 @@ class HeirCkksSession:
                 valid_count=self.valid_count,
                 debug=self.debug,
             )
-        compiler = compile_sum if operation == "sum" else compile_mean
+        compilers = {
+            "sum": compile_sum,
+            "mean": compile_mean,
+            "variance": compile_variance,
+        }
+        compiler = compilers[operation]
         return compiler(
             width=self.width,
             valid_count=self.valid_count,
@@ -160,7 +198,9 @@ class HeirCkksSession:
 
     def _require_setup(self) -> None:
         if not self._is_setup:
-            raise RuntimeError("call setup() before encrypt/sum/mean/decrypt")
+            raise RuntimeError(
+                "call setup() before encrypt/aggregate/decrypt"
+            )
 
     def _require_column(self, encrypted: EncryptedColumn) -> None:
         self._require_setup()
