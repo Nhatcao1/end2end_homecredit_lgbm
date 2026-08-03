@@ -15,7 +15,7 @@ from dataclasses import dataclass
 import math
 from typing import Any, Literal
 
-from code.heir.python_api.official_ckks_aggregates import (
+from .aggregates import (
     compile_mean,
     compile_sum,
     compile_variance,

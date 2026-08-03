@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import argparse
 
-from code.heir_python import HeirCkksSession
+from . import HeirCkksSession
 
 
 def main() -> None:

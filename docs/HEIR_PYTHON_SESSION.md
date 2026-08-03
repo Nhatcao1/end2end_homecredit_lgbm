@@ -18,6 +18,18 @@ mean_value = session.decrypt(mean_ct)
 variance_value = session.decrypt(variance_ct)
 ```
 
+## Package layout
+
+| File | Responsibility |
+|---|---|
+| `kernels.py` | Self-contained SUM, MEAN, and VARIANCE MLIR generation |
+| `aggregates.py` | Official `heir.compile` programs, packing, encrypt/eval/decrypt |
+| `session.py` | Small application-facing encrypted-column API |
+| `example_sum_mean.py` | Runnable usage example without benchmark/report code |
+
+Internal imports are relative, so this directory can later become a standalone
+Python distribution without depending on the legacy `code/heir` package.
+
 ## Public methods
 
 | Method | Input | Output |
@@ -67,6 +79,7 @@ python3 -m code.heir_python.example_sum_mean \
   --debug
 ```
 
-The implementation uses the official `heir.compile(..., scheme="ckks")`
-route through the existing aggregate compiler. It does not import OpenFHE,
-invoke CMake, or run generated C++ directly.
+The package owns its official `heir.compile(..., scheme="ckks")` wrappers and
+MLIR sources in `code/heir_python/aggregates.py` and
+`code/heir_python/kernels.py`. It has no dependency on the legacy `code/heir`
+tree. It does not import OpenFHE, invoke CMake, or run generated C++ directly.
