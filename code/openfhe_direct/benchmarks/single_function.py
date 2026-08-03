@@ -168,7 +168,8 @@ def _call_function(
 def _run_repetition(
     *,
     function: str,
-    session: OpenFHECreditSession,
+    client: OpenFHECreditSession,
+    evaluator: OpenFHECreditSession,
     groups: list[PreparedPaymentGroup],
     absolute_tolerance: float,
     relative_tolerance: float,
@@ -184,9 +185,9 @@ def _run_repetition(
         expected = _expected_values(group)[function]
         if function == "encrypt":
             # HE API call: OpenFHECreditSession.encrypt(AMT_INSTALMENT)
-            result, elapsed = _timed(session.encrypt, group.installment)
+            result, elapsed = _timed(client.encrypt, group.installment)
             function_seconds += elapsed
-            observed, elapsed = _timed(_decrypt_result, session, result)
+            observed, elapsed = _timed(_decrypt_result, client, result)
             audit_seconds += elapsed
         else:
             installment_ct = None
@@ -194,14 +195,14 @@ def _run_repetition(
             if function != "add_public_vector":
                 # HE API call: OpenFHECreditSession.encrypt(AMT_INSTALMENT)
                 installment_ct, elapsed = _timed(
-                    session.encrypt,
+                    client.encrypt,
                     group.installment,
                 )
                 parent_encrypt_seconds += elapsed
             if function not in {"decrypt", "minimum", "maximum"}:
                 # HE API call: OpenFHECreditSession.encrypt(AMT_PAYMENT)
                 payment_ct, elapsed = _timed(
-                    session.encrypt,
+                    client.encrypt,
                     group.payment,
                 )
                 parent_encrypt_seconds += elapsed
@@ -209,7 +210,7 @@ def _run_repetition(
             if function in DIFFERENCE_INPUT_FUNCTIONS:
                 # HE API call: OpenFHECreditSession.subtract(parent ciphertexts)
                 difference_ct, elapsed = _timed(
-                    session.subtract,
+                    evaluator.subtract,
                     installment_ct,
                     payment_ct,
                 )
@@ -217,7 +218,7 @@ def _run_repetition(
             result, elapsed = _timed(
                 _call_function,
                 function,
-                session,
+                client if function == "decrypt" else evaluator,
                 group,
                 installment_ct,
                 payment_ct,
@@ -229,7 +230,7 @@ def _run_repetition(
             else:
                 observed, elapsed = _timed(
                     _decrypt_result,
-                    session,
+                    client,
                     result,
                 )
                 audit_seconds += elapsed
@@ -282,6 +283,15 @@ def _write_report(
         f"- Ciphertext chunks: `{chunk_count}`",
         f"- Repetitions: `{repetitions}`",
         f"- Shared setup/key generation: `{setup_seconds:.9f}` seconds",
+        *(
+            ["- Client/evaluator roles: `separated`"]
+            if function not in {"minimum", "maximum"}
+            else [
+                "- Client/evaluator roles: `same-process exception`",
+                "- Reason: CKKS/FHEW switching transport is not exposed by "
+                "the current Python path",
+            ]
+        ),
         *(
             [
                 f"- CKKS/FHEW public input scale: `{input_scale:g}`",
@@ -379,17 +389,23 @@ def run_batch_benchmark(
     else:
         session_options["_openfhe_module"] = _openfhe_module
     # HE API call: OpenFHECreditSession(...) creates context and keys.
-    session, setup_seconds = _timed(
+    client, setup_seconds = _timed(
         factory,
         **session_options,
     )
+    # The ordinary CKKS functions use a secretless evaluator view. Existing
+    # CKKS/FHEW MIN/MAX remains a separately tracked same-process exception
+    # until its switching material can be transported by OpenFHE Python.
+    separated_roles = not minmax
+    evaluator = client.evaluator_view() if separated_roles else client
 
     rows = [
         {
             "repetition": repetition,
             **_run_repetition(
                 function=function,
-                session=session,
+                client=client,
+                evaluator=evaluator,
                 groups=groups,
                 absolute_tolerance=absolute_tolerance,
                 relative_tolerance=relative_tolerance,
@@ -421,6 +437,7 @@ def run_batch_benchmark(
         "repetitions": repetitions,
         "setup_seconds": setup_seconds,
         "input_scale": input_scale,
+        "client_evaluator_separated": separated_roles,
         **medians,
         "max_abs_error": max(float(row["max_abs_error"]) for row in rows),
         "max_relative_error": max(

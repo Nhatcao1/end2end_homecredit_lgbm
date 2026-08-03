@@ -57,7 +57,8 @@ def _numpy_sum(values: list[int]) -> tuple[int, float]:
 
 def _run_repetition(
     *,
-    session: OpenFHECreditSession,
+    client: OpenFHECreditSession,
+    evaluator: OpenFHECreditSession,
     raw_values: list[int],
     normalization_divisor: float,
     repetition: int,
@@ -69,12 +70,12 @@ def _run_repetition(
     expected_normalized_sum = expected / normalization_divisor
 
     # HE API call: OpenFHECreditSession.encrypt(normalized values)
-    encrypted, encrypt_seconds = _timed(session.encrypt, normalized)
+    encrypted, encrypt_seconds = _timed(client.encrypt, normalized)
     # HE API call: OpenFHECreditSession.sum(encrypted)
-    encrypted_sum, sum_seconds = _timed(session.sum, encrypted)
+    encrypted_sum, sum_seconds = _timed(evaluator.sum, encrypted)
     # HE API call: OpenFHECreditSession.decrypt(encrypted_sum)
     normalized_observed, decrypt_seconds = _timed(
-        session.decrypt,
+        client.decrypt,
         encrypted_sum,
     )
     observed_vnd = float(normalized_observed) * normalization_divisor
@@ -142,6 +143,7 @@ def _write_report(
         f"- Ring dimension: `{ring_dimension}`",
         f"- Repetitions: `{repetitions}`",
         f"- Context/key setup: `{setup_seconds:.9f}` seconds",
+        "- Client/evaluator roles: `separated`",
         "- Acceptance: absolute error and relative error must both pass",
         "",
         "| Expected normalized SUM | Decrypted normalized SUM | "
@@ -208,7 +210,7 @@ def run_ckks_sum_count(
     values = _read_values(dataset_path.resolve(), value_count)
     factory = _session_factory or OpenFHECreditSession
     # HE API call: OpenFHECreditSession(...) creates CKKS context and keys.
-    session, setup_seconds = _timed(
+    client, setup_seconds = _timed(
         factory,
         slot_count=slot_count,
         multiplicative_depth=multiplicative_depth,
@@ -216,9 +218,11 @@ def run_ckks_sum_count(
         first_mod_size=first_mod_size,
         ring_dimension=ring_dimension,
     )
+    evaluator = client.evaluator_view()
     rows = [
         _run_repetition(
-            session=session,
+            client=client,
+            evaluator=evaluator,
             raw_values=values,
             normalization_divisor=normalization_divisor,
             repetition=repetition,
@@ -240,6 +244,7 @@ def run_ckks_sum_count(
         "relative_tolerance": relative_tolerance,
         "acceptance_rule": "both tolerances must pass",
         "setup_seconds": setup_seconds,
+        "client_evaluator_separated": True,
     }
     with (root / "results.csv").open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=list(rows[0]))

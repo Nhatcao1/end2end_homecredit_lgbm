@@ -16,7 +16,7 @@ BENCHMARKS = (
 
 
 class OpenFHEBenchmarkApiCommentTest(unittest.TestCase):
-    def test_every_session_method_reference_has_adjacent_api_comment(self):
+    def test_every_role_method_reference_has_adjacent_api_comment(self):
         for path in BENCHMARKS:
             source = path.read_text(encoding="utf-8")
             lines = source.splitlines()
@@ -26,14 +26,15 @@ class OpenFHEBenchmarkApiCommentTest(unittest.TestCase):
                 for node in ast.walk(tree)
                 if isinstance(node, ast.Attribute)
                 and isinstance(node.value, ast.Name)
-                and node.value.id == "session"
+                and node.value.id in {"client", "evaluator", "session"}
+                and node.attr not in {"evaluator_view"}
             ]
             self.assertTrue(references, path.name)
             for reference in references:
                 preceding = lines[max(0, reference.lineno - 4):reference.lineno]
                 self.assertTrue(
                     any("# HE API call:" in line for line in preceding),
-                    f"{path.name}:{reference.lineno} session."
+                    f"{path.name}:{reference.lineno} {reference.value.id}."
                     f"{reference.attr} lacks an adjacent HE API comment",
                 )
 

@@ -10,15 +10,16 @@ runner is:
 code/openfhe_direct/benchmarks/primitives.py
 ```
 
-It maps the reported operations directly to `session.py`:
+The remote client performs encryption and final audit decryption. The
+secretless evaluator view maps the reported calculations to `session.py`:
 
 | Report | Public session call |
 |---|---|
-| `CT+CT` | `session.add(left_ct, right_ct)` |
-| `CT-CT` | `session.subtract(left_ct, right_ct)` |
-| `CT×CT` | `session.multiply(left_ct, right_ct)` |
-| `CT+PT` | `session.add_public_vector(left_ct, right_values)` |
-| `CT×PT` | `session.multiply_public_vector(left_ct, right_values)` |
+| `CT+CT` | `evaluator.add(left_ct, right_ct)` |
+| `CT-CT` | `evaluator.subtract(left_ct, right_ct)` |
+| `CT×CT` | `evaluator.multiply(left_ct, right_ct)` |
+| `CT+PT` | `evaluator.add_public_vector(left_ct, right_values)` |
+| `CT×PT` | `evaluator.multiply_public_vector(left_ct, right_values)` |
 
 One command can run 1k, 5k, 100k, and 1m real values sequentially:
 
@@ -36,9 +37,10 @@ python3 code/openfhe_direct/benchmarks/primitives.py \
   --overwrite
 ```
 
-Each row-count run creates one OpenFHE context and key set. All five operations
-reuse that context but receive fresh parent encryption, so their outputs are
-not chained. The report includes Python latency, encryption, session-method
+Each row-count run creates one OpenFHE context and key set at the client. All
+five operations reuse its secretless evaluator view but receive fresh parent
+encryption, so their outputs are not chained. The report includes Python
+latency, client encryption, evaluator-method
 evaluation, audit decryption, throughput, accuracy, and slowdown. It does not
 run HEIR or compile generated C++.
 
@@ -215,6 +217,7 @@ python3 code/openfhe_direct/benchmarks/payment_diff_sum_mean.py \
 ```
 
 Each row-count run rereads the source CSV, filters only invalid numeric parent
-pairs, creates a new direct OpenFHE-Python context, encrypts both parent
-columns, calculates PAYMENT_DIFF, and merges all encrypted chunk results. No
-intermediate ciphertext is decrypted.
+pairs, creates a new direct OpenFHE-Python context, and encrypts both parent
+columns on the client role. The secretless evaluator calculates PAYMENT_DIFF
+and merges all encrypted chunk results. Only the returned final ciphertext is
+decrypted by the client.

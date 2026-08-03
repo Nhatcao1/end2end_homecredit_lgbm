@@ -101,6 +101,9 @@ def _write_report(
         f"- Public input scale: `{input_scale:g}`",
         f"- Repetitions: `{repetitions}`",
         f"- CKKS/FHEW context and key setup: `{setup_seconds:.9f}` seconds",
+        "- Client/evaluator roles: `same-process scheme-switching exception`",
+        "- Reason: the current Python route cannot transport all live "
+        "CKKS/FHEW switching material",
         "",
         "## Final accuracy audit",
         "",
@@ -408,6 +411,11 @@ def run_multigroup_benchmark(
         "one_shared_context": True,
         "independent_group_execution": True,
         "scheme_switching_minmax": True,
+        "client_evaluator_separated": False,
+        "separation_blocker": (
+            "current OpenFHE Python path cannot transport all live "
+            "CKKS/FHEW switching material"
+        ),
         "group_count": len(groups),
         "selected_opaque_groups": identifiers,
         "selection": selection,

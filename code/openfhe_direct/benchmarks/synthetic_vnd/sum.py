@@ -114,18 +114,19 @@ def packed_plaintext_modulus(bits: int, ring_dimension: int) -> int:
 
 def _run_repetition(
     *,
-    session: OpenFHEBgvSession,
+    client: OpenFHEBgvSession,
+    evaluator: OpenFHEBgvSession,
     values: list[int],
     repetition: int,
 ) -> dict[str, Any]:
     expected, numpy_seconds = _numpy_reference_sum(values)
 
     # HE API call: OpenFHEBgvSession.encrypt(values)
-    encrypted, encrypt_seconds = _timed(session.encrypt, values)
+    encrypted, encrypt_seconds = _timed(client.encrypt, values)
     # HE API call: OpenFHEBgvSession.sum(encrypted)
-    encrypted_sum, sum_seconds = _timed(session.sum, encrypted)
+    encrypted_sum, sum_seconds = _timed(evaluator.sum, encrypted)
     # HE API call: OpenFHEBgvSession.decrypt(encrypted_sum)
-    observed, decrypt_seconds = _timed(session.decrypt, encrypted_sum)
+    observed, decrypt_seconds = _timed(client.decrypt, encrypted_sum)
 
     absolute_error = abs(int(observed) - expected)
     relative_error = absolute_error / max(1, abs(expected))
@@ -180,6 +181,7 @@ def _write_report(
         f"- Ring dimension: `{ring_dimension}`",
         f"- Repetitions: `{repetitions}`",
         f"- Context/key setup: `{setup_seconds:.9f}` seconds",
+        "- Client/evaluator roles: `separated`",
         f"- OpenFHE Python: `{_openfhe_version()}`",
         "- Acceptance: decrypted encrypted SUM must exactly equal NumPy SUM",
         "",
@@ -248,16 +250,18 @@ def run_sum_count(
 
     factory = _session_factory or OpenFHEBgvSession
     # HE API call: OpenFHEBgvSession(...) creates context and SUM keys.
-    session, setup_seconds = _timed(
+    client, setup_seconds = _timed(
         factory,
         slot_count=slot_count,
         plaintext_modulus=plaintext_modulus,
         multiplicative_depth=multiplicative_depth,
         ring_dimension=ring_dimension,
     )
+    evaluator = client.evaluator_view()
     rows = [
         _run_repetition(
-            session=session,
+            client=client,
+            evaluator=evaluator,
             values=values,
             repetition=repetition,
         )
@@ -277,6 +281,7 @@ def run_sum_count(
         "centered_capacity": plaintext_modulus // 2,
         "plaintext_vector_sum": expected_sum,
         "setup_seconds": setup_seconds,
+        "client_evaluator_separated": True,
         "dataset": str(dataset_path.resolve()),
     }
     with (root / "results.csv").open("w", encoding="utf-8", newline="") as handle:

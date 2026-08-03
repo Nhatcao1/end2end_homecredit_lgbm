@@ -95,14 +95,15 @@ def _python_values(
 def _evaluate_chunk(
     *,
     operation: str,
-    session: OpenFHECreditSession,
+    client: OpenFHECreditSession,
+    evaluator: OpenFHECreditSession,
     group: PreparedPaymentGroup,
 ) -> tuple[list[float], float, float, float]:
     encryption_seconds = evaluation_seconds = decrypt_seconds = 0.0
 
     # HE API call: OpenFHECreditSession.encrypt(AMT_INSTALMENT)
     installment_ct, elapsed = _timed(
-        session.encrypt,
+        client.encrypt,
         group.installment,
     )
     encryption_seconds += elapsed
@@ -110,42 +111,42 @@ def _evaluate_chunk(
     if operation in ("add", "subtract", "multiply"):
         # HE API call: OpenFHECreditSession.encrypt(AMT_PAYMENT)
         payment_ct, elapsed = _timed(
-            session.encrypt,
+            client.encrypt,
             group.payment,
         )
         encryption_seconds += elapsed
         if operation == "add":
             # HE API call: OpenFHECreditSession.add(parent ciphertexts)
             result_ct, evaluation_seconds = _timed(
-                session.add,
+                evaluator.add,
                 installment_ct,
                 payment_ct,
             )
         elif operation == "subtract":
             # HE API call: OpenFHECreditSession.subtract(parent ciphertexts)
             result_ct, evaluation_seconds = _timed(
-                session.subtract,
+                evaluator.subtract,
                 installment_ct,
                 payment_ct,
             )
         else:
             # HE API call: OpenFHECreditSession.multiply(parent ciphertexts)
             result_ct, evaluation_seconds = _timed(
-                session.multiply,
+                evaluator.multiply,
                 installment_ct,
                 payment_ct,
             )
     elif operation == "add_public_vector":
         # HE API call: OpenFHECreditSession.add_public_vector(CT, PT)
         result_ct, evaluation_seconds = _timed(
-            session.add_public_vector,
+            evaluator.add_public_vector,
             installment_ct,
             group.payment,
         )
     elif operation == "multiply_public_vector":
         # HE API call: OpenFHECreditSession.multiply_public_vector(CT, PT)
         result_ct, evaluation_seconds = _timed(
-            session.multiply_public_vector,
+            evaluator.multiply_public_vector,
             installment_ct,
             group.payment,
         )
@@ -153,7 +154,7 @@ def _evaluate_chunk(
         raise ValueError(f"unsupported primitive operation: {operation}")
 
     # HE API call: OpenFHECreditSession.decrypt(final result)
-    observed, decrypt_seconds = _timed(session.decrypt, result_ct)
+    observed, decrypt_seconds = _timed(client.decrypt, result_ct)
     if not isinstance(observed, list):
         raise TypeError("primitive operation must decrypt to a vector")
     return (
@@ -167,7 +168,8 @@ def _evaluate_chunk(
 def _run_operation(
     *,
     operation: str,
-    session: OpenFHECreditSession,
+    client: OpenFHECreditSession,
+    evaluator: OpenFHECreditSession,
     groups: list[PreparedPaymentGroup],
     installment: list[float],
     payment: list[float],
@@ -191,7 +193,8 @@ def _run_operation(
             chunk_decrypt,
         ) = _evaluate_chunk(
             operation=operation,
-            session=session,
+            client=client,
+            evaluator=evaluator,
             group=group,
         )
         observed.extend(chunk_values)
@@ -253,8 +256,8 @@ def _write_count_report(
     lines = [
         "# Direct OpenFHE-Python primitive arithmetic",
         "",
-        "All HE operations below are public methods of "
-        "`OpenFHECreditSession` in `code/openfhe_direct/session.py`. "
+        "The remote client encrypts and decrypts. A secretless evaluator "
+        "view calls public methods of `OpenFHECreditSession`. "
         "There is no HEIR lowering, generated MLIR/C++, or CMake build.",
         "",
         f"- Real installment rows: `{value_count}`",
@@ -363,7 +366,7 @@ def run_primitive_count(
     groups = _chunks(parents.installment, parents.payment, slot_count)
     factory = _session_factory or OpenFHECreditSession
     # HE API call: OpenFHECreditSession(...) creates context and keys.
-    session, setup_seconds = _timed(
+    client, setup_seconds = _timed(
         factory,
         slot_count=slot_count,
         multiplicative_depth=multiplicative_depth,
@@ -371,11 +374,15 @@ def run_primitive_count(
         first_mod_size=first_mod_size,
         ring_dimension=ring_dimension,
     )
+    # Evaluator receives the compatible context/evaluation keys, but neither
+    # the public encryption key nor the client secret key.
+    evaluator = client.evaluator_view()
 
     rows = [
         _run_operation(
             operation=operation,
-            session=session,
+            client=client,
+            evaluator=evaluator,
             groups=groups,
             installment=parents.installment,
             payment=parents.payment,
@@ -409,6 +416,7 @@ def run_primitive_count(
             "ring_dimension": ring_dimension or "OpenFHE-selected",
         },
         "prepared_files_used": parents.files_used,
+        "client_evaluator_separated": True,
     }
     with (root / "results.csv").open(
         "w",

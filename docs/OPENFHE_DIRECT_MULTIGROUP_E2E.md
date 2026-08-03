@@ -25,6 +25,12 @@ Its public `minimum()` and `maximum()` methods use OpenFHE-Python CKKS↔FHEW
 switching. All groups reuse that one live context. The benchmark does not
 import OpenFHE, configure keys, run the HEIR compiler, or generate C++.
 
+This remains a same-process exception to the normal client/evaluator split.
+The current Python route does not expose transport of every live CKKS↔FHEW
+switching component. `summary.json` therefore records
+`client_evaluator_separated: false`; ordinary CKKS/BGV benchmarks record
+`true`.
+
 ## Prepare the complete real group population
 
 Run this once. It scans the full installments table and writes opaque group

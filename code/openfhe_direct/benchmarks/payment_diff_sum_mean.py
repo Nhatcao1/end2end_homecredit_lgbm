@@ -116,7 +116,8 @@ def _python_reference(
 def _run_repetition(
     *,
     operation: str,
-    session: OpenFHECreditSession,
+    client: OpenFHECreditSession,
+    evaluator: OpenFHECreditSession,
     installment: list[float],
     payment: list[float],
     slot_count: int,
@@ -146,14 +147,14 @@ def _run_repetition(
         ciphertext_chunks += 1
 
         # HE API call: OpenFHECreditSession.encrypt(AMT_INSTALMENT)
-        installment_ct, elapsed = _timed(session.encrypt, due)
+        installment_ct, elapsed = _timed(client.encrypt, due)
         encrypt_seconds += elapsed
         # HE API call: OpenFHECreditSession.encrypt(AMT_PAYMENT)
-        payment_ct, elapsed = _timed(session.encrypt, paid)
+        payment_ct, elapsed = _timed(client.encrypt, paid)
         encrypt_seconds += elapsed
         # HE API call: OpenFHECreditSession.subtract(parent ciphertexts)
         difference_ct, elapsed = _timed(
-            session.subtract,
+            evaluator.subtract,
             installment_ct,
             payment_ct,
         )
@@ -161,16 +162,16 @@ def _run_repetition(
 
         if operation == "sum":
             # HE API call: OpenFHECreditSession.sum(PAYMENT_DIFF ciphertext)
-            partial_ct, elapsed = _timed(session.sum, difference_ct)
+            partial_ct, elapsed = _timed(evaluator.sum, difference_ct)
             reduction_seconds += elapsed
         else:
             # HE API call: OpenFHECreditSession.mean(PAYMENT_DIFF ciphertext)
-            partial_ct, elapsed = _timed(session.mean, difference_ct)
+            partial_ct, elapsed = _timed(evaluator.mean, difference_ct)
             reduction_seconds += elapsed
             # Weight each encrypted chunk mean by chunk_count / total_count.
             # HE API call: OpenFHECreditSession.multiply_public_scalar(mean_ct)
             partial_ct, elapsed = _timed(
-                session.multiply_public_scalar,
+                evaluator.multiply_public_scalar,
                 partial_ct,
                 len(due) / float(total_count),
             )
@@ -181,7 +182,7 @@ def _run_repetition(
         else:
             # HE API call: OpenFHECreditSession.add(partial scalar ciphertexts)
             global_result_ct, elapsed = _timed(
-                session.add,
+                evaluator.add,
                 global_result_ct,
                 partial_ct,
             )
@@ -191,7 +192,7 @@ def _run_repetition(
         raise RuntimeError("no ciphertext chunks were evaluated")
     # HE API call: OpenFHECreditSession.decrypt(final global scalar)
     observed, audit_decrypt_seconds = _timed(
-        session.decrypt,
+        client.decrypt,
         global_result_ct,
     )
     observed = float(observed)
@@ -266,7 +267,8 @@ def _write_report(
         "`PAYMENT_DIFF = AMT_INSTALMENT - AMT_PAYMENT`, and returns one "
         f"global encrypted {label} across every selected row.",
         "",
-        "All HE work calls `OpenFHECreditSession` methods. There is no HEIR "
+        "Parent encryption/final audit stay client-side; a secretless "
+        "evaluator calls `OpenFHECreditSession` calculation methods. No HEIR "
         "compiler, generated C++, CMake, prepared-column directory, groupby, "
         "or intermediate decryption.",
         "",
@@ -347,7 +349,7 @@ def run_payment_diff_sum_mean_count(
 
     factory = _session_factory or OpenFHECreditSession
     # HE API call: OpenFHECreditSession(...) creates context and keys.
-    session, setup_seconds = _timed(
+    client, setup_seconds = _timed(
         factory,
         slot_count=slot_count,
         multiplicative_depth=multiplicative_depth,
@@ -355,10 +357,12 @@ def run_payment_diff_sum_mean_count(
         first_mod_size=first_mod_size,
         ring_dimension=ring_dimension,
     )
+    evaluator = client.evaluator_view()
     rows = [
         _run_repetition(
             operation=operation,
-            session=session,
+            client=client,
+            evaluator=evaluator,
             installment=parents.installment,
             payment=parents.payment,
             slot_count=slot_count,
@@ -387,6 +391,7 @@ def run_payment_diff_sum_mean_count(
         "raw_rows_examined": parents.raw_rows_examined,
         "invalid_rows_dropped": parents.invalid_rows_dropped,
         "setup_seconds": setup_seconds,
+        "client_evaluator_separated": True,
     }
     with (root / "results.csv").open(
         "w",

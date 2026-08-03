@@ -159,7 +159,8 @@ def _expected_values(group: PreparedPaymentGroup) -> dict[str, Any]:
 
 
 def _operation_calls(
-    session: OpenFHECreditSession,
+    client: OpenFHECreditSession,
+    evaluator: OpenFHECreditSession,
     group: PreparedPaymentGroup,
     installment_ct: EncryptedVector,
     payment_ct: EncryptedVector,
@@ -170,64 +171,64 @@ def _operation_calls(
     tens = [10.0] * count
     return {
         # HE API call: OpenFHECreditSession.encrypt(installment)
-        "encrypt": lambda: session.encrypt(group.installment),
+        "encrypt": lambda: client.encrypt(group.installment),
         # HE API call: OpenFHECreditSession.decrypt(installment_ct)
-        "decrypt": lambda: session.decrypt(installment_ct),
+        "decrypt": lambda: client.decrypt(installment_ct),
         # HE API call: OpenFHECreditSession.add(installment_ct, payment_ct)
-        "add": lambda: session.add(installment_ct, payment_ct),
+        "add": lambda: evaluator.add(installment_ct, payment_ct),
         # HE API call: OpenFHECreditSession.subtract(parents)
-        "subtract": lambda: session.subtract(installment_ct, payment_ct),
+        "subtract": lambda: evaluator.subtract(installment_ct, payment_ct),
         # HE API call: OpenFHECreditSession.multiply(parents)
-        "multiply": lambda: session.multiply(installment_ct, payment_ct),
+        "multiply": lambda: evaluator.multiply(installment_ct, payment_ct),
         # HE API call: OpenFHECreditSession.add_public_scalar(diff_ct, 1.5)
-        "add_public_scalar": lambda: session.add_public_scalar(
+        "add_public_scalar": lambda: evaluator.add_public_scalar(
             difference_ct,
             1.5,
         ),
         # HE API call: OpenFHECreditSession.add_public_vector(payment_ct, tens)
-        "add_public_vector": lambda: session.add_public_vector(
+        "add_public_vector": lambda: evaluator.add_public_vector(
             payment_ct,
             tens,
         ),
         # HE API call: OpenFHECreditSession.multiply_public_scalar(diff_ct, 0.5)
-        "multiply_public_scalar": lambda: session.multiply_public_scalar(
+        "multiply_public_scalar": lambda: evaluator.multiply_public_scalar(
             difference_ct,
             0.5,
         ),
         # HE API call: OpenFHECreditSession.multiply_public_vector(diff_ct, weights)
-        "multiply_public_vector": lambda: session.multiply_public_vector(
+        "multiply_public_vector": lambda: evaluator.multiply_public_vector(
             difference_ct,
             weights,
         ),
         # HE API call: OpenFHECreditSession.square(difference_ct)
-        "square": lambda: session.square(difference_ct),
+        "square": lambda: evaluator.square(difference_ct),
         # HE API call: OpenFHECreditSession.sum(difference_ct)
-        "sum": lambda: session.sum(difference_ct),
+        "sum": lambda: evaluator.sum(difference_ct),
         # HE API call: OpenFHECreditSession.mean(difference_ct)
-        "mean": lambda: session.mean(difference_ct),
+        "mean": lambda: evaluator.mean(difference_ct),
         # HE API call: OpenFHECreditSession.variance_components(difference_ct)
-        "variance_components": lambda: session.variance_components(
+        "variance_components": lambda: evaluator.variance_components(
             difference_ct
         ),
         # HE API call: OpenFHECreditSession.variance(difference_ct)
-        "variance": lambda: session.variance(difference_ct),
+        "variance": lambda: evaluator.variance(difference_ct),
         # HE API call: OpenFHECreditSession.covariance_components(parents)
-        "covariance_components": lambda: session.covariance_components(
+        "covariance_components": lambda: evaluator.covariance_components(
             installment_ct,
             payment_ct,
         ),
         # HE API call: OpenFHECreditSession.correlation_components(parents)
-        "correlation_components": lambda: session.correlation_components(
+        "correlation_components": lambda: evaluator.correlation_components(
             installment_ct,
             payment_ct,
         ),
         # HE API call: OpenFHECreditSession.weighted_sum(diff_ct, weights)
-        "weighted_sum": lambda: session.weighted_sum(
+        "weighted_sum": lambda: evaluator.weighted_sum(
             difference_ct,
             weights,
         ),
         # HE API call: OpenFHECreditSession.risk_score(diff_ct, weights, bias)
-        "risk_score": lambda: session.risk_score(
+        "risk_score": lambda: evaluator.risk_score(
             difference_ct,
             weights,
             1.5,
@@ -247,7 +248,8 @@ def _write_report(
     lines = [
         "# Direct OpenFHE-Python API latency",
         "",
-        "Every row calls the named `OpenFHECreditSession` method. There is "
+        "Encryption/decryption rows run on the client role; calculation rows "
+        "run on a secretless evaluator view. There is "
         "no HEIR compiler, generated C++, CMake, gateway, or HTTP service.",
         "",
         f"- Prepared group: `{group.applicant_id}`",
@@ -309,7 +311,7 @@ def run_benchmark(
 
     group = load_prepared_group(prepared_group.resolve())
     # HE API call: OpenFHECreditSession(...) creates context and keys.
-    session, setup_seconds = _timed(
+    client, setup_seconds = _timed(
         OpenFHECreditSession,
         slot_count=group.slot_count,
         multiplicative_depth=multiplicative_depth,
@@ -318,19 +320,21 @@ def run_benchmark(
     )
     # HE API call: OpenFHECreditSession.encrypt(AMT_INSTALMENT)
     installment_ct, installment_encrypt = _timed(
-        session.encrypt,
+        client.encrypt,
         group.installment,
     )
     # HE API call: OpenFHECreditSession.encrypt(AMT_PAYMENT)
     payment_ct, payment_encrypt = _timed(
-        session.encrypt,
+        client.encrypt,
         group.payment,
     )
     # HE API call: OpenFHECreditSession.subtract(parent ciphertexts)
-    difference_ct = session.subtract(installment_ct, payment_ct)
+    evaluator = client.evaluator_view()
+    difference_ct = evaluator.subtract(installment_ct, payment_ct)
     expected = _expected_values(group)
     calls = _operation_calls(
-        session,
+        client,
+        evaluator,
         group,
         installment_ct,
         payment_ct,
@@ -344,7 +348,7 @@ def run_benchmark(
         for _ in range(repetitions):
             result, elapsed = _timed(call)
             latencies.append(elapsed)
-        observed = _decrypt_result(session, result)
+        observed = _decrypt_result(client, result)
         errors = _error_values(observed, expected[name])
         max_absolute = max(error[0] for error in errors)
         max_relative = max(error[1] for error in errors)
@@ -384,6 +388,7 @@ def run_benchmark(
         "repetitions": repetitions,
         "setup_seconds": setup_seconds,
         "parent_encrypt_seconds": installment_encrypt + payment_encrypt,
+        "client_evaluator_separated": True,
         "functions": rows,
     }
     (root / "summary.json").write_text(

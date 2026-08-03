@@ -146,8 +146,31 @@ class OpenFHEBgvSession:
         self._public_key = keys.publicKey
         self._secret_key = keys.secretKey
 
+    @property
+    def can_decrypt(self) -> bool:
+        """Whether this BGV role owns the client-only secret key."""
+        return self._secret_key is not None
+
+    def evaluator_view(self) -> "OpenFHEBgvSession":
+        """Return a BGV calculation-only view without encryption keys."""
+        evaluator = object.__new__(OpenFHEBgvSession)
+        evaluator.slot_count = self.slot_count
+        evaluator.plaintext_modulus = self.plaintext_modulus
+        evaluator.scaling_mod_size = self.scaling_mod_size
+        evaluator.first_mod_size = self.first_mod_size
+        evaluator.centered_capacity = self.centered_capacity
+        evaluator._session_id = self._session_id
+        evaluator._context = self._context
+        evaluator._public_key = None
+        evaluator._secret_key = None
+        return evaluator
+
     def encrypt(self, values: Sequence[int]) -> EncryptedVector:
         """Encode and encrypt one packed integer vector."""
+        if self._public_key is None:
+            raise RuntimeError(
+                "the evaluator received no public key and cannot encrypt"
+            )
         materialized = []
         for value in values:
             integer = int(value)
@@ -200,6 +223,10 @@ class OpenFHEBgvSession:
     ) -> list[int] | int:
         """Decrypt one final integer result for the audit boundary."""
         self._require_encrypted(encrypted)
+        if self._secret_key is None:
+            raise RuntimeError(
+                "the evaluator received no secret key and cannot decrypt"
+            )
         plaintext = self._context.Decrypt(
             self._secret_key,
             encrypted.ciphertext,

@@ -1,6 +1,7 @@
 # Direct OpenFHE-Python API benchmark
 
-This benchmark calls the public methods on `OpenFHECreditSession` directly.
+This benchmark uses a client `OpenFHECreditSession` for encryption/decryption
+and calls calculation methods through its secretless evaluator view.
 It does not use HEIR, generated C++, CMake, a gateway, or an HTTP client.
 
 The timed functions are:
@@ -17,9 +18,10 @@ variance                   correlation_components
 weighted_sum               risk_score
 ```
 
-One local CKKS context and key set are created. The two parent columns are
-encrypted once. `PAYMENT_DIFF` is produced as ciphertext subtraction and is
-the encrypted input for the aggregate methods.
+One local CKKS context and key set are created by the client role. The two
+parent columns are encrypted once. The evaluator receives only compatible
+components and ciphertexts. `PAYMENT_DIFF` is produced as ciphertext
+subtraction and is the encrypted input for the aggregate methods.
 
 The report intentionally stays small:
 
