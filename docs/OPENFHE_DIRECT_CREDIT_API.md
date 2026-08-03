@@ -12,7 +12,9 @@ It has no gateway URL, HTTP client, HEIR compiler, MLIR, or CMake runner.
 
 | File | Responsibility |
 |---|---|
-| `code/openfhe_direct/session.py` | CKKS context and calculation methods |
+| `code/openfhe_direct/api.py` | Non-HE workflow and ciphertext-only functions |
+| `code/openfhe_direct/planner.py` | Depth and evaluation-key rules |
+| `code/openfhe_direct/session.py` | CKKS context and OpenFHE execution methods |
 | `code/openfhe_direct/prepared_data.py` | Prepared credit CSV loading |
 | `code/openfhe_direct/credit_rating_example.py` | Readable application flow |
 
@@ -41,7 +43,9 @@ It has no gateway URL, HTTP client, HEIR compiler, MLIR, or CMake runner.
 | `weighted_sum` | plaintext-vector `EvalMult` then `EvalSum` |
 | `risk_score` | weighted sum then scalar `EvalAdd(bias)` |
 
-`EvalMultKeyGen` and `EvalSumKeyGen` run once when the session is created.
+The planner runs before encryption. `EvalMultKeyGen` and `EvalSumKeyGen` run
+once when the session is created, and only when the declared workflow needs
+the corresponding keys.
 
 The Python interpreter must contain the official `openfhe` binding built for
 the same OpenFHE version as the installed C++ runtime. The class checks that
@@ -58,12 +62,13 @@ source .venv-heir-python/bin/activate
 
 python3 code/openfhe_direct/credit_rating_example.py \
   --prepared-group data/prepared/examples/payment_diff_demo_group.csv \
-  --multiplicative-depth 4 \
   --output benchmark_runs/openfhe_direct_credit_result.json
 ```
 
 The example calculates `PAYMENT_DIFF = AMT_INSTALMENT - AMT_PAYMENT` after
-both parent columns are encrypted.
+both parent columns are encrypted. It also returns encrypted SUM, MEAN, and
+sample VARIANCE. The planner selects the CKKS depth and key requirements; the
+application does not pass them.
 
 ## Latency benchmark
 
