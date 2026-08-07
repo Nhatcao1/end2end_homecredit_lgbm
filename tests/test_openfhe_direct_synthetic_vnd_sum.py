@@ -59,6 +59,9 @@ class _BgvContext:
     def EvalSumKeyGen(self, secret_key):
         self.sum_key = secret_key
 
+    def EvalMultKeyGen(self, secret_key):
+        self.mult_key = secret_key
+
     def MakePackedPlaintext(self, values):
         return _BgvPlaintext(values)
 
@@ -68,6 +71,9 @@ class _BgvContext:
 
     def EvalAdd(self, left, right):
         return [a + b for a, b in zip(left, right)]
+
+    def EvalMult(self, left, right):
+        return [a * b for a, b in zip(left, right)]
 
     def EvalSum(self, ciphertext, count):
         return [sum(ciphertext[:count])]
@@ -190,6 +196,24 @@ class OpenFHEDirectSyntheticVndSumTest(unittest.TestCase):
         self.assertLessEqual(modulus.bit_length(), 40)
         self.assertEqual(0, (modulus - 1) % (2 * 16_384))
         self.assertGreater(modulus // 2, 40_000_000_000)
+
+    def test_bgv_session_exposes_ciphertext_multiply_when_depth_is_available(self):
+        fake = _BgvOpenFHE()
+        session = OpenFHEBgvSession(
+            slot_count=2,
+            plaintext_modulus=1_000_003,
+            multiplicative_depth=1,
+            ring_dimension=8,
+            _openfhe_module=fake,
+        )
+        evaluator = session.evaluator_view()
+        left = session.encrypt([20, 30])
+        right = session.encrypt([4, 5])
+
+        observed = session.decrypt(evaluator.multiply(left, right))
+
+        self.assertEqual([80, 150], observed)
+        self.assertEqual("secret", fake.context.mult_key)
 
     def test_benchmark_calls_session_only(self):
         source = (

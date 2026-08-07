@@ -12,6 +12,9 @@ BENCHMARKS = (
     ROOT / "code/openfhe_direct/benchmarks/payment_diff_multigroup.py",
     ROOT / "code/openfhe_direct/benchmarks/synthetic_vnd/sum.py",
     ROOT / "code/openfhe_direct/benchmarks/synthetic_vnd/ckks_sum.py",
+    ROOT
+    / "code/openfhe_direct/benchmarks/synthetic_numeric/"
+    "multiplication_limits.py",
 )
 
 FORBIDDEN_HE_CLI_FLAGS = (

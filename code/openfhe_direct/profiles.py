@@ -34,3 +34,17 @@ class BgvBackendProfile:
 
 CKKS_CREDIT_PROFILE = CkksBackendProfile()
 BGV_VND_SUM_PROFILE = BgvBackendProfile()
+
+# Small, fixed profiles for the multiplication-limit probe. They are not
+# command-line knobs: changing either profile requires code review.
+CKKS_MULTIPLY_PROBE_PROFILE = CkksBackendProfile(
+    slot_count=8,
+    ring_dimension=16_384,
+    benchmark_depth=2,
+)
+BGV_MULTIPLY_PROBE_PROFILE = BgvBackendProfile(
+    slot_count=8,
+    ring_dimension=16_384,
+    multiplicative_depth=1,
+    plaintext_modulus_bits=30,
+)

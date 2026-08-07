@@ -123,14 +123,16 @@ class OpenFHEBgvSession:
         ):
             context.Enable(feature)
 
-        required_methods = (
+        required_methods = [
             "MakePackedPlaintext",
             "Encrypt",
             "Decrypt",
             "EvalAdd",
             "EvalSum",
             "EvalSumKeyGen",
-        )
+        ]
+        if multiplicative_depth:
+            required_methods.extend(("EvalMult", "EvalMultKeyGen"))
         missing = [
             name for name in required_methods if not hasattr(context, name)
         ]
@@ -141,6 +143,8 @@ class OpenFHEBgvSession:
 
         keys = context.KeyGen()
         context.EvalSumKeyGen(keys.secretKey)
+        if multiplicative_depth:
+            context.EvalMultKeyGen(keys.secretKey)
         self.slot_count = slot_count
         self.plaintext_modulus = plaintext_modulus
         self.scaling_mod_size = scaling_mod_size
@@ -219,6 +223,19 @@ class OpenFHEBgvSession:
                 encrypted.ciphertext,
                 encrypted.length,
             ),
+            self._session_id,
+        )
+
+    def multiply(
+        self,
+        left: EncryptedVector,
+        right: EncryptedVector,
+    ) -> EncryptedVector:
+        """Exact packed ciphertext multiplication modulo plaintext modulus."""
+        self._require_vector_pair(left, right)
+        return EncryptedVector(
+            self._context.EvalMult(left.ciphertext, right.ciphertext),
+            left.length,
             self._session_id,
         )
 
